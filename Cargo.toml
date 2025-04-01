@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "didwebvh-resolver",
+    "didwebvh-provision",
+]
+resolver = "2"
