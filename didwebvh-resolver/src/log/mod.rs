@@ -145,7 +145,7 @@ pub fn parse_did_log(log_bytes: &[u8], did: &str) -> Result<DIDLog> {
         if is_first_entry {
             verify_scid(&entry)
                 .map_err(|e| ResolverError::LogProcessing(
-                    format!("SCID verification failed at line {}: {}", line_idx + 1, e)
+                    format!("Log: SCID verification failed at line {}: {}", line_idx + 1, e)
                 ))?;
         }
         
@@ -231,7 +231,7 @@ fn validate_entry_structure(entry: &DIDLogEntry, entry_index: usize) -> Result<(
     }
     
     // Check that there is at least one proof
-    if entry.proof.is_empty() {
+    if entry.proof.is_none() {
         return Err(ResolverError::LogProcessing(
             "Missing proof".to_string()
         ));
@@ -506,14 +506,14 @@ mod tests {
                 "@context": ["https://www.w3.org/ns/did/v1"],
                 "id": "did:webvh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ:example.com"
             }),
-            proof: vec![Proof {
+            proof: Some(vec![Proof {
                 type_: "DataIntegrityProof".to_string(),
                 cryptosuite: "eddsa-jcs-2022".to_string(),
                 verification_method: "did:key:z6MkhbNRN2Q9BaY9TvTc2K3izkhfVwgHiXL7VWZnTqxEvc3R#z6MkhbNRN2Q9BaY9TvTc2K3izkhfVwgHiXL7VWZnTqxEvc3R".to_string(),
                 created: "2024-09-26T23:22:26Z".to_string(),
                 proof_purpose: "assertionMethod".to_string(),
                 proof_value: "z2fPF6fMewtV15kji2N432R7RjmmFs8p7MiSHSTM9FoVmJPtc3JUuZ472pZKoWgZDuT75EDwkGmZbK8ZKVF55pXvx".to_string(),
-            }],
+            }]),
         };
         
         // Validate as the first entry (entry_index = 0)
@@ -540,14 +540,14 @@ mod tests {
                 "@context": ["https://www.w3.org/ns/did/v1"],
                 "id": "did:webvh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ:example.com"
             }),
-            proof: vec![Proof {
+            proof: Some(vec![Proof {
                 type_: "DataIntegrityProof".to_string(),
                 cryptosuite: "eddsa-jcs-2022".to_string(),
                 verification_method: "did:key:z6MkhbNRN2Q9BaY9TvTc2K3izkhfVwgHiXL7VWZnTqxEvc3R#z6MkhbNRN2Q9BaY9TvTc2K3izkhfVwgHiXL7VWZnTqxEvc3R".to_string(),
                 created: "2024-09-26T23:22:26Z".to_string(),
                 proof_purpose: "assertionMethod".to_string(),
                 proof_value: "z2fPF6fMewtV15kji2N432R7RjmmFs8p7MiSHSTM9FoVmJPtc3JUuZ472pZKoWgZDuT75EDwkGmZbK8ZKVF55pXvx".to_string(),
-            }],
+            }]),
         };
         
         // Validate as the first entry (entry_index = 0)

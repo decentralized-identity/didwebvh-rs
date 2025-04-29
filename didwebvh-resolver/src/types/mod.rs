@@ -22,36 +22,45 @@ pub struct DIDLogEntry {
     pub state: Value,
     
     /// Data Integrity proofs
-    pub proof: Vec<Proof>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub proof: Option<Vec<Proof>>,
 }
 
 /// Parameters that control DID processing
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Parameters {
     /// Specification version (e.g., "did:webvh:0.5")
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub method: Option<String>,
     
     /// Self-certifying identifier
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub scid: Option<String>,
     
     /// Keys authorized for updates
     #[serde(rename = "updateKeys")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub update_keys: Option<Vec<String>>,
     
     /// Pre-rotation key hashes
     #[serde(rename = "nextKeyHashes")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub next_key_hashes: Option<Vec<String>>,
     
     /// DID portability flag
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub portable: Option<bool>,
     
     /// Witness configuration
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub witness: Option<WitnessConfig>,
     
     /// Deactivation status
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub deactivated: Option<bool>,
     
     /// Cache TTL in seconds
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ttl: Option<u64>,
 }
 
@@ -216,14 +225,14 @@ mod tests {
                 "@context": ["https://www.w3.org/ns/did/v1"],
                 "id": "did:webvh:QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ:domain.example"
             }),
-            proof: vec![Proof {
+            proof: Some(vec![Proof {
                 type_: "DataIntegrityProof".to_string(),
                 cryptosuite: "eddsa-jcs-2022".to_string(),
                 verification_method: "did:key:z6MkhbNRN2Q9BaY9TvTc2K3izkhfVwgHiXL7VWZnTqxEvc3R#z6MkhbNRN2Q9BaY9TvTc2K3izkhfVwgHiXL7VWZnTqxEvc3R".to_string(),
                 created: "2024-09-26T23:22:26Z".to_string(),
                 proof_purpose: "assertionMethod".to_string(),
                 proof_value: "z2fPF6fMewtV15kji2N432R7RjmmFs8p7MiSHSTM9FoVmJPtc3JUuZ472pZKoWgZDuT75EDwkGmZbK8ZKVF55pXvx".to_string(),
-            }],
+            }]),
         };
 
         // Serialize to JSON
@@ -241,7 +250,7 @@ mod tests {
         assert_eq!(entry.parameters.next_key_hashes, deserialized.parameters.next_key_hashes);
         
         // Just check that we have the same number of proofs
-        assert_eq!(entry.proof.len(), deserialized.proof.len());
+        assert_eq!(entry.proof.unwrap().len(), deserialized.proof.unwrap().len());
         
         // More detailed checks could be added
     }
@@ -261,9 +270,10 @@ mod tests {
         assert_eq!(entry.parameters.scid, Some("QmfGEUAcMpzo25kF2Rhn8L5FAXysfGnkzjwdKoNPi615XQ".to_string()));
         
         // Check that the proof was deserialized correctly
-        assert_eq!(entry.proof.len(), 1);
-        assert_eq!(entry.proof[0].type_, "DataIntegrityProof");
-        assert_eq!(entry.proof[0].cryptosuite, "eddsa-jcs-2022");
-        assert_eq!(entry.proof[0].proof_purpose, "assertionMethod");
+        let proof = entry.proof.unwrap();
+        assert_eq!(proof.len(), 1);
+        assert_eq!(proof[0].type_, "DataIntegrityProof");
+        assert_eq!(proof[0].cryptosuite, "eddsa-jcs-2022");
+        assert_eq!(proof[0].proof_purpose, "assertionMethod");
     }
 }
