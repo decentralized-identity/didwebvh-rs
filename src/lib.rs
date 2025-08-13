@@ -63,7 +63,7 @@ impl Version {
     /// Turns the Version to a number so we can compare for version control
     pub(crate) fn as_f32(&self) -> f32 {
         match self {
-            Version::V1_0Pre => 0.9, // Pre 1.0 is considered 0.9
+            Version::V1_0Pre => 1.0, // Considered to be 1.0
             Version::V1_0 => 1.0,
         }
     }
@@ -337,10 +337,10 @@ impl DIDWebVHState {
         if let Some(version_id) = version_id {
             for log_entry in self.log_entries.iter() {
                 if log_entry.get_version_id() == version_id {
-                    if let Some(version_time) = version_time {
-                        if version_time < log_entry.get_version_time() {
-                            return Err(DIDWebVHError::NotFound);
-                        }
+                    if let Some(version_time) = version_time
+                        && version_time < log_entry.get_version_time()
+                    {
+                        return Err(DIDWebVHError::NotFound);
                     }
                     return Ok(log_entry);
                 }

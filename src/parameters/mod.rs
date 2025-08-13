@@ -116,12 +116,11 @@ impl Parameters {
         // scid can not be changed, so leave it at default None
 
         // Are we changing WebVH Version?
-        if let Some(this_version) = self.method {
-            if let Some(previous_version) = old_params.method {
-                if this_version != previous_version {
-                    diff.method = self.method
-                }
-            }
+        if let Some(this_version) = self.method
+            && let Some(previous_version) = old_params.method
+            && this_version != previous_version
+        {
+            diff.method = self.method
         }
 
         // Check if portable has been turned off (can never be turned on except on first log entry)
@@ -216,14 +215,14 @@ impl Parameters {
         };
 
         if current_value.is_empty() {
-            if let Some(previous) = previous {
-                if previous.is_empty() {
-                    // attribute was already empty, and thus setting it again to empty would be
-                    // invalid
-                    return Err(DIDWebVHError::ParametersError(format!(
-                        "{attribute_name} cannot be empty when previous was also empty!"
-                    )));
-                }
+            if let Some(previous) = previous
+                && previous.is_empty()
+            {
+                // attribute was already empty, and thus setting it again to empty would be
+                // invalid
+                return Err(DIDWebVHError::ParametersError(format!(
+                    "{attribute_name} cannot be empty when previous was also empty!"
+                )));
             }
             Ok(Some(Arc::new(Vec::new())))
         } else {
@@ -250,24 +249,24 @@ impl Parameters {
         };
 
         if current_witness.is_empty() {
-            if let Some(previous) = previous {
-                if previous.is_empty() {
-                    // attribute was already empty, and thus setting it again to empty would be
-                    // invalid
-                    return Err(DIDWebVHError::ParametersError(
-                        "Witnesses cannot be empty when previous was also empty!".to_string(),
-                    ));
-                }
+            if let Some(previous) = previous
+                && previous.is_empty()
+            {
+                // attribute was already empty, and thus setting it again to empty would be
+                // invalid
+                return Err(DIDWebVHError::ParametersError(
+                    "Witnesses cannot be empty when previous was also empty!".to_string(),
+                ));
             }
             Ok(Some(Arc::new(Witnesses::Empty {})))
         } else {
             // There are values
             debug!("values: {current_witness:#?}");
             current_witness.validate()?;
-            if let Some(previous) = previous {
-                if previous == current_witness {
-                    return Ok(None);
-                }
+            if let Some(previous) = previous
+                && previous == current_witness
+            {
+                return Ok(None);
             }
             Ok(current.clone())
         }
@@ -500,12 +499,12 @@ impl Parameters {
         } else if let Some(deactivated) = self.deactivated
             && deactivated
         {
-            if let Some(update_keys) = &self.update_keys {
-                if !update_keys.is_empty() {
-                    return Err(DIDWebVHError::DeactivatedError(
-                        "DID Parameters say deactivated, yet updateKeys are not null!".to_string(),
-                    ));
-                }
+            if let Some(update_keys) = &self.update_keys
+                && !update_keys.is_empty()
+            {
+                return Err(DIDWebVHError::DeactivatedError(
+                    "DID Parameters say deactivated, yet updateKeys are not null!".to_string(),
+                ));
             }
             new_parameters.update_keys = Some(Arc::new(Vec::new()));
         }

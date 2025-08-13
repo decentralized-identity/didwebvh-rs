@@ -139,30 +139,30 @@ impl LogEntry {
 
                 // Check if there are JSON nulls in the parameters
                 let mut pre_version = false;
-                if let Some(v) = parameters.get("updateKeys") {
-                    if v.is_null() {
-                        pre_version = true;
-                    }
+                if let Some(v) = parameters.get("updateKeys")
+                    && v.is_null()
+                {
+                    pre_version = true;
                 }
-                if let Some(v) = parameters.get("nextKeyHashes") {
-                    if v.is_null() {
-                        pre_version = true;
-                    }
+                if let Some(v) = parameters.get("nextKeyHashes")
+                    && v.is_null()
+                {
+                    pre_version = true;
                 }
-                if let Some(v) = parameters.get("witness") {
-                    if v.is_null() {
-                        pre_version = true;
-                    }
+                if let Some(v) = parameters.get("witness")
+                    && v.is_null()
+                {
+                    pre_version = true;
                 }
-                if let Some(v) = parameters.get("watchers") {
-                    if v.is_null() {
-                        pre_version = true;
-                    }
+                if let Some(v) = parameters.get("watchers")
+                    && v.is_null()
+                {
+                    pre_version = true;
                 }
-                if let Some(v) = parameters.get("ttl") {
-                    if v.is_null() {
-                        pre_version = true;
-                    }
+                if let Some(v) = parameters.get("ttl")
+                    && v.is_null()
+                {
+                    pre_version = true;
                 }
 
                 if pre_version {

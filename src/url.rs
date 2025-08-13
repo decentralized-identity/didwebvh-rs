@@ -274,6 +274,7 @@ impl WebVHURL {
 }
 
 impl Display for WebVHURL {
+    /// Handles converting a WebVHURL to a WebVH DID representation
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut url_string = String::new();
         url_string.push_str("did:webvh:");
@@ -284,7 +285,9 @@ impl Display for WebVHURL {
             url_string.push_str(&format!("%3A{port}",));
         }
 
-        url_string.push_str(&self.path.replace('/', ":"));
+        if self.path != "/.well-known/" {
+            url_string.push_str(&self.path.replace('/', ":"));
+        }
 
         if let Some(query) = &self.query {
             url_string.push('?');
@@ -300,6 +303,8 @@ impl Display for WebVHURL {
 
 #[cfg(test)]
 mod tests {
+    use url::Url;
+
     use crate::{
         DIDWebVHError,
         url::{URLType, WebVHURL},
@@ -412,6 +417,13 @@ mod tests {
             webvh.get_http_url(None)?.to_string().as_str(),
             "https://example.com:8080/custom/path/did.jsonl?versionId=1-xyz#fragment"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn to_did_from_url() -> Result<(), DIDWebVHError> {
+        let webvh = WebVHURL::parse_url(&Url::parse("http://localhost:8000/").unwrap())?;
+        assert_eq!(webvh.to_string(), "did:webvh:{SCID}:localhost%3A8000");
         Ok(())
     }
 }
