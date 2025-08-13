@@ -304,23 +304,23 @@ fn update_parameters(
     // ************************************************************************
     // Portability
     // ************************************************************************
-    if let Some(portable) = old_log_entry.validated_parameters.portable {
-        if portable {
-            // Portable
-            if Confirm::with_theme(&ColorfulTheme::default())
-                .with_prompt("Disable portability for this DID?")
-                .default(false)
-                .interact()
-                .map_err(|e| {
-                    DIDWebVHError::ParametersError(format!("Invalid selection on portability: {e}"))
-                })?
-            {
-                // Disable portability
-                new_params.portable = Some(false);
-            } else {
-                // Keep portability
-                new_params.portable = Some(true);
-            }
+    if let Some(portable) = old_log_entry.validated_parameters.portable
+        && portable
+    {
+        // Portable
+        if Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt("Disable portability for this DID?")
+            .default(false)
+            .interact()
+            .map_err(|e| {
+                DIDWebVHError::ParametersError(format!("Invalid selection on portability: {e}"))
+            })?
+        {
+            // Disable portability
+            new_params.portable = Some(false);
+        } else {
+            // Keep portability
+            new_params.portable = Some(true);
         }
     }
 

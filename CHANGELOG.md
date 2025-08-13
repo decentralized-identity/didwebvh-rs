@@ -10,6 +10,8 @@ Handle when there is no witness proof file on resolution
 URL Conversions incorrectly including .well-known path for default location
   * Added unit test to test for inclusion of default paths in URL conversions
 * **MAINTENANCE:** Updating crate dependencies to latest versions
+* **MAINTENANCE:** Addressing rust-analyzer warnings
+  * Chaining `if let` statements where multiple `if` statements were being used
 
 ## 1st August 2025
 

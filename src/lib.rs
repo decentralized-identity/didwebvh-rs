@@ -337,10 +337,10 @@ impl DIDWebVHState {
         if let Some(version_id) = version_id {
             for log_entry in self.log_entries.iter() {
                 if log_entry.get_version_id() == version_id {
-                    if let Some(version_time) = version_time {
-                        if version_time < log_entry.get_version_time() {
-                            return Err(DIDWebVHError::NotFound);
-                        }
+                    if let Some(version_time) = version_time
+                        && version_time < log_entry.get_version_time()
+                    {
+                        return Err(DIDWebVHError::NotFound);
                     }
                     return Ok(log_entry);
                 }
