@@ -9,7 +9,7 @@ use crate::{
     witness::proofs::WitnessProofCollection,
 };
 use chrono::{DateTime, Utc};
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use std::time::Duration;
 use tracing::{Instrument, Level, span, warn};
 use url::Url;
@@ -22,16 +22,23 @@ pub struct DIDWebVH;
 impl DIDWebVH {
     // Handles the fetching of the file from a given URL
     async fn download_file(client: Client, url: Url) -> Result<String, DIDWebVHError> {
-        client
+        let response = client
             .get(url.clone())
             .send()
             .await
-            .map_err(|e| DIDWebVHError::NetworkError(format!("url ({url}): {e}")))?
-            .text()
-            .await
-            .map_err(|e| {
+            .map_err(|e| DIDWebVHError::NetworkError(format!("url ({url}): {e}")))?;
+
+        if response.status() == StatusCode::OK {
+            response.text().await.map_err(|e| {
                 DIDWebVHError::NetworkError(format!("url ({url}): Failed to read response: {e}"))
             })
+        } else {
+            warn!("url ({url}): HTTP Status code = {}", response.status());
+            Err(DIDWebVHError::NetworkError(format!(
+                "url ({url}): HTTP Status code = {}",
+                response.status()
+            )))
+        }
     }
 
     /// Handles all processing and fetching for LogEntry file
@@ -167,14 +174,17 @@ impl DIDWebVHState {
                 let witness_proofs = if let Ok(proofs) = r2 {
                     match proofs {
                         Ok(proofs) => match proofs {
-                            Ok(proofs_string) => WitnessProofCollection {
-                                proofs: serde_json::from_str(&proofs_string).map_err(|e| {
-                                    DIDWebVHError::WitnessProofError(format!(
-                                        "Couldn't deserialize Witness Proofs Data: {e}",
-                                    ))
-                                })?,
-                                ..Default::default()
-                            },
+                            Ok(proofs_string) => {
+                                println!("proofs ({proofs_string})");
+                                WitnessProofCollection {
+                                    proofs: serde_json::from_str(&proofs_string).map_err(|e| {
+                                        DIDWebVHError::WitnessProofError(format!(
+                                            "Couldn't deserialize Witness Proofs Data: {e}",
+                                        ))
+                                    })?,
+                                    ..Default::default()
+                                }
+                            }
                             Err(e) => {
                                 warn!("Error downloading witness proofs: {e}");
                                 WitnessProofCollection::default()

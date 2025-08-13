@@ -2,6 +2,7 @@ use chrono::{TimeDelta, Utc};
 use didwebvh_rs::resolve::DIDWebVH;
 use ssi::dids::{DID, DIDResolver};
 use std::env;
+use tracing_subscriber::filter;
 
 #[tokio::main]
 async fn main() {
@@ -12,6 +13,14 @@ async fn main() {
         eprintln!("Usage: {} <did:webvh>", args[0]);
         std::process::exit(1);
     }
+
+    // construct a subscriber that prints formatted traces to stdout
+    let subscriber = tracing_subscriber::fmt()
+        // Use a more compact, abbreviated log format
+        .with_env_filter(filter::EnvFilter::from_default_env())
+        .finish();
+    // use that subscriber to process traces emitted after this point
+    tracing::subscriber::set_global_default(subscriber).expect("Logging failed, exiting...");
 
     let did = unsafe { DID::new_unchecked(args[1].as_bytes()) };
 

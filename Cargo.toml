@@ -1,13 +1,13 @@
 [package]
 name = "didwebvh-rs"
-version = "0.1.0"
+version = "0.1.1"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
 authors = ["Glenn Gore <glenn@affinidi.com>"]
 homepage = "https://didwebvh.info/"
 keywords = ["ssi"]
-publish = false
+publish = true
 license = "Apache-2.0"
 readme = "README.md"
 rust-version = "1.88.0"
@@ -24,7 +24,7 @@ multihash = "0.19"
 reqwest = "0.12"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
-serde_json_canonicalizer = "0.3.0"
+serde_json_canonicalizer = "0.3.1"
 serde_with = "3.14"
 sha2 = "0.10"
 ssi = { version = "0.12", features = ["secp384r1"] }
