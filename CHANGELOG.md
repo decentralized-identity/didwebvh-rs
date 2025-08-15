@@ -8,6 +8,8 @@
 UpdateKey not propagating to new LogEntry Parameter set when pre-rotation is disabled
   * Secondary issue of changing update-key also results in an error
 * **FIX:** Wizard would not reset an existing did.jsonl file for a new DID
+* **FIX:** Parameter method was always being placed in each LogEntry, will now
+correctly skip if version is the same
 
 ## 14th August 2025
 

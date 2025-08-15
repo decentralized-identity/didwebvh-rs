@@ -118,8 +118,6 @@ pub async fn edit_did() -> Result<()> {
                     DIDWebVHError::LogEntryError("No new LogEntry created".to_string())
                 })?;
 
-                println!("TIMTAM: **** {new_entry:#?}");
-
                 let new_proofs = witness_log_entry(
                     &mut webvh_state.witness_proofs,
                     new_entry,
