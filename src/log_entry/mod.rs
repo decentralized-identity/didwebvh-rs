@@ -214,9 +214,17 @@ impl LogEntry {
 
     /// Append a valid LogEntry to a file
     pub fn save_to_file(&self, file_path: &str) -> Result<(), DIDWebVHError> {
+        let append = if self.get_version_id_fields()?.0 == 1 {
+            false // Don't append to the file if this is the first version
+        } else {
+            true // Append to the file for all subsequent versions
+        };
+
         let mut file = OpenOptions::new()
             .create(true)
-            .append(true)
+            .write(true)
+            .truncate(!append)
+            .append(append)
             .open(file_path)
             .map_err(|e| {
                 DIDWebVHError::LogEntryError(format!("Couldn't open file {file_path}: {e}"))

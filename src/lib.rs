@@ -166,31 +166,25 @@ impl DIDWebVHState {
         signing_key: &Secret,
     ) -> Result<Option<&LogEntryState>, DIDWebVHError> {
         let now = Utc::now();
-
-        // Create a VerificationMethod ID from the signing key matched to an updateKey
-        let deactivated = parameters.deactivated.unwrap_or_default();
-        if let Some(keys) = &parameters.update_keys
-            && !deactivated
-        {
-            // update_keys exist and DID is NOT deactovated
-            if !keys.contains(&signing_key.get_public_keymultibase().map_err(|e| {
-                DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}"))
-            })?) {
-                return Err(DIDWebVHError::SCIDError(format!(
-                    "Signing key ID {} does not match any updateKey {keys:#?}",
-                    signing_key.get_public_keymultibase().unwrap(),
-                )));
-            }
-        } else if deactivated {
-            // This is the last LogEntry for a deactivated Entry
-            // Do nothing
-        } else {
-            return Err(DIDWebVHError::SCIDError(
-                "No update keys provided in parameters".to_string(),
-            ));
-        }
-
         let last_log_entry = self.log_entries.last();
+
+        // Ensure that the signing key is valid
+        Self::check_signing_key(last_log_entry, parameters, signing_key)?;
+
+        // If this LogEntry causes the DID to be deactivated, then updateKeys should be set to
+        // invalid
+        if parameters.deactivated.unwrap_or_default() {
+            // DID will be deactivated
+            if let Some(keys) = &parameters.update_keys
+                && keys.is_empty()
+            {
+                // Valid empty UpdateKeys for a deactivated DID
+            } else {
+                return Err(DIDWebVHError::LogEntryError(
+                    "Cannot deactivate DID unless update_keys is set to []".to_string(),
+                ));
+            }
+        }
 
         let mut new_entry = if let Some(last_log_entry) = last_log_entry {
             // Utilizes the previous LogEntry for some info
@@ -245,6 +239,7 @@ impl DIDWebVHState {
             };
             let mut parameters = parameters.clone();
             parameters.scid = Some(Arc::new(SCID_HOLDER.to_string()));
+            parameters.method = Some(Version::default());
 
             let log_entry = LogEntry::create(
                 SCID_HOLDER.to_string(),
@@ -385,16 +380,76 @@ impl DIDWebVHState {
             watchers: log_entry.validated_parameters.watchers.as_deref().cloned(),
         }
     }
+
+    /// Ensures that the signing key is valid depending on the current state of the DID
+    /// Checks state of the UpdateKeys in Parameters
+    fn check_signing_key(
+        previous_log_entry: Option<&LogEntryState>,
+        parameters: &Parameters,
+        signing_key: &Secret,
+    ) -> Result<(), DIDWebVHError> {
+        if let Some(previous) = previous_log_entry {
+            if previous.validated_parameters.pre_rotation_active {
+                //Check if signing key exists in the previous verified LogEntry NextKeyHashes
+                if let Some(hashes) = &previous.validated_parameters.next_key_hashes {
+                    if !hashes.contains(&signing_key.get_public_keymultibase_hash().map_err(
+                        |e| DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}")),
+                    )?) {
+                        return Err(DIDWebVHError::SCIDError(format!(
+                            "Signing key ID {} does not match any updateKey {:#?}",
+                            signing_key.get_public_keymultibase().unwrap(),
+                            previous.get_active_update_keys()
+                        )));
+                    }
+                } else {
+                    return Err(DIDWebVHError::LogEntryError(
+                        "Previous LogEntry has pre_rotation_active but no next_key_hashes"
+                            .to_string(),
+                    ));
+                }
+            } else {
+                //Check if signing key exists in the previous verified LogEntry UpdateKeys
+                if !previous.get_active_update_keys().contains(
+                    &signing_key.get_public_keymultibase().map_err(|e| {
+                        DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}"))
+                    })?,
+                ) {
+                    return Err(DIDWebVHError::SCIDError(format!(
+                        "Signing key ID {} does not match any updateKey {:#?}",
+                        signing_key.get_public_keymultibase().unwrap(),
+                        previous.get_active_update_keys()
+                    )));
+                }
+            }
+        } else {
+            // This is the first LogEntry, thus update_keys must exist
+            if let Some(keys) = &parameters.update_keys {
+                if !keys.contains(&signing_key.get_public_keymultibase().map_err(|e| {
+                    DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}"))
+                })?) {
+                    return Err(DIDWebVHError::SCIDError(format!(
+                        "Signing key ID {} does not match any updateKey {keys:#?}",
+                        signing_key.get_public_keymultibase().unwrap(),
+                    )));
+                }
+            } else {
+                return Err(DIDWebVHError::LogEntryError(
+                    "First LogEntry, update_keys are required but none exist".to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::{DIDWebVHState, Version, parameters::Parameters};
     use affinidi_secrets_resolver::secrets::Secret;
     use serde_json::Value;
     use ssi::JWK;
+    use std::sync::Arc;
 
     fn did_doc() -> Value {
         let raw_did = r#"{
@@ -465,5 +520,23 @@ mod tests {
             .expect("Failed to create LogEntry");
 
         assert!(log_entry.is_some());
+    }
+
+    #[test]
+    fn webvh_create_log_entry_no_update_keys() {
+        let key = Secret::from_jwk(&JWK::generate_ed25519().unwrap())
+            .expect("Couldn't create signing key");
+
+        let state = did_doc();
+
+        let parameters = Parameters {
+            ..Default::default()
+        };
+
+        let mut didwebvh = DIDWebVHState::default();
+
+        let log_entry = didwebvh.create_log_entry(None, &state, &parameters, &key);
+
+        assert!(log_entry.is_err());
     }
 }

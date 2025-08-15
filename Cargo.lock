@@ -113,14 +113,14 @@ dependencies = [
 
 [[package]]
 name = "affinidi-did-resolver-cache-sdk"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62839c92bdbc370f74dd7f20abe592c26aee8278031157006086c4fab4442a1d"
+checksum = "83e7aec463c67e4dd6412906baf5bb24a816c9e09594ca5608ca5cef2c77a4a9"
 dependencies = [
  "ahash 0.8.12",
  "base64 0.22.1",
  "did-peer",
- "did-webvh",
+ "didwebvh-rs 0.1.1",
  "futures-util",
  "highway",
  "moka",
@@ -462,9 +462,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.88"
+version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e539d3fca749fcee5236ab05e93a52867dd549cc157c8cb7f99595f3cedffdb5"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1753,10 +1753,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "did-webvh"
-version = "0.1.7"
+name = "didwebvh-rs"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "622962fd46a4559d2325e5c0c4619ca6ee80f1c6fc28f01107075d9743eb7c58"
+checksum = "7f1d5cde5db0cca31f67472d22f247e0e497334c975f448202fa1818d2ed9253"
 dependencies = [
  "affinidi-data-integrity",
  "affinidi-secrets-resolver",
@@ -1780,7 +1780,7 @@ dependencies = [
 
 [[package]]
 name = "didwebvh-rs"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "affinidi-data-integrity",
  "affinidi-secrets-resolver",

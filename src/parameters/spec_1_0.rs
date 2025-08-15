@@ -80,7 +80,7 @@ impl From<Parameters> for Parameters1_0 {
         Parameters1_0 {
             deactivated: value.deactivated.unwrap_or_default(),
             pre_rotation_active: value.pre_rotation_active,
-            method: Some(Version::V1_0.to_string()),
+            method: value.method.map(|_| Version::V1_0.to_string()),
             next_key_hashes: value.next_key_hashes.clone(),
             scid: value.scid.clone(),
             ttl: value.ttl,
@@ -97,7 +97,7 @@ impl From<Parameters1_0> for Parameters {
         Parameters {
             deactivated: Some(value.deactivated),
             pre_rotation_active: value.pre_rotation_active,
-            method: Some(Version::V1_0),
+            method: value.method.map(|_| Version::V1_0),
             next_key_hashes: value.next_key_hashes.clone(),
             scid: value.scid.clone(),
             ttl: value.ttl,
