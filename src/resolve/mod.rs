@@ -174,17 +174,14 @@ impl DIDWebVHState {
                 let witness_proofs = if let Ok(proofs) = r2 {
                     match proofs {
                         Ok(proofs) => match proofs {
-                            Ok(proofs_string) => {
-                                println!("proofs ({proofs_string})");
-                                WitnessProofCollection {
-                                    proofs: serde_json::from_str(&proofs_string).map_err(|e| {
-                                        DIDWebVHError::WitnessProofError(format!(
-                                            "Couldn't deserialize Witness Proofs Data: {e}",
-                                        ))
-                                    })?,
-                                    ..Default::default()
-                                }
-                            }
+                            Ok(proofs_string) => WitnessProofCollection {
+                                proofs: serde_json::from_str(&proofs_string).map_err(|e| {
+                                    DIDWebVHError::WitnessProofError(format!(
+                                        "Couldn't deserialize Witness Proofs Data: {e}",
+                                    ))
+                                })?,
+                                ..Default::default()
+                            },
                             Err(e) => {
                                 warn!("Error downloading witness proofs: {e}");
                                 WitnessProofCollection::default()

@@ -108,8 +108,6 @@ impl LogEntry {
             DIDWebVHError::LogEntryError(format!("Couldn't deserialize LogEntry. Reason: {e}"))
         })?;
 
-        println!("{values:#?}");
-
         // Step 2: Detect method version
         let version = if let Some(parameters) = values.get("parameters") {
             if let Some(method) = parameters.get("method") {

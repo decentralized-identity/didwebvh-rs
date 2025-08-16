@@ -293,12 +293,13 @@ impl DIDWebVHState {
                 ));
             };
 
-            let mut validated_params = new_entry.get_parameters();
-            validated_params.active_witness = validated_params.witness.clone();
+            let validated_parameters = new_params.validate(None)?;
+            //let mut validated_params = new_entry.get_parameters();
+            //validated_params.active_witness = validated_params.witness.clone();
             self.meta_first_ts = new_entry.get_version_time_string().to_string();
             self.meta_last_ts = self.meta_first_ts.clone();
             self.scid = scid.clone();
-            validated_params
+            validated_parameters
         };
 
         // Generate the proof for the log entry
@@ -388,6 +389,10 @@ impl DIDWebVHState {
         parameters: &Parameters,
         signing_key: &Secret,
     ) -> Result<(), DIDWebVHError> {
+        debug!(
+            "previous_log_entry exists?: {}",
+            previous_log_entry.is_some()
+        );
         if let Some(previous) = previous_log_entry {
             if previous.validated_parameters.pre_rotation_active {
                 //Check if signing key exists in the previous verified LogEntry NextKeyHashes
@@ -395,8 +400,8 @@ impl DIDWebVHState {
                     if !hashes.contains(&signing_key.get_public_keymultibase_hash().map_err(
                         |e| DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}")),
                     )?) {
-                        return Err(DIDWebVHError::SCIDError(format!(
-                            "Signing key ID {} does not match any updateKey {:#?}",
+                        return Err(DIDWebVHError::ParametersError(format!(
+                            "Signing key ID {} does not match any next key hashes {:#?}",
                             signing_key.get_public_keymultibase().unwrap(),
                             previous.get_active_update_keys()
                         )));
@@ -414,7 +419,7 @@ impl DIDWebVHState {
                         DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}"))
                     })?,
                 ) {
-                    return Err(DIDWebVHError::SCIDError(format!(
+                    return Err(DIDWebVHError::ParametersError(format!(
                         "Signing key ID {} does not match any updateKey {:#?}",
                         signing_key.get_public_keymultibase().unwrap(),
                         previous.get_active_update_keys()
@@ -427,7 +432,7 @@ impl DIDWebVHState {
                 if !keys.contains(&signing_key.get_public_keymultibase().map_err(|e| {
                     DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}"))
                 })?) {
-                    return Err(DIDWebVHError::SCIDError(format!(
+                    return Err(DIDWebVHError::ParametersError(format!(
                         "Signing key ID {} does not match any updateKey {keys:#?}",
                         signing_key.get_public_keymultibase().unwrap(),
                     )));
