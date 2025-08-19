@@ -108,8 +108,6 @@ impl LogEntry {
             DIDWebVHError::LogEntryError(format!("Couldn't deserialize LogEntry. Reason: {e}"))
         })?;
 
-        println!("{values:#?}");
-
         // Step 2: Detect method version
         let version = if let Some(parameters) = values.get("parameters") {
             if let Some(method) = parameters.get("method") {
@@ -214,9 +212,17 @@ impl LogEntry {
 
     /// Append a valid LogEntry to a file
     pub fn save_to_file(&self, file_path: &str) -> Result<(), DIDWebVHError> {
+        let append = if self.get_version_id_fields()?.0 == 1 {
+            false // Don't append to the file if this is the first version
+        } else {
+            true // Append to the file for all subsequent versions
+        };
+
         let mut file = OpenOptions::new()
             .create(true)
-            .append(true)
+            .write(true)
+            .truncate(!append)
+            .append(append)
             .open(file_path)
             .map_err(|e| {
                 DIDWebVHError::LogEntryError(format!("Couldn't open file {file_path}: {e}"))

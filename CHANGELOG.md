@@ -1,5 +1,17 @@
 # didwebvh-rs Changelog history
 
+## 18th August 2025
+
+### Release 0.1.2
+
+* **FIX:** [Issue #5](https://github.com/decentralized-identity/didwebvh-rs/issues/5)
+UpdateKey not propagating to new LogEntry Parameter set when pre-rotation is disabled
+  * Secondary issue of changing update-key also results in an error
+* **FIX:** Wizard would not reset an existing did.jsonl file for a new DID
+* **FIX:** Parameter method was always being placed in each LogEntry, will now
+correctly skip if version is the same
+* **MAINTENANCE:** More tests added for code coverage (@66.78% code coverage)
+
 ## 14th August 2025
 
 ### Release 0.1.1

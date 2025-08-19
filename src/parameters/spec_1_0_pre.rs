@@ -156,7 +156,7 @@ impl From<Parameters> for Parameters1_0Pre {
         Parameters1_0Pre {
             deactivated: value.deactivated.unwrap_or_default(),
             pre_rotation_active: value.pre_rotation_active,
-            method: Some(Version::V1_0Pre.to_string()),
+            method: value.method.map(|_| Version::V1_0Pre.to_string()),
             next_key_hashes,
             scid: value.scid.clone(),
             ttl,
@@ -203,7 +203,7 @@ impl From<Parameters1_0Pre> for Parameters {
         Parameters {
             deactivated: Some(value.deactivated),
             pre_rotation_active: value.pre_rotation_active,
-            method: Some(Version::V1_0),
+            method: value.method.map(|_| Version::V1_0),
             next_key_hashes,
             scid: value.scid.clone(),
             ttl,

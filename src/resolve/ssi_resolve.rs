@@ -63,3 +63,49 @@ impl DIDMethodResolver for DIDWebVH {
 impl DIDMethod for DIDWebVH {
     const DID_METHOD_NAME: &'static str = "webvh";
 }
+
+#[cfg(test)]
+mod tests {
+    use ssi::dids::{DID, DIDResolver};
+
+    use crate::resolve::DIDWebVH;
+
+    #[tokio::test]
+    async fn resolve_reference() {
+        let webvh = DIDWebVH;
+
+        unsafe {
+            let result = webvh.resolve(
+            DID::new_unchecked("did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs".as_bytes()),
+        ).await;
+
+            assert!(result.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_reference_specific_version() {
+        let webvh = DIDWebVH;
+
+        unsafe {
+            let result = webvh.resolve(DID::new_unchecked(
+            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs?versionId=2-QmUCFFYYGBJhzZqyouAtvRJ7ULdd8FqSUvwb61FPTMH1Aj".as_bytes()),
+        ).await;
+
+            assert!(result.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_reference_specific_time() {
+        let webvh = DIDWebVH;
+
+        unsafe {
+            let result = webvh.resolve(DID::new_unchecked(
+            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs?versionTime=2025-08-01T00:00:00Z".as_bytes()),
+        ).await;
+
+            assert!(result.is_ok());
+        }
+    }
+}

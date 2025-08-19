@@ -105,4 +105,8 @@ impl LogEntryState {
             .clone()
             .map(|scid| scid.to_string())
     }
+
+    pub(crate) fn get_active_update_keys(&self) -> Arc<Vec<String>> {
+        self.validated_parameters.active_update_keys.clone()
+    }
 }

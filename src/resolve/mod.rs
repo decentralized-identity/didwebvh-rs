@@ -174,17 +174,14 @@ impl DIDWebVHState {
                 let witness_proofs = if let Ok(proofs) = r2 {
                     match proofs {
                         Ok(proofs) => match proofs {
-                            Ok(proofs_string) => {
-                                println!("proofs ({proofs_string})");
-                                WitnessProofCollection {
-                                    proofs: serde_json::from_str(&proofs_string).map_err(|e| {
-                                        DIDWebVHError::WitnessProofError(format!(
-                                            "Couldn't deserialize Witness Proofs Data: {e}",
-                                        ))
-                                    })?,
-                                    ..Default::default()
-                                }
-                            }
+                            Ok(proofs_string) => WitnessProofCollection {
+                                proofs: serde_json::from_str(&proofs_string).map_err(|e| {
+                                    DIDWebVHError::WitnessProofError(format!(
+                                        "Couldn't deserialize Witness Proofs Data: {e}",
+                                    ))
+                                })?,
+                                ..Default::default()
+                            },
                             Err(e) => {
                                 warn!("Error downloading witness proofs: {e}");
                                 WitnessProofCollection::default()
@@ -241,5 +238,46 @@ impl DIDWebVHState {
         }
         .instrument(_span)
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::DIDWebVHState;
+
+    #[tokio::test]
+    async fn resolve_reference() {
+        let mut webvh = DIDWebVHState::default();
+
+        let result = webvh.resolve(
+            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs",
+            None,
+        ).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn resolve_reference_specific_version() {
+        let mut webvh = DIDWebVHState::default();
+
+        let result = webvh.resolve(
+            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs?versionId=2-QmUCFFYYGBJhzZqyouAtvRJ7ULdd8FqSUvwb61FPTMH1Aj",
+            None,
+        ).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn resolve_reference_specific_time() {
+        let mut webvh = DIDWebVHState::default();
+
+        let result = webvh.resolve(
+            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs?versionTime=2025-08-01T00:00:00Z",
+            None,
+        ).await;
+
+        assert!(result.is_ok());
     }
 }
