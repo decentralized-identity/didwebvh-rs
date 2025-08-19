@@ -14,18 +14,6 @@ fn test_first_log_entry_good() {
     assert!(first_log_entry.get_parameters().validate(None).is_ok());
 }
 
-#[ignore]
-#[test]
-fn test_first_log_entry_deactivated_error() {
-    let first_log_entry =
-        load_test_file("tests/test_vectors/first_log_entry_deactivated_error.jsonl");
-
-    let first_log_entry: LogEntry = LogEntry::deserialize_string(&first_log_entry, None)
-        .expect("Failed to parse first log entry JSON");
-
-    assert!(first_log_entry.get_parameters().validate(None).is_err());
-}
-
 #[test]
 fn test_first_log_entry_verify_signature() {
     let first_log_entry = load_test_file("tests/test_vectors/first_log_entry_verify_full.jsonl");

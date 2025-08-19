@@ -450,8 +450,14 @@ impl DIDWebVHState {
 
 #[cfg(test)]
 mod tests {
-    use crate::{DIDWebVHState, Version, parameters::Parameters};
+    use crate::{
+        DIDWebVHState, Version,
+        log_entry::LogEntry,
+        log_entry_state::{LogEntryState, LogEntryValidationStatus},
+        parameters::Parameters,
+    };
     use affinidi_secrets_resolver::secrets::Secret;
+    use chrono::Utc;
     use serde_json::Value;
     use ssi::JWK;
     use std::sync::Arc;
@@ -543,5 +549,195 @@ mod tests {
         let log_entry = didwebvh.create_log_entry(None, &state, &parameters, &key);
 
         assert!(log_entry.is_err());
+    }
+
+    #[test]
+    fn webvh_check_signing_key_no_pre_rotate_no_previous() {
+        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
+            .expect("Couldn't create Secret");
+        let result = DIDWebVHState::check_signing_key(
+            None,
+            &Parameters {
+                update_keys: Some(Arc::new(vec![
+                    secret
+                        .get_public_keymultibase()
+                        .expect("Couldn't get public_key from Secret"),
+                ])),
+                ..Default::default()
+            },
+            &secret,
+        );
+
+        assert!(result.is_ok())
+    }
+
+    #[test]
+    fn webvh_check_signing_key_no_pre_rotate_no_previous_error() {
+        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
+            .expect("Couldn't create Secret");
+        let result = DIDWebVHState::check_signing_key(
+            None,
+            &Parameters {
+                update_keys: Some(Arc::new(vec!["bad_key1234".to_string()])),
+                ..Default::default()
+            },
+            &secret,
+        );
+
+        assert!(result.is_err())
+    }
+
+    #[test]
+    fn webvh_check_signing_key_no_pre_rotate_with_previous() {
+        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
+            .expect("Couldn't create Secret");
+
+        let parameters = Parameters {
+            scid: Some(Arc::new("1-abcdef1234567890".to_string())),
+            update_keys: Some(Arc::new(vec![
+                secret
+                    .get_public_keymultibase()
+                    .expect("Couldn't get public_key from Secret"),
+            ])),
+            ..Default::default()
+        };
+        let previous = LogEntryState {
+            log_entry: LogEntry::create(
+                "1-abcdef1234567890".to_string(),
+                Utc::now().fixed_offset(),
+                parameters.clone(),
+                did_doc(),
+                Version::V1_0,
+            )
+            .expect("Failed to create LogEntry"),
+            version_number: 1,
+            validation_status: LogEntryValidationStatus::Ok,
+            validated_parameters: parameters.validate(None).unwrap(),
+        };
+
+        let result = DIDWebVHState::check_signing_key(
+            Some(&previous),
+            &Parameters {
+                ..Default::default()
+            },
+            &secret,
+        );
+
+        assert!(result.is_ok())
+    }
+
+    #[test]
+    fn webvh_check_signing_key_no_pre_rotate_with_previous_error() {
+        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
+            .expect("Couldn't create Secret");
+
+        let parameters = Parameters {
+            scid: Some(Arc::new("1-abcdef1234567890".to_string())),
+            update_keys: Some(Arc::new(vec!["bad-key1234".to_string()])),
+            ..Default::default()
+        };
+        let previous = LogEntryState {
+            log_entry: LogEntry::create(
+                "1-abcdef1234567890".to_string(),
+                Utc::now().fixed_offset(),
+                parameters.clone(),
+                did_doc(),
+                Version::V1_0,
+            )
+            .expect("Failed to create LogEntry"),
+            version_number: 1,
+            validation_status: LogEntryValidationStatus::Ok,
+            validated_parameters: parameters.validate(None).unwrap(),
+        };
+
+        let result = DIDWebVHState::check_signing_key(
+            Some(&previous),
+            &Parameters {
+                ..Default::default()
+            },
+            &secret,
+        );
+
+        assert!(result.is_err())
+    }
+
+    #[test]
+    fn webvh_check_signing_key_pre_rotate_no_previous() {
+        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
+            .expect("Couldn't create Secret");
+        let result = DIDWebVHState::check_signing_key(
+            None,
+            &Parameters {
+                update_keys: Some(Arc::new(vec![
+                    secret
+                        .get_public_keymultibase()
+                        .expect("Couldn't get public_key from Secret"),
+                ])),
+                next_key_hashes: Some(Arc::new(vec![
+                    secret
+                        .get_public_keymultibase_hash()
+                        .expect("Couldn't get public_key_hash from Secret"),
+                ])),
+                ..Default::default()
+            },
+            &secret,
+        );
+
+        assert!(result.is_ok())
+    }
+
+    #[test]
+    fn webvh_check_signing_key_pre_rotate_previous() {
+        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
+            .expect("Couldn't create Secret");
+
+        let next = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
+            .expect("Couldn't create Secret");
+
+        let parameters = Parameters {
+            scid: Some(Arc::new("1-abcdef1234567890".to_string())),
+            update_keys: Some(Arc::new(vec![
+                secret
+                    .get_public_keymultibase()
+                    .expect("Couldn't get public_key from Secret"),
+            ])),
+            next_key_hashes: Some(Arc::new(vec![
+                next.get_public_keymultibase_hash()
+                    .expect("Couldn't get public_key_hash from Secret"),
+            ])),
+            ..Default::default()
+        };
+
+        let previous = LogEntryState {
+            log_entry: LogEntry::create(
+                "1-abcdef1234567890".to_string(),
+                Utc::now().fixed_offset(),
+                parameters.clone(),
+                did_doc(),
+                Version::V1_0,
+            )
+            .expect("Failed to create LogEntry"),
+            version_number: 1,
+            validation_status: LogEntryValidationStatus::Ok,
+            validated_parameters: parameters.validate(None).unwrap(),
+        };
+
+        let result = DIDWebVHState::check_signing_key(
+            Some(&previous),
+            &Parameters {
+                update_keys: Some(Arc::new(vec![
+                    next.get_public_keymultibase()
+                        .expect("Couldn't get public_key from Secret"),
+                ])),
+                next_key_hashes: Some(Arc::new(vec![
+                    next.get_public_keymultibase_hash()
+                        .expect("Couldn't get public_key_hash from Secret"),
+                ])),
+                ..Default::default()
+            },
+            &next,
+        );
+
+        assert!(result.is_ok())
     }
 }
