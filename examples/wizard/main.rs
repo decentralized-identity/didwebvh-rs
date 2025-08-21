@@ -1039,10 +1039,20 @@ fn configure_parameters(
 /// Creates nextKeyHashes for the DID Document
 /// Returns Secrets and the hashes
 fn create_next_key_hashes(existing_secrets: &mut ConfigInfo) -> Result<Vec<String>> {
+    println!(
+        "{}{}{}{}",
+        style("NOTE: ").bold().color256(214),
+        style("This will loop until you decide you have enough key hashes. Select").color256(69),
+        style(" <no> ").color256(214),
+        style("to stop generating key hashes").color256(69)
+    );
     let mut next_key_hashes: Vec<String> = Vec::new();
     loop {
         if Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt("Generate a new pre-rotated key?")
+            .with_prompt(format!(
+                "Existing hashes ({}): Generate a new pre-rotated key?",
+                next_key_hashes.len()
+            ))
             .default(true)
             .interact()?
         {

@@ -1,5 +1,15 @@
 # didwebvh-rs Changelog history
 
+## August 2025
+
+### Release 0.1.3
+
+* **IMPROVEMENT:** Added additional notes to the wizard when creating updateKeys
+and NextKeyHashes so it is clear that it is a loop until you decide you have
+enough keys
+* **MAINTENANCE:** Bumped crate dependencies to latest versions
+* **MAINTENANCE:** More tests added for code coverage (@xx% code coverage)
+
 ## 18th August 2025
 
 ### Release 0.1.2
