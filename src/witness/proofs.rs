@@ -313,3 +313,284 @@ impl WitnessProofCollection {
         self.proofs.0.iter().map(|p| p.proof.len()).sum()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use affinidi_data_integrity::{DataIntegrityProof, crypto_suites::CryptoSuite};
+
+    use crate::{DIDWebVHError, witness::proofs::WitnessProofCollection};
+
+    #[test]
+    fn test_add_proof_bad_version_id() {
+        let mut proofs = WitnessProofCollection::default();
+
+        let proof = DataIntegrityProof {
+            type_: "test".to_string(),
+            created: None,
+            context: None,
+            cryptosuite: CryptoSuite::EddsaJcs2022,
+            proof_purpose: "test".to_string(),
+            proof_value: None,
+            verification_method: "verification-method".to_string(),
+        };
+
+        let result = proofs.add_proof("invalid", &proof, false);
+
+        if let Err(DIDWebVHError::WitnessProofError(msg)) = result {
+            assert!(msg.starts_with("Invalid versionID"));
+        } else {
+            panic!("Expected an error for invalid version ID");
+        }
+    }
+
+    #[test]
+    fn test_add_proof_bad_version_id_number() {
+        let mut proofs = WitnessProofCollection::default();
+
+        let proof = DataIntegrityProof {
+            type_: "test".to_string(),
+            created: None,
+            context: None,
+            cryptosuite: CryptoSuite::EddsaJcs2022,
+            proof_purpose: "test".to_string(),
+            proof_value: None,
+            verification_method: "verification-method".to_string(),
+        };
+
+        let result = proofs.add_proof("invalid-number", &proof, false);
+
+        if let Err(DIDWebVHError::WitnessProofError(msg)) = result {
+            assert!(msg.starts_with("Invalid versionID"));
+        } else {
+            panic!("Expected an error for invalid version ID");
+        }
+    }
+
+    #[test]
+    fn test_add_proof_future_version() {
+        let mut proofs = WitnessProofCollection::default();
+
+        let proof = DataIntegrityProof {
+            type_: "test".to_string(),
+            created: None,
+            context: None,
+            cryptosuite: CryptoSuite::EddsaJcs2022,
+            proof_purpose: "test".to_string(),
+            proof_value: None,
+            verification_method: "verification-method".to_string(),
+        };
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+    }
+
+    #[test]
+    fn test_add_proof_multiple_same_version() {
+        let mut proofs = WitnessProofCollection::default();
+
+        let proof = DataIntegrityProof {
+            type_: "test".to_string(),
+            created: None,
+            context: None,
+            cryptosuite: CryptoSuite::EddsaJcs2022,
+            proof_purpose: "test".to_string(),
+            proof_value: None,
+            verification_method: "verification-method".to_string(),
+        };
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs.proofs.0.iter().for_each(|p| {
+            assert_eq!(p.proof.len(), 3, "Expected 3 proofs for version 1-abcd");
+        });
+    }
+
+    #[test]
+    fn test_add_proof_multiple_multiple_versions() {
+        let mut proofs = WitnessProofCollection::default();
+
+        let proof = DataIntegrityProof {
+            type_: "test".to_string(),
+            created: None,
+            context: None,
+            cryptosuite: CryptoSuite::EddsaJcs2022,
+            proof_purpose: "test".to_string(),
+            proof_value: None,
+            verification_method: "verification-method".to_string(),
+        };
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs.proofs.0.iter().for_each(|p| {
+            assert_eq!(p.proof.len(), 3, "Expected 3 proofs for version 1-abcd");
+        });
+    }
+
+    #[test]
+    fn test_remove_version_id() {
+        let mut proofs = WitnessProofCollection::default();
+
+        let proof = DataIntegrityProof {
+            type_: "test".to_string(),
+            created: None,
+            context: None,
+            cryptosuite: CryptoSuite::EddsaJcs2022,
+            proof_purpose: "test".to_string(),
+            proof_value: None,
+            verification_method: "verification-method".to_string(),
+        };
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+
+        assert_eq!(proofs.proofs.0.len(), 2);
+        proofs.remove_version_id("1-abcd");
+        assert_eq!(proofs.proofs.0.len(), 1);
+
+        assert_eq!(proofs.get_proof_count("2-abcd"), 3);
+    }
+
+    #[test]
+    fn test_get_proofs() {
+        let mut proofs = WitnessProofCollection::default();
+
+        let proof = DataIntegrityProof {
+            type_: "test".to_string(),
+            created: None,
+            context: None,
+            cryptosuite: CryptoSuite::EddsaJcs2022,
+            proof_purpose: "test".to_string(),
+            proof_value: None,
+            verification_method: "verification-method".to_string(),
+        };
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+
+        let p1 = proofs.get_proofs("1-abcd").expect("Couldn't get proofs");
+
+        assert_eq!(p1.proof.len(), 3);
+    }
+
+    #[test]
+    fn test_generate_proof_state() {
+        let mut proofs = WitnessProofCollection::default();
+
+        let proof = DataIntegrityProof {
+            type_: "test".to_string(),
+            created: None,
+            context: None,
+            cryptosuite: CryptoSuite::EddsaJcs2022,
+            proof_purpose: "test".to_string(),
+            proof_value: None,
+            verification_method: "verification-method".to_string(),
+        };
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("1-abcd", &proof, false)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+
+        proofs
+            .add_proof("2-abcd", &proof, true)
+            .expect("Couldn't add proof");
+
+        proofs
+            .generate_proof_state(2)
+            .expect("Couldn't generate new proof state");
+    }
+}

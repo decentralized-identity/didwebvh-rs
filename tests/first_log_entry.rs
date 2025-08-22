@@ -1,8 +1,8 @@
+mod common;
+
 use affinidi_data_integrity::verification_proof::verify_data;
 use common::load_test_file;
 use didwebvh_rs::log_entry::{LogEntry, LogEntryMethods};
-
-mod common;
 
 #[test]
 fn test_first_log_entry_good() {

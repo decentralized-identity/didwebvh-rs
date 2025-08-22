@@ -1,4 +1,5 @@
 /target
-*.jsonl
-*-witness.json
-*-secrets.json
+/*.jsonl
+/*-witness.json
+/*-secrets.json
+/www
