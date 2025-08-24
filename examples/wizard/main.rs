@@ -763,7 +763,7 @@ fn get_verification_methods(webvh_did: &str, doc: &mut Value) {
         ];
         let purpose = MultiSelect::with_theme(&ColorfulTheme::default())
             .with_prompt("What are the relationships of this Verification Method?")
-            .items(&relationships)
+            .items(relationships)
             .defaults(&[true, true, true, false, false]) // Default to authentication
             .interact()
             .unwrap();
@@ -884,7 +884,7 @@ fn add_services(webvh_did: &str, doc: &mut Value) {
 
         let service = match Select::with_theme(&ColorfulTheme::default())
             .with_prompt("Service type?")
-            .items(&service_choice)
+            .items(service_choice)
             .default(0) // Default to Ed25519
             .interact()
             .unwrap()

@@ -8,7 +8,8 @@
 and NextKeyHashes so it is clear that it is a loop until you decide you have
 enough keys
 * **MAINTENANCE:** Bumped crate dependencies to latest versions
-* **MAINTENANCE:** More tests added for code coverage (@xx% code coverage)
+  * `dialoguer` upgraded from 0.11 to 0.12
+* **MAINTENANCE:** More tests added for code coverage (@72.5% code coverage)
 
 ## 18th August 2025
 

@@ -64,7 +64,7 @@ fn modify_watcher_nodes(watchers: &Arc<Vec<String>>) -> Result<Vec<String>> {
 
     let selected = MultiSelect::with_theme(&ColorfulTheme::default())
         .with_prompt("Which Watcher Nodes do you want to keep?")
-        .items(watchers)
+        .items(watchers.iter())
         .interact()
         .unwrap();
 
