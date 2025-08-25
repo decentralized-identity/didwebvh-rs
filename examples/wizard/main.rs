@@ -2,7 +2,7 @@
 *   creates a new webvh DID
 */
 
-use crate::{updating::edit_did, witness::witness_log_entry};
+use crate::{resolve::resolve, updating::edit_did, witness::witness_log_entry};
 use affinidi_secrets_resolver::secrets::Secret;
 use affinidi_tdk::dids::{DID, KeyType};
 use ahash::HashMap;
@@ -22,6 +22,7 @@ use tracing::debug;
 use tracing_subscriber::filter;
 use url::Url;
 
+mod resolve;
 mod updating;
 mod witness;
 
@@ -139,7 +140,12 @@ async fn main() -> Result<()> {
     // ************************************************************************
     // Show main menu
     // ************************************************************************
-    let menu = vec!["Create a new webvh DID", "Update existing DID", "Exit"];
+    let menu = vec![
+        "Create a new webvh DID",
+        "Update existing DID",
+        "Resolve a WebVH DID",
+        "Exit",
+    ];
 
     loop {
         let selection = Select::with_theme(&ColorfulTheme::default())
@@ -159,6 +165,10 @@ async fn main() -> Result<()> {
                 edit_did().await?;
             }
             2 => {
+                println!("{}", style("Resolving a WebVH DID").color256(69));
+                resolve().await;
+            }
+            3 => {
                 println!("{}", style("Exiting the wizard, goodbye!").color256(69));
                 break;
             }

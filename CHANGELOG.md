@@ -7,6 +7,8 @@
 * **IMPROVEMENT:** Added additional notes to the wizard when creating updateKeys
 and NextKeyHashes so it is clear that it is a loop until you decide you have
 enough keys
+* **IMPROVEMENT:** Ability to resolve a WebVH DID from the wizard added
+  * You can still use the example `resolve` as well
 * **MAINTENANCE:** Bumped crate dependencies to latest versions
   * `dialoguer` upgraded from 0.11 to 0.12
 * **MAINTENANCE:** More tests added for code coverage (@72.5% code coverage)
