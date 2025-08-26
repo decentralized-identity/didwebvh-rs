@@ -23,7 +23,6 @@ impl DIDWebVHState {
         // Validate each LogEntry
         let mut previous_entry: Option<&LogEntryState> = None;
 
-        let mut deactivated_flag = false;
         for entry in self.log_entries.iter_mut() {
             match entry.verify_log_entry(previous_entry) {
                 Ok(()) => (),
@@ -48,13 +47,13 @@ impl DIDWebVHState {
                 && deactivated
             {
                 // Deactivated, return the current LogEntry and MetaData
-                deactivated_flag = true;
+                self.deactivated = true;
             }
 
             // Set the next previous records
             previous_entry = Some(entry);
 
-            if deactivated_flag {
+            if self.deactivated {
                 // If we have a deactivated entry, we stop processing further entries
                 break;
             }

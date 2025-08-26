@@ -1,5 +1,23 @@
 # didwebvh-rs Changelog history
 
+## 26th August 2025
+
+### Release 0.1.3
+
+* **IMPROVEMENT:** Added additional notes to the wizard when creating updateKeys
+and NextKeyHashes so it is clear that it is a loop until you decide you have
+enough keys
+* **IMPROVEMENT:** Ability to resolve a WebVH DID from the wizard added
+  * You can still use the example `resolve` as well
+* **IMPROVEMENT:** Resolver Query parameter `versionNumber` implemented
+  * Allows you to resolve a specific LogEntry version number instead of the full
+  `versionId`
+* **FIX:** DID Deactivation metadata is now stored at the DID level and not LogEntry
+  * Once a DID has been deactivated, all LogEntries will show the DID as deactivated
+* **MAINTENANCE:** Bumped crate dependencies to latest versions
+  * `dialoguer` upgraded from 0.11 to 0.12
+* **MAINTENANCE:** More tests added for code coverage (@73.15% code coverage)
+
 ## 18th August 2025
 
 ### Release 0.1.2

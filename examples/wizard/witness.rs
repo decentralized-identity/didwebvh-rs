@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::ConfigInfo;
 use affinidi_data_integrity::DataIntegrityProof;
 use anyhow::{Result, bail};
@@ -10,6 +8,7 @@ use didwebvh_rs::{
     witness::{Witnesses, proofs::WitnessProofCollection},
 };
 use serde_json::json;
+use std::sync::Arc;
 
 /// Witnesses a LogEntry with the active LogEntries
 pub fn witness_log_entry(

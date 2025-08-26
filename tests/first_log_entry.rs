@@ -1,8 +1,12 @@
 use affinidi_data_integrity::verification_proof::verify_data;
-use common::load_test_file;
 use didwebvh_rs::log_entry::{LogEntry, LogEntryMethods};
 
-mod common;
+#[cfg(test)]
+pub fn load_test_file(file: &str) -> String {
+    use std::fs;
+
+    fs::read_to_string(file).unwrap_or_else(|_| panic!("Failed to read test file: {file}",))
+}
 
 #[test]
 fn test_first_log_entry_good() {

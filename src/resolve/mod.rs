@@ -1,4 +1,10 @@
 //! Resolving WebVH DID's logic is handled here
+//!
+//! A WebVH DID can be loaded via HTTP(S) or local file (testing)
+//! [`crate::DIDWebVHState::resolve`] Will load a WebVH DID using HTTP(S)
+//! [`crate::DIDWebVHState::resolve_file`] Will load a WebVH DID using a local file path
+//! [`crate::DIDWebVHState::resolve_state`] Is an internal function that will validate the DID return
+//! the resolved result
 
 use crate::{
     DIDWebVHError, DIDWebVHState,
@@ -73,7 +79,41 @@ impl DIDWebVH {
 }
 
 impl DIDWebVHState {
-    /// Resolves a webvh DID
+    /// Load a WebVH DID from a local file (useful for testing)
+    /// did: DID to resolve (can use query parameters here)
+    /// log_entries_path: path to the did.jsonl file
+    /// witness_proofs_file: optional path to the did-witness.json file
+    pub async fn resolve_file(
+        &mut self,
+        did: &str,
+        log_entries_path: &str,
+        witness_proofs_file: Option<&str>,
+    ) -> Result<(&LogEntry, MetaData), DIDWebVHError> {
+        let _span = span!(Level::DEBUG, "resolve_file", PATH = log_entries_path);
+        async move {
+            let parsed_did_url = WebVHURL::parse_did_url(did)?;
+
+            // Load log entries from file
+            self.load_log_entries_from_file(log_entries_path)?;
+
+            // Load witness proofs from file if provided
+            if let Some(witness_path) = witness_proofs_file {
+                self.load_witness_proofs_from_file(witness_path);
+            } else {
+                self.witness_proofs = WitnessProofCollection::default();
+            }
+
+            // Have LogEntries and Witness Proofs, now can validate the DID
+            self.validated = false;
+            self.expires = DateTime::default();
+
+            self.resolve_state(&parsed_did_url)
+        }
+        .instrument(_span)
+        .await
+    }
+
+    /// Resolves a webvh DID fetched using HTTP(S)
     ///
     /// Inputs:
     /// did: DID to resolve
@@ -196,48 +236,57 @@ impl DIDWebVHState {
                     warn!("Downloading witness proofs timedout. Defaulting to no witness proofs");
                     WitnessProofCollection::default()
                 };
-
                 // Have LogEntries and Witness Proofs, now can validate the DID
                 self.log_entries = log_entries;
                 self.witness_proofs = witness_proofs;
                 self.validated = false;
                 self.expires = DateTime::default();
-
-                self.validate()?;
-
-                // Ensure metadata is set for the DID
-                if let Some(first) = self.log_entries.first() {
-                    self.scid = first.get_scid().unwrap();
-                    self.meta_first_ts = first.get_version_time_string();
-                }
-                if let Some(last) = self.log_entries.last() {
-                    self.meta_last_ts = last.get_version_time_string();
-                }
             }
 
-            // DID is fully validated
-            if parsed_did_url.query_version_id.is_some()
-                || parsed_did_url.query_version_time.is_some()
-            {
-                match self.get_specific_log_entry(
-                    parsed_did_url.query_version_id.as_deref(),
-                    parsed_did_url.query_version_time,
-                ) {
-                    Ok(entry) => {
-                        let metadata = self.generate_meta_data(entry);
-                        Ok((&entry.log_entry, metadata))
-                    }
-                    Err(_) => Err(DIDWebVHError::NotFound),
-                }
-            } else if let Some(last) = self.log_entries.last() {
-                let metadata = self.generate_meta_data(last);
-                Ok((&last.log_entry, metadata))
-            } else {
-                Err(DIDWebVHError::NotFound)
-            }
+            self.resolve_state(&parsed_did_url)
         }
         .instrument(_span)
         .await
+    }
+
+    fn resolve_state(
+        &mut self,
+        parsed_did_url: &WebVHURL,
+    ) -> Result<(&LogEntry, MetaData), DIDWebVHError> {
+        let _span = span!(Level::DEBUG, "resolve_state").entered();
+        self.validate()?;
+
+        // Ensure metadata is set for the DID
+        if let Some(first) = self.log_entries.first() {
+            self.scid = first.get_scid().unwrap();
+            self.meta_first_ts = first.get_version_time_string();
+        }
+        if let Some(last) = self.log_entries.last() {
+            self.meta_last_ts = last.get_version_time_string();
+        }
+
+        // DID is fully validated
+        if parsed_did_url.query_version_id.is_some()
+            || parsed_did_url.query_version_time.is_some()
+            || parsed_did_url.query_version_number.is_some()
+        {
+            match self.get_specific_log_entry(
+                parsed_did_url.query_version_id.as_deref(),
+                parsed_did_url.query_version_time,
+                parsed_did_url.query_version_number,
+            ) {
+                Ok(entry) => {
+                    let metadata = self.generate_meta_data(entry);
+                    Ok((&entry.log_entry, metadata))
+                }
+                Err(_) => Err(DIDWebVHError::NotFound),
+            }
+        } else if let Some(last) = self.log_entries.last() {
+            let metadata = self.generate_meta_data(last);
+            Ok((&last.log_entry, metadata))
+        } else {
+            Err(DIDWebVHError::NotFound)
+        }
     }
 }
 

@@ -103,7 +103,7 @@ fn select_update_keys_from_next_hashes(
     let selected = loop {
         let selected = MultiSelect::with_theme(&ColorfulTheme::default())
             .with_prompt("Which pre-rotated keys do you want to use for this LogEntry update?")
-            .items(hashes)
+            .items(hashes.iter())
             .defaults(&[true])
             .interact()
             .unwrap();
@@ -152,7 +152,7 @@ fn modify_update_keys(
 
         let selected = MultiSelect::with_theme(&ColorfulTheme::default())
             .with_prompt("Which existing authorization keys do you want to keep?")
-            .items(&old_params.active_update_keys)
+            .items(old_params.active_update_keys.iter())
             .interact()
             .unwrap();
 

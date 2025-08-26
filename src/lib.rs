@@ -125,6 +125,9 @@ pub struct DIDWebVHState {
 
     /// Validated?
     pub validated: bool,
+
+    /// Deactivated?
+    pub deactivated: bool,
 }
 
 impl DIDWebVHState {
@@ -329,10 +332,22 @@ impl DIDWebVHState {
         &self,
         version_id: Option<&str>,
         version_time: Option<DateTime<FixedOffset>>,
+        version_number: Option<u32>,
     ) -> Result<&LogEntryState, DIDWebVHError> {
         if let Some(version_id) = version_id {
             for log_entry in self.log_entries.iter() {
                 if log_entry.get_version_id() == version_id {
+                    if let Some(version_time) = version_time
+                        && version_time < log_entry.get_version_time()
+                    {
+                        return Err(DIDWebVHError::NotFound);
+                    }
+                    return Ok(log_entry);
+                }
+            }
+        } else if let Some(version_number) = version_number {
+            for log_entry in self.log_entries.iter() {
+                if log_entry.get_version_number() == version_number {
                     if let Some(version_time) = version_time
                         && version_time < log_entry.get_version_time()
                     {
@@ -369,10 +384,7 @@ impl DIDWebVHState {
             updated: self.meta_last_ts.clone(),
             scid: self.scid.clone(),
             portable: log_entry.validated_parameters.portable.unwrap_or(false),
-            deactivated: log_entry
-                .validated_parameters
-                .deactivated
-                .unwrap_or_default(),
+            deactivated: self.deactivated,
             witness: log_entry
                 .validated_parameters
                 .active_witness

@@ -118,3 +118,41 @@ impl WitnessProofCollection {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use serde_json::json;
+
+    use crate::{
+        log_entry::{LogEntry, spec_1_0::LogEntry1_0},
+        log_entry_state::{LogEntryState, LogEntryValidationStatus},
+        parameters::{Parameters, spec_1_0::Parameters1_0},
+        witness::proofs::WitnessProofCollection,
+    };
+
+    #[test]
+    fn test_no_witnesses_configured() {
+        let mut proofs = WitnessProofCollection::default();
+
+        let log_entry = LogEntryState {
+            version_number: 1,
+            log_entry: LogEntry::Spec1_0(LogEntry1_0 {
+                proof: vec![],
+                parameters: Parameters1_0::default(),
+                version_id: "1-abcd".to_string(),
+                version_time: Utc::now().fixed_offset(),
+                state: json!({}),
+            }),
+            validated_parameters: Parameters {
+                active_witness: None,
+                ..Default::default()
+            },
+            validation_status: LogEntryValidationStatus::Ok,
+        };
+
+        proofs
+            .validate_log_entry(&log_entry, 1)
+            .expect("Couldn't validate witness proofs");
+    }
+}

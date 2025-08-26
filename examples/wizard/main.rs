@@ -2,7 +2,7 @@
 *   creates a new webvh DID
 */
 
-use crate::{updating::edit_did, witness::witness_log_entry};
+use crate::{resolve::resolve, updating::edit_did, witness::witness_log_entry};
 use affinidi_secrets_resolver::secrets::Secret;
 use affinidi_tdk::dids::{DID, KeyType};
 use ahash::HashMap;
@@ -22,6 +22,7 @@ use tracing::debug;
 use tracing_subscriber::filter;
 use url::Url;
 
+mod resolve;
 mod updating;
 mod witness;
 
@@ -139,7 +140,12 @@ async fn main() -> Result<()> {
     // ************************************************************************
     // Show main menu
     // ************************************************************************
-    let menu = vec!["Create a new webvh DID", "Update existing DID", "Exit"];
+    let menu = vec![
+        "Create a new webvh DID",
+        "Update existing DID",
+        "Resolve a WebVH DID",
+        "Exit",
+    ];
 
     loop {
         let selection = Select::with_theme(&ColorfulTheme::default())
@@ -159,6 +165,10 @@ async fn main() -> Result<()> {
                 edit_did().await?;
             }
             2 => {
+                println!("{}", style("Resolving a WebVH DID").color256(69));
+                resolve().await;
+            }
+            3 => {
                 println!("{}", style("Exiting the wizard, goodbye!").color256(69));
                 break;
             }
@@ -763,7 +773,7 @@ fn get_verification_methods(webvh_did: &str, doc: &mut Value) {
         ];
         let purpose = MultiSelect::with_theme(&ColorfulTheme::default())
             .with_prompt("What are the relationships of this Verification Method?")
-            .items(&relationships)
+            .items(relationships)
             .defaults(&[true, true, true, false, false]) // Default to authentication
             .interact()
             .unwrap();
@@ -884,7 +894,7 @@ fn add_services(webvh_did: &str, doc: &mut Value) {
 
         let service = match Select::with_theme(&ColorfulTheme::default())
             .with_prompt("Service type?")
-            .items(&service_choice)
+            .items(service_choice)
             .default(0) // Default to Ed25519
             .interact()
             .unwrap()
@@ -1039,10 +1049,20 @@ fn configure_parameters(
 /// Creates nextKeyHashes for the DID Document
 /// Returns Secrets and the hashes
 fn create_next_key_hashes(existing_secrets: &mut ConfigInfo) -> Result<Vec<String>> {
+    println!(
+        "{}{}{}{}",
+        style("NOTE: ").bold().color256(214),
+        style("This will loop until you decide you have enough key hashes. Select").color256(69),
+        style(" <no> ").color256(214),
+        style("to stop generating key hashes").color256(69)
+    );
     let mut next_key_hashes: Vec<String> = Vec::new();
     loop {
         if Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt("Generate a new pre-rotated key?")
+            .with_prompt(format!(
+                "Existing hashes ({}): Generate a new pre-rotated key?",
+                next_key_hashes.len()
+            ))
             .default(true)
             .interact()?
         {
