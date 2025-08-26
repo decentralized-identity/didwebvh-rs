@@ -26,6 +26,7 @@ async fn main() {
     let did = unsafe { DID::new_unchecked(args[1].as_bytes()) };
 
     let elapsed = ssi_resolve(did).await;
+    println!();
     println!(
         "{}{}{}",
         style("Time Taken: ").color256(69),
@@ -47,10 +48,31 @@ async fn ssi_resolve(did: &DID) -> TimeDelta {
     let stop = Utc::now();
 
     println!(
-        "DID Document:\n{}",
-        serde_json::to_string_pretty(&output.document).unwrap()
+        "{}\n{}",
+        style("DID Document:").color256(69),
+        style(serde_json::to_string_pretty(&output.document).unwrap()).color256(34)
     );
-    println!("Metadata: {:?}", output.metadata);
+    println!();
+    println!(
+        "{}",
+        style(
+            "NOTE: This is using the SSI crate resolver trait interface, it does NOT support WebVH Metadata"
+        ).color256(9)
+    );
+
+    println!(
+        "{}",
+        style(
+            "NOTE: You can resolve a WebVH DID using a more flexible resolver using the WebVH Wizard" 
+        ).color256(45)
+    );
+
+    println!();
+    println!(
+        "{}\n{}",
+        style("SSI Crate Metadata:").color256(69),
+        style(format!("{:?}", output.metadata)).color256(214)
+    );
 
     stop.signed_duration_since(start)
 }
