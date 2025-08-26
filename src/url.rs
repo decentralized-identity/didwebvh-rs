@@ -3,6 +3,8 @@ use chrono::{DateTime, FixedOffset};
 use std::fmt::{Display, Formatter};
 use url::Url;
 
+type QueryPairs = (Option<String>, Option<DateTime<FixedOffset>>, Option<u32>);
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum URLType {
     /// Regular DID Documentation lookup
@@ -49,6 +51,9 @@ pub struct WebVHURL {
 
     /// Helper pointing to versionTime
     pub query_version_time: Option<DateTime<FixedOffset>>,
+
+    /// Helper pointing to versionNumber
+    pub query_version_number: Option<u32>,
 }
 
 impl WebVHURL {
@@ -75,7 +80,8 @@ impl WebVHURL {
             None => (url, None),
         };
 
-        let (query_version_id, query_version_time) = Self::parse_query(query.as_deref())?;
+        let (query_version_id, query_version_time, query_version_number) =
+            Self::parse_query(query.as_deref())?;
 
         // Expect minimum of two parts (SCID, domain)
         // May contain three parts (SCID, domain, path)
@@ -137,6 +143,7 @@ impl WebVHURL {
             file_name: Some(file_name),
             query_version_id,
             query_version_time,
+            query_version_number,
         })
     }
 
@@ -149,7 +156,8 @@ impl WebVHURL {
         }
 
         let fragment = url.fragment();
-        let (query_version_id, query_version_time) = Self::parse_query(url.query())?;
+        let (query_version_id, query_version_time, query_version_number) =
+            Self::parse_query(url.query())?;
 
         let Some(domain) = url.domain() else {
             return Err(DIDWebVHError::InvalidMethodIdentifier(
@@ -195,20 +203,22 @@ impl WebVHURL {
             file_name,
             query_version_id,
             query_version_time,
+            query_version_number,
         })
     }
 
     /// Parses URL query parameters and returns:
     /// Error if versionTime or VersionId are invalid parameters
     /// None if there is no valid qauery
-    /// (versionId, versionTime) if valid query parameters exist
+    /// (versionId, versionTime, versionNumber) if valid query parameters exist
     fn parse_query(
         // Example query string = "versionId=1-test&versionTime=1996-12-19T16:39:57-08:00"
         query: Option<&str>,
-    ) -> Result<(Option<String>, Option<DateTime<FixedOffset>>), DIDWebVHError> {
+    ) -> Result<QueryPairs, DIDWebVHError> {
         if let Some(query) = query {
             let mut version_id = None;
             let mut version_time = None;
+            let mut version_number = None;
             for parameter in query.split('&') {
                 if let Some((key, value)) = parameter.split_once('=') {
                     if key == "versionId" {
@@ -219,6 +229,11 @@ impl WebVHURL {
                                 DIDWebVHError::DIDError(format!("DID Query parameter (versionTime) is invalid. Must be RFC 3339 compliant: {e}"
                                 ))
                             })?);
+                    } else if key == "versionNumber" {
+                        version_number = Some(str::parse(value).map_err(|e| {
+                            DIDWebVHError::DIDError(format!("DID Query parameter (versionNumber) is invalid. Must be a positive integer: {e}"
+                            ))
+                        })?);
                     }
                 } else {
                     return Err(DIDWebVHError::DIDError(format!(
@@ -226,9 +241,9 @@ impl WebVHURL {
                     )));
                 }
             }
-            Ok((version_id, version_time))
+            Ok((version_id, version_time, version_number))
         } else {
-            Ok((None, None))
+            Ok((None, None, None))
         }
     }
 
@@ -333,6 +348,16 @@ mod tests {
         };
 
         assert_eq!(parsed.query, Some("versionId=1-xyz".to_string()));
+    }
+
+    #[test]
+    fn url_with_query_version_number() {
+        let parsed = match WebVHURL::parse_did_url("did:webvh:scid:example.com?versionNumber=13") {
+            Ok(parsed) => parsed,
+            Err(_) => panic!("Failed to parse URL"),
+        };
+
+        assert_eq!(parsed.query_version_number, Some(13));
     }
 
     #[test]

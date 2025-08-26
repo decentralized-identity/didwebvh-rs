@@ -1,4 +1,5 @@
 use chrono::{TimeDelta, Utc};
+use console::style;
 use didwebvh_rs::resolve::DIDWebVH;
 use ssi::dids::{DID, DIDResolver};
 use std::env;
@@ -25,10 +26,15 @@ async fn main() {
     let did = unsafe { DID::new_unchecked(args[1].as_bytes()) };
 
     let elapsed = ssi_resolve(did).await;
-    println!("Time Taken: {}ms", elapsed.num_milliseconds());
+    println!(
+        "{}{}{}",
+        style("Time Taken: ").color256(69),
+        style(elapsed.num_milliseconds()).color256(141),
+        style("ms").color256(69)
+    );
 }
 
-// Resolves usiong the SSI Library traits
+// Resolves using the SSI Library traits
 async fn ssi_resolve(did: &DID) -> TimeDelta {
     let webvh = DIDWebVH;
     let start = Utc::now();
