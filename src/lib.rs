@@ -26,6 +26,9 @@ pub mod url;
 pub mod validate;
 pub mod witness;
 
+// Re-export Affinidi Secrets Resolver so others can create Secrets
+pub use affinidi_secrets_resolver;
+
 /// WebVH Specification supports multiple LogEntry versions in the same DID
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]

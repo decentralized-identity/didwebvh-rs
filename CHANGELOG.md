@@ -1,5 +1,13 @@
 # didwebvh-rs Changelog history
 
+## 3rd September 2025
+
+### Release 0.1.4
+
+* **IMPROVEMENT:** Exporting Secrets Resolver via this crate so it is easier for
+developers to manage secrets required to manage DIDs
+* **MAINTENANCE:** Bumped crate dependencies to latest versions
+
 ## 26th August 2025
 
 ### Release 0.1.3
