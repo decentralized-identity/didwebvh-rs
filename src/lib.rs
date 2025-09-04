@@ -170,7 +170,7 @@ impl DIDWebVHState {
         document: &Value,
         parameters: &Parameters,
         signing_key: &Secret,
-    ) -> Result<Option<&LogEntryState>, DIDWebVHError> {
+    ) -> Result<&LogEntryState, DIDWebVHError> {
         let now = Utc::now();
         let last_log_entry = self.log_entries.last();
 
@@ -327,7 +327,11 @@ impl DIDWebVHState {
             validated_parameters,
         });
 
-        Ok(self.log_entries.last())
+        self.log_entries.last().ok_or_else(|| {
+            DIDWebVHError::LogEntryError(
+                "INTERNAL Error. Successfully created LogEntry, but can not find it!".to_string(),
+            )
+        })
     }
 
     /// Gets a specific LogEntry based on versionId and versionTime
@@ -541,11 +545,11 @@ mod tests {
 
         let mut didwebvh = DIDWebVHState::default();
 
-        let log_entry = didwebvh
-            .create_log_entry(None, &state, &parameters, &key)
-            .expect("Failed to create LogEntry");
-
-        assert!(log_entry.is_some());
+        assert!(
+            didwebvh
+                .create_log_entry(None, &state, &parameters, &key)
+                .is_ok()
+        );
     }
 
     #[test]

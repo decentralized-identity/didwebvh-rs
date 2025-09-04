@@ -233,20 +233,12 @@ async fn create_log_entry(
             new_params.active_update_keys[0]
         );
     };
-    let log_entry_result = didwebvh.create_log_entry(None, &new_state, &new_params, signing_key)?;
-
-    let log_entry = if let Some(log_entry_state) = &log_entry_result {
-        &log_entry_state.log_entry
-    } else {
-        bail!(
-            "This is likely an SDK bug. Creating first DID succeeded, but no LogEntry has been logged and saved."
-        );
-    };
+    let log_entry = didwebvh.create_log_entry(None, &new_state, &new_params, signing_key)?;
 
     println!(
         "{}\n{}",
         style("New Log Entry:").color256(69),
-        style(serde_json::to_string_pretty(&log_entry).unwrap()).color256(34)
+        style(serde_json::to_string_pretty(&log_entry.log_entry).unwrap()).color256(34)
     );
 
     if Confirm::with_theme(&ColorfulTheme::default())

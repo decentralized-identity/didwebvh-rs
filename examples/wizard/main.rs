@@ -6,7 +6,7 @@ use crate::{resolve::resolve, updating::edit_did, witness::witness_log_entry};
 use affinidi_secrets_resolver::secrets::Secret;
 use affinidi_tdk::dids::{DID, KeyType};
 use ahash::HashMap;
-use anyhow::{Result, bail};
+use anyhow::Result;
 use console::style;
 use dialoguer::{Confirm, Editor, Input, MultiSelect, Select, theme::ColorfulTheme};
 use didwebvh_rs::{
@@ -290,20 +290,12 @@ async fn create_new_did() -> Result<()> {
     // Step 5: Create preliminary JSON Log Entry
     // ************************************************************************
 
-    let log_entry_result = didwebvh.create_log_entry(
+    let log_entry = didwebvh.create_log_entry(
         None, // No version time, defaults to now
         &did_document,
         &parameters,
         authorizing_keys.first().unwrap(),
     )?;
-
-    let log_entry = if let Some(log_entry_state) = log_entry_result {
-        log_entry_state
-    } else {
-        bail!(
-            "This is likely an SDK bug. Creating first DID succeeded, but no LogEntry has been logged and saved."
-        );
-    };
 
     println!(
         "{}\n{}",

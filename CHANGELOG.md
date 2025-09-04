@@ -1,5 +1,13 @@
 # didwebvh-rs Changelog history
 
+## 4th  September 2025
+
+### Release 0.1.5
+
+* **IMPROVEMENT:** Removed Option on return from `create_log_entry`
+  * Will now return an `Err` if something wrong internally occurs
+  * Simplifies error handling on the client side
+
 ## 3rd September 2025
 
 ### Release 0.1.4
