@@ -120,7 +120,7 @@ dependencies = [
  "ahash 0.8.12",
  "base64 0.22.1",
  "did-peer",
- "didwebvh-rs 0.1.3",
+ "didwebvh-rs 0.1.4",
  "futures-util",
  "highway",
  "moka",
@@ -1739,9 +1739,9 @@ dependencies = [
 
 [[package]]
 name = "didwebvh-rs"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae135065e2d24098ee30884a0ffd1ddd1302b55bef0d212b056a75227b9b9d0e"
+checksum = "88d9ab3c90d0ccb99de3449d1050ad0f5e8121828aec966fac8d90590a06c91c"
 dependencies = [
  "affinidi-data-integrity",
  "affinidi-secrets-resolver",
@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "didwebvh-rs"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "affinidi-data-integrity",
  "affinidi-secrets-resolver",
@@ -3485,9 +3485,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.27"
+version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
+checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
 name = "loom"
