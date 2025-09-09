@@ -38,6 +38,10 @@ struct ConfigInfo {
 
     /// Secrets relating to Witness Nodes
     pub witnesses: HashMap<String, Secret>,
+
+    /// Secrets relating to the DID Document itself
+    /// Key = ID
+    pub did_keys: HashMap<String, Secret>,
 }
 
 impl ConfigInfo {
@@ -184,6 +188,8 @@ async fn main() -> Result<()> {
 
 async fn create_new_did() -> Result<()> {
     let mut didwebvh = DIDWebVHState::default();
+    // Store keys that we want to use for updates
+    let mut authorization_secrets = ConfigInfo::default();
 
     // ************************************************************************
     // Step 1: Get the URLs for this DID
@@ -235,7 +241,7 @@ async fn create_new_did() -> Result<()> {
     // Step 3: Create the DID Document
     // ************************************************************************
     let did_document = loop {
-        match create_did_document(&webvh_did) {
+        match create_did_document(&webvh_did, &mut authorization_secrets) {
             Ok(doc) => break doc,
             Err(_) => {
                 println!(
@@ -266,8 +272,6 @@ async fn create_new_did() -> Result<()> {
     // ************************************************************************
     // Step 4: Configure Parameters
     // ************************************************************************
-    // Store keys that we want to use for updates
-    let mut authorization_secrets = ConfigInfo::default();
     authorizing_keys.iter().for_each(|key| {
         authorization_secrets.add_key(key);
     });
@@ -608,7 +612,7 @@ pub fn get_keys() -> Result<Vec<Secret>> {
 }
 
 // Create DID Document
-fn create_did_document(webvh_did: &str) -> Result<Value> {
+fn create_did_document(webvh_did: &str, config_info: &mut ConfigInfo) -> Result<Value> {
     println!(
         "{} {}",
         style("Create a DID Document for:").color256(69),
@@ -641,7 +645,7 @@ fn create_did_document(webvh_did: &str) -> Result<Value> {
     }
 
     // Add Verification Methods
-    get_verification_methods(webvh_did, &mut did_document);
+    get_verification_methods(webvh_did, &mut did_document, config_info);
 
     println!();
     println!(
@@ -737,7 +741,7 @@ fn also_known_as() -> Vec<String> {
 }
 
 // Create Verification Methods
-fn get_verification_methods(webvh_did: &str, doc: &mut Value) {
+fn get_verification_methods(webvh_did: &str, doc: &mut Value, config_info: &mut ConfigInfo) {
     let mut key_id: u32 = 0;
     let mut success_count: u32 = 0;
 
@@ -820,6 +824,8 @@ fn get_verification_methods(webvh_did: &str, doc: &mut Value) {
                     _ => {}
                 }
             }
+            // Add to secrets
+            config_info.did_keys.insert(vm_id, secret);
         }
         if success_count > 0
             && !Confirm::with_theme(&ColorfulTheme::default())
@@ -836,6 +842,7 @@ fn get_verification_methods(webvh_did: &str, doc: &mut Value) {
 fn create_key(id: &str) -> Secret {
     let items = vec![
         KeyType::Ed25519.to_string(),
+        "X25519".to_string(),
         KeyType::P256.to_string(),
         KeyType::Secp256k1.to_string(),
         KeyType::P384.to_string(),
@@ -848,8 +855,14 @@ fn create_key(id: &str) -> Secret {
         .interact()
         .unwrap();
 
-    let (_, mut secret) =
-        DID::generate_did_key(KeyType::try_from(items[selection].as_str()).unwrap()).unwrap();
+    let mut secret = if selection == 1 {
+        let (_, secret) = DID::generate_did_key(KeyType::Ed25519).unwrap();
+        secret.to_x25519().unwrap()
+    } else {
+        DID::generate_did_key(KeyType::try_from(items[selection].as_str()).unwrap())
+            .unwrap()
+            .1
+    };
 
     secret.id = id.to_string();
     secret

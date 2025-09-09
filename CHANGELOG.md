@@ -1,6 +1,16 @@
 # didwebvh-rs Changelog history
 
-## 4th  September 2025
+## September 2025
+
+### Release 0.1.6
+
+* **FIX:** URL parsing would incorrectly handle trailing slashes on URL Path
+* **IMPROVEMENT:** Wizard will now assist with exporting to did:web format
+* **IMPROVEMENT:** DID Secrets now stored in the `did-secrets.json` when using the
+Wizard
+* **IMPROVEMENT:** Added X25519 key support for Encryption Keys (DID Doc)
+
+## 4th September 2025
 
 ### Release 0.1.5
 

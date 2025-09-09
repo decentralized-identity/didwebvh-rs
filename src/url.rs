@@ -119,10 +119,9 @@ impl WebVHURL {
             }
         }
         if path.is_empty() {
-            path = "/.well-known/".to_string();
-        } else {
-            path.push('/');
+            path = "/.well-known".to_string();
         }
+
         let type_ = if parts.len() > 2 && parts[parts.len() - 1] == "whois" {
             file_name.push_str("whois.vp");
             URLType::WhoIs
@@ -186,7 +185,7 @@ impl WebVHURL {
         } else {
             (
                 URLType::DIDDoc,
-                url.path().to_string(),
+                url.path().trim_end_matches("/").to_string(),
                 Some("did.jsonl".to_string()),
             )
         };
@@ -267,8 +266,10 @@ impl WebVHURL {
 
         url_string.push_str(&self.path);
         if let Some(file_name) = file_name {
+            url_string.push('/');
             url_string.push_str(file_name);
         } else if let Some(file_name) = &self.file_name {
+            url_string.push('/');
             url_string.push_str(file_name);
         }
 
@@ -381,7 +382,7 @@ mod tests {
     fn url_with_whois() -> Result<(), DIDWebVHError> {
         let result = WebVHURL::parse_did_url("did:webvh:scid:domain%3A8000:whois")?;
         assert_eq!(result.type_, URLType::WhoIs);
-        assert_eq!(result.path, "/.well-known/");
+        assert_eq!(result.path, "/.well-known");
         assert_eq!(result.file_name, Some("whois.vp".to_string()));
         Ok(())
     }
@@ -390,7 +391,7 @@ mod tests {
     fn url_with_whois_path() -> Result<(), DIDWebVHError> {
         let result = WebVHURL::parse_did_url("did:webvh:scid:domain%3A8000:custom:path:whois")?;
         assert_eq!(result.type_, URLType::WhoIs);
-        assert_eq!(result.path, "/custom/path/");
+        assert_eq!(result.path, "/custom/path");
         assert_eq!(result.file_name, Some("whois.vp".to_string()));
         Ok(())
     }
@@ -399,7 +400,7 @@ mod tests {
     fn url_with_default_path() -> Result<(), DIDWebVHError> {
         let result = WebVHURL::parse_did_url("did:webvh:scid:domain%3A8000")?;
         assert_eq!(result.type_, URLType::DIDDoc);
-        assert_eq!(result.path, "/.well-known/");
+        assert_eq!(result.path, "/.well-known");
         assert_eq!(result.file_name, Some("did.jsonl".to_string()));
         Ok(())
     }
@@ -408,7 +409,7 @@ mod tests {
     fn url_with_custom_path() -> Result<(), DIDWebVHError> {
         let result = WebVHURL::parse_did_url("did:webvh:scid:domain%3A8000:custom:path")?;
         assert_eq!(result.type_, URLType::DIDDoc);
-        assert_eq!(result.path, "/custom/path/");
+        assert_eq!(result.path, "/custom/path");
         assert_eq!(result.file_name, Some("did.jsonl".to_string()));
         Ok(())
     }
@@ -449,6 +450,17 @@ mod tests {
     fn to_did_from_url() -> Result<(), DIDWebVHError> {
         let webvh = WebVHURL::parse_url(&Url::parse("http://localhost:8000/").unwrap())?;
         assert_eq!(webvh.to_string(), "did:webvh:{SCID}:localhost%3A8000");
+        Ok(())
+    }
+
+    #[test]
+    fn to_did_from_url_trailing_slash() -> Result<(), DIDWebVHError> {
+        let webvh = WebVHURL::parse_url(&Url::parse("https://localhost:8000/test/").unwrap())?;
+        assert_eq!(webvh.to_string(), "did:webvh:{SCID}:localhost%3A8000:test");
+        assert_eq!(
+            webvh.get_http_url(None)?.to_string().as_str(),
+            "http://localhost:8000/test/did.jsonl"
+        );
         Ok(())
     }
 }
