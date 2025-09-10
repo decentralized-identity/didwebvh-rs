@@ -28,6 +28,7 @@ site
 - [x] Validate witness information
 - [x] DID Query Parameters versionId and versionTime implemented
 - [x] WebVH DID specification version support (v1.0 and pre-v1.0)
+- [x] Export WebVH to a did:web document
 
 ## Usage
 
@@ -48,6 +49,11 @@ let mut webvh = DIDWebVHState::default();
 // Load LogEntries from a file
 webvh.load_log_entries_from_file("did.jsonl")?;
 ```
+
+## Feature Flags
+
+- **ssi**
+  - Enables integration with the [ssi](https://crates.io/crates/ssi) crate
 
 ## Everyone likes a wizard
 

@@ -12,6 +12,7 @@ resolved DID Document where missing (#files and #whois)
 * **IMPROVEMENT:** DID Secrets now stored in the `did-secrets.json` when using the
 Wizard
 * **IMPROVEMENT:** Added X25519 key support for Encryption Keys (DID Doc)
+* **IMPROVEMENT:** SSI Crate moved to a feature flag (`ssi`) so it becomes optional
 * **FIX:** URL parsing would incorrectly handle trailing slashes on URL Path
 
 ## 4th September 2025

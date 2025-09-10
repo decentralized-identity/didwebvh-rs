@@ -21,6 +21,7 @@ use tracing::{Instrument, Level, span, warn};
 use url::Url;
 
 /// Integration with the Spruice ID SSI Library
+#[cfg(feature = "ssi")]
 pub mod ssi_resolve;
 
 pub struct DIDWebVH;
