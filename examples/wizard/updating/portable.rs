@@ -10,9 +10,7 @@ use anyhow::{Result, anyhow, bail};
 use console::style;
 use dialoguer::{Confirm, Input, theme::ColorfulTheme};
 use didwebvh_rs::{DIDWebVHState, parameters::Parameters, url::WebVHURL};
-use iref::IriBuf;
-use ssi::dids::Document;
-use std::str::FromStr;
+use serde_json::Value;
 use url::Url;
 
 /// Revokes a webvh DID method
@@ -29,9 +27,11 @@ pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Re
         .get_state()
         .get("id")
         .ok_or_else(|| anyhow::anyhow!("DID not found in the log entry state"))?
-        .as_str();
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("DID is not a string"))?
+        .to_string();
 
-    let did_url = WebVHURL::parse_did_url(did.unwrap())?;
+    let did_url = WebVHURL::parse_did_url(&did)?;
 
     println!(
         "\n{}",
@@ -74,12 +74,17 @@ pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Re
     // Modify the DID Doc and create new LogEntry
     let did_doc: String = serde_json::to_string(&log_entry.get_state())?;
     let new_did_doc = did_doc.replace(&did_url.to_string(), &new_did_url.to_string());
-    let mut new_did_doc: Document = serde_json::from_str(&new_did_doc)?;
+    let mut new_did_doc: Value = serde_json::from_str(&new_did_doc)?;
 
     // Add to alsoKnownAs
-    new_did_doc
-        .also_known_as
-        .push(IriBuf::from_str(did.unwrap())?);
+    if let Some(alias) = new_did_doc.get_mut("alsoKnownAs") {
+        alias.as_array_mut().unwrap().push(Value::String(did));
+    } else {
+        new_did_doc.as_object_mut().unwrap().insert(
+            "alsoKnownAs".to_string(),
+            Value::Array(vec![Value::String(did)]),
+        );
+    }
 
     println!(
         "{}",
@@ -110,13 +115,7 @@ pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Re
     };
 
     didwebvh
-        .create_log_entry(
-            None,
-            &serde_json::to_value(new_did_doc)
-                .map_err(|e| anyhow!("Couldn't convert DID Doc to JSON: {}", e))?,
-            &new_params,
-            signing_key,
-        )
+        .create_log_entry(None, &new_did_doc, &new_params, signing_key)
         .map_err(|e| anyhow!("Couldn't create LogEntry: {}", e))?;
 
     Ok(())

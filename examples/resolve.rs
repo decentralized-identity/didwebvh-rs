@@ -1,7 +1,6 @@
 use chrono::{TimeDelta, Utc};
 use console::style;
-use didwebvh_rs::resolve::DIDWebVH;
-use ssi::dids::{DID, DIDResolver};
+use didwebvh_rs::{DIDWebVHState, log_entry::LogEntryMethods};
 use std::env;
 use tracing_subscriber::filter;
 
@@ -23,9 +22,7 @@ async fn main() {
     // use that subscriber to process traces emitted after this point
     tracing::subscriber::set_global_default(subscriber).expect("Logging failed, exiting...");
 
-    let did = unsafe { DID::new_unchecked(args[1].as_bytes()) };
-
-    let elapsed = ssi_resolve(did).await;
+    let elapsed = resolve(&args[1]).await;
     println!();
     println!(
         "{}{}{}",
@@ -35,11 +32,10 @@ async fn main() {
     );
 }
 
-// Resolves using the SSI Library traits
-async fn ssi_resolve(did: &DID) -> TimeDelta {
-    let webvh = DIDWebVH;
+async fn resolve(did: &str) -> TimeDelta {
+    let mut webvh = DIDWebVHState::default();
     let start = Utc::now();
-    let output = match webvh.resolve(did).await {
+    let (log_entry, meta) = match webvh.resolve(did, None).await {
         Ok(res) => res,
         Err(e) => {
             panic!("Error: {e:?}");
@@ -50,28 +46,14 @@ async fn ssi_resolve(did: &DID) -> TimeDelta {
     println!(
         "{}\n{}",
         style("DID Document:").color256(69),
-        style(serde_json::to_string_pretty(&output.document).unwrap()).color256(34)
-    );
-    println!();
-    println!(
-        "{}",
-        style(
-            "NOTE: This is using the SSI crate resolver trait interface, it does NOT support WebVH Metadata"
-        ).color256(9)
-    );
-
-    println!(
-        "{}",
-        style(
-            "NOTE: You can resolve a WebVH DID using a more flexible resolver using the WebVH Wizard" 
-        ).color256(45)
+        style(serde_json::to_string_pretty(&log_entry.get_state()).unwrap()).color256(34)
     );
 
     println!();
     println!(
         "{}\n{}",
-        style("SSI Crate Metadata:").color256(69),
-        style(format!("{:?}", output.metadata)).color256(214)
+        style("WebVH Metadata:").color256(69),
+        style(format!("{:?}", meta)).color256(214)
     );
 
     stop.signed_duration_since(start)

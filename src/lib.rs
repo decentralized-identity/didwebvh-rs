@@ -479,7 +479,6 @@ mod tests {
     use affinidi_secrets_resolver::secrets::Secret;
     use chrono::Utc;
     use serde_json::Value;
-    use ssi::JWK;
     use std::sync::Arc;
 
     fn did_doc() -> Value {
@@ -534,8 +533,7 @@ mod tests {
 
     #[test]
     fn webvh_create_log_entry() {
-        let key = Secret::from_jwk(&JWK::generate_ed25519().unwrap())
-            .expect("Couldn't create signing key");
+        let key = Secret::generate_ed25519(None);
 
         let state = did_doc();
 
@@ -555,8 +553,7 @@ mod tests {
 
     #[test]
     fn webvh_create_log_entry_no_update_keys() {
-        let key = Secret::from_jwk(&JWK::generate_ed25519().unwrap())
-            .expect("Couldn't create signing key");
+        let key = Secret::generate_ed25519(None);
 
         let state = did_doc();
 
@@ -573,8 +570,8 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_no_previous() {
-        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
-            .expect("Couldn't create Secret");
+        let secret = Secret::generate_ed25519(None);
+
         let result = DIDWebVHState::check_signing_key(
             None,
             &Parameters {
@@ -593,8 +590,8 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_no_previous_error() {
-        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
-            .expect("Couldn't create Secret");
+        let secret = Secret::generate_ed25519(None);
+
         let result = DIDWebVHState::check_signing_key(
             None,
             &Parameters {
@@ -609,8 +606,7 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_with_previous() {
-        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
-            .expect("Couldn't create Secret");
+        let secret = Secret::generate_ed25519(None);
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
@@ -648,8 +644,7 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_with_previous_error() {
-        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
-            .expect("Couldn't create Secret");
+        let secret = Secret::generate_ed25519(None);
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
@@ -683,8 +678,8 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_pre_rotate_no_previous() {
-        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
-            .expect("Couldn't create Secret");
+        let secret = Secret::generate_ed25519(None);
+
         let result = DIDWebVHState::check_signing_key(
             None,
             &Parameters {
@@ -708,11 +703,9 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_pre_rotate_previous() {
-        let secret = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
-            .expect("Couldn't create Secret");
+        let secret = Secret::generate_ed25519(None);
 
-        let next = Secret::from_jwk(&JWK::generate_ed25519().expect("Couldn't create Secret"))
-            .expect("Couldn't create Secret");
+        let next = Secret::generate_ed25519(None);
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),

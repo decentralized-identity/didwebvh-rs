@@ -7,10 +7,6 @@
 A complete implementation of the [did:webvh](https://identity.foundation/didwebvh/v1.0/)
 method in Rust. Supports version 1.0 spec.
 
-This library implements the [Rust SSI Library](https://github.com/spruceid/ssi)
-resolver traits for use in universal resolvers such as the [Affinidi DID resolver](https://github.com/affinidi/affinidi-tdk-rs/tree/main/crates/affinidi-did-resolver)
-or your own.
-
 A helpful implementation site is the [webvh DID Method Information](https://didwebvh.info/)
 site
 
@@ -54,6 +50,7 @@ webvh.load_log_entries_from_file("did.jsonl")?;
 
 - **ssi**
   - Enables integration with the [ssi](https://crates.io/crates/ssi) crate
+    - This is useful when integrating into universal resolvers
 
 ## Everyone likes a wizard
 

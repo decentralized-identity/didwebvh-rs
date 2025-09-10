@@ -52,7 +52,7 @@ dialoguer = "0.12"
 format_num = "0.1.0"
 iref = { version = "3.2", features = ["serde"] }
 rand = "0.9"
-ssi = { version = "0.12", features = ["secp384r1"] }
+# ssi = { version = "0.12", features = ["secp384r1"] }
 tracing-subscriber = { version = "0.3", features = [
   "env-filter",
   "fmt",

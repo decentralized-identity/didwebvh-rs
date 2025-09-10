@@ -228,8 +228,16 @@ fn get_service_files(id: &str, url: &WebVHURL) -> Result<Value, DIDWebVHError> {
 #[cfg(test)]
 mod tests {
     use crate::{DIDWebVHState, did_web::to_web_did};
+    use serde::Deserialize;
     use serde_json::{Value, json};
-    use ssi::dids::document::{Service, service::Endpoint};
+
+    // Dummy struct to help with testing DID Services
+    #[derive(Deserialize, PartialEq)]
+    struct Service {
+        pub id: String,
+        #[serde(rename = "serviceEndpoint")]
+        pub service_endpoint: String,
+    }
 
     #[test]
     fn test_no_log_entry() {
@@ -365,32 +373,15 @@ mod tests {
         )
         .expect("Couldn't process service attribute");
 
-        let results: Vec<(String, String)> = services
-            .iter()
-            .map(|s| {
-                if let Endpoint::Uri(uri) = &s
-                    .service_endpoint
-                    .as_ref()
-                    .expect("Service Endpoint can't be empty")
-                    .first()
-                    .expect("Service Endpoint can't be Empty!")
-                {
-                    (s.id.to_string(), uri.to_string())
-                } else {
-                    panic!("Service Endpoint is not a URI");
-                }
-            })
-            .collect();
-
         assert_eq!(services.len(), 2);
-        assert!(results.contains(&(
-            "did:web:affinidi.com#files".to_string(),
-            "https://affinidi.com/".to_string()
-        )));
-        assert!(results.contains(&(
-            "did:web:affinidi.com#whois".to_string(),
-            "https://affinidi.com/whois.vp".to_string()
-        )));
+        assert!(services.contains(&Service {
+            id: "did:web:affinidi.com#files".to_string(),
+            service_endpoint: "https://affinidi.com/".to_string()
+        }));
+        assert!(services.contains(&Service {
+            id: "did:web:affinidi.com#whois".to_string(),
+            service_endpoint: "https://affinidi.com/whois.vp".to_string()
+        }));
     }
 
     #[test]
@@ -407,31 +398,14 @@ mod tests {
         )
         .expect("Couldn't process service attribute");
 
-        let results: Vec<(String, String)> = services
-            .iter()
-            .map(|s| {
-                if let Endpoint::Uri(uri) = &s
-                    .service_endpoint
-                    .as_ref()
-                    .expect("Service Endpoint can't be empty")
-                    .first()
-                    .expect("Service Endpoint can't be Empty!")
-                {
-                    (s.id.to_string(), uri.to_string())
-                } else {
-                    panic!("Service Endpoint is not a URI");
-                }
-            })
-            .collect();
-
         assert_eq!(services.len(), 2);
-        assert!(results.contains(&(
-            "did:web:affinidi.com:custom:path#files".to_string(),
-            "https://affinidi.com/custom/path/".to_string()
-        )));
-        assert!(results.contains(&(
-            "did:web:affinidi.com:custom:path#whois".to_string(),
-            "https://affinidi.com/custom/path/whois.vp".to_string()
-        )));
+        assert!(services.contains(&Service {
+            id: "did:web:affinidi.com:custom:path#files".to_string(),
+            service_endpoint: "https://affinidi.com/custom/path/".to_string()
+        }));
+        assert!(services.contains(&Service {
+            id: "did:web:affinidi.com:custom:path#whois".to_string(),
+            service_endpoint: "https://affinidi.com/custom/path/whois.vp".to_string()
+        }));
     }
 }
