@@ -73,9 +73,9 @@ dependencies = [
 
 [[package]]
 name = "affinidi-data-integrity"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c2a2b62d45b003b6a3afb2a5cec29aab99d01271b5756a358d05a2f1be9a40"
+checksum = "44ad26ac55172999da5beb5ecaab47c45e46c6afd2003dc447b3e4eed4efcd06"
 dependencies = [
  "affinidi-secrets-resolver",
  "chrono",
@@ -85,7 +85,6 @@ dependencies = [
  "serde_json",
  "serde_json_canonicalizer",
  "sha2 0.10.9",
- "ssi",
  "thiserror 2.0.16",
  "tracing",
 ]
