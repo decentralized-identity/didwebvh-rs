@@ -14,6 +14,9 @@ Wizard
 * **IMPROVEMENT:** Added X25519 key support for Encryption Keys (DID Doc)
 * **IMPROVEMENT:** SSI Crate moved to a feature flag (`ssi`) so it becomes optional
 * **FIX:** URL parsing would incorrectly handle trailing slashes on URL Path
+* **FIX:** Wizard would exit with an error when aborting migrating the DID
+* **MAINTENANCE:** Updated crate dependencies
+* **MAINTENANCE:** Tests added for code coverage (@74.27% code coverage)
 
 ## 4th September 2025
 

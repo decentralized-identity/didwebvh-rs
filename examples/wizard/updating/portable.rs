@@ -14,7 +14,7 @@ use serde_json::Value;
 use url::Url;
 
 /// Revokes a webvh DID method
-pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Result<()> {
+pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Result<bool> {
     let Some(log_entry) = didwebvh.log_entries.last() else {
         bail!("There must at least be a first LogEntry for this DID to migrate it");
     };
@@ -68,7 +68,7 @@ pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Re
         .default(true)
         .interact()?
     {
-        return Ok(());
+        return Ok(false);
     }
 
     // Modify the DID Doc and create new LogEntry
@@ -97,7 +97,7 @@ pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Re
         .interact()?
     {
         println!("{}", style("Migration aborted!").color256(141));
-        return Ok(());
+        return Ok(false);
     }
 
     // Create new LogEntry for this migration
@@ -118,5 +118,5 @@ pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Re
         .create_log_entry(None, &new_did_doc, &new_params, signing_key)
         .map_err(|e| anyhow!("Couldn't create LogEntry: {}", e))?;
 
-    Ok(())
+    Ok(true)
 }
