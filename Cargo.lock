@@ -1782,6 +1782,7 @@ dependencies = [
  "iref",
  "multihash 0.19.3",
  "rand 0.9.2",
+ "regex",
  "reqwest 0.12.23",
  "serde",
  "serde_json",
