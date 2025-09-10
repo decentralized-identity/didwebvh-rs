@@ -1772,7 +1772,6 @@ dependencies = [
  "console",
  "dialoguer",
  "format_num",
- "iref",
  "multihash 0.19.3",
  "rand 0.9.2",
  "regex",
