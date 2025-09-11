@@ -1,6 +1,24 @@
 # didwebvh-rs Changelog history
 
-## 4th  September 2025
+## 11th September 2025
+
+### Release 0.1.6
+
+* **IMPROVEMENT:** Wizard will now assist with exporting to did:web format
+  * The wizard will change DID Document values on your behalf
+  * It can also add to the did:webvh Document `alsoKnownAs` records
+* **IMPROVEMENT:** Resolver will now auto add implicit service records to the
+resolved DID Document where missing (#files and #whois)
+* **IMPROVEMENT:** DID Secrets now stored in the `did-secrets.json` when using the
+Wizard
+* **IMPROVEMENT:** Added X25519 key support for Encryption Keys (DID Doc)
+* **IMPROVEMENT:** SSI Crate moved to a feature flag (`ssi`) so it becomes optional
+* **FIX:** URL parsing would incorrectly handle trailing slashes on URL Path
+* **FIX:** Wizard would exit with an error when aborting migrating the DID
+* **MAINTENANCE:** Updated crate dependencies
+* **MAINTENANCE:** Tests added for code coverage (@74.27% code coverage)
+
+## 4th September 2025
 
 ### Release 0.1.5
 
