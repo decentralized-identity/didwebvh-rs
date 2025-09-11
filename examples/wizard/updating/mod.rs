@@ -2,7 +2,9 @@
 *   Tasks relating to editing an existing webvh DID go here
 */
 use crate::{
-    ConfigInfo, edit_did_document,
+    ConfigInfo,
+    did_web::save_did_web,
+    edit_did_document,
     updating::{
         authorization::update_authorization_keys, portable::migrate_did, revoke::revoke_did,
         watchers::modify_watcher_params, witness::modify_witness_params,
@@ -139,6 +141,16 @@ pub async fn edit_did() -> Result<()> {
                         .witness_proofs
                         .save_to_file(&[file_name_prefix, "-witness.json"].concat())?;
                 }
+
+                if Confirm::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Export latest state to a did:web document?")
+                    .default(true)
+                    .interact()
+                    .unwrap()
+                {
+                    save_did_web(new_entry)?;
+                }
+
                 break;
             }
             1 => {
@@ -168,6 +180,15 @@ pub async fn edit_did() -> Result<()> {
                         webvh_state
                             .witness_proofs
                             .save_to_file(&[file_name_prefix, "-witness.json"].concat())?;
+                    }
+
+                    if Confirm::with_theme(&ColorfulTheme::default())
+                        .with_prompt("Export latest state to a did:web document?")
+                        .default(true)
+                        .interact()
+                        .unwrap()
+                    {
+                        save_did_web(new_entry)?;
                     }
                 }
 

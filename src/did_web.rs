@@ -18,6 +18,19 @@ impl DIDWebVHState {
             Err(DIDWebVHError::NotFound)
         }
     }
+    ///
+    /// Takes a did:webvh ID and converts it to a did:web ID
+    pub fn convert_webvh_id_to_web_id(id: &str) -> String {
+        // input: did:webvh:<SCID>:<path>
+        let parts: Vec<&str> = id.split(':').collect();
+        let mut new_did = String::new();
+        new_did.push_str("did:web");
+        for p in parts[3..].iter() {
+            new_did.push(':');
+            new_did.push_str(p);
+        }
+        new_did
+    }
 }
 
 impl LogEntryState {
@@ -41,7 +54,7 @@ fn to_web_did(old_state: &Value) -> Result<Value, DIDWebVHError> {
         .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't serialize state: {}", e)))?;
 
     // Replace the existing did:webvh:<SCID> with did:web
-    let re = Regex::new(r"(^did:webvh:[^:]+)")
+    let re = Regex::new(r"(did:webvh:[^:]+)")
         .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't create regex: {}", e)))?;
     let new_did_doc = re.replace_all(&did_doc, "did:web");
 
@@ -52,15 +65,10 @@ fn to_web_did(old_state: &Value) -> Result<Value, DIDWebVHError> {
     let (old_did, new_did) = if let Some(id) = old_state.get("id")
         && let Some(id_str) = id.as_str()
     {
-        // input: did:webvh:<SCID>:<path>
-        let parts: Vec<&str> = id_str.split(':').collect();
-        let mut new_did = String::new();
-        new_did.push_str("did:web");
-        for p in parts[3..].iter() {
-            new_did.push(':');
-            new_did.push_str(p);
-        }
-        (id_str.to_string(), new_did)
+        (
+            id_str.to_string(),
+            DIDWebVHState::convert_webvh_id_to_web_id(id_str),
+        )
     } else {
         return Err(DIDWebVHError::DIDError(
             "Couldn't find DID (id) attribute".to_string(),
@@ -341,7 +349,7 @@ mod tests {
 
     #[test]
     fn test_also_known_as_existing_many() {
-        let old_state = json!({"id": "did:webvh:acme1234:affinidi.com", "alsoKnownAs": ["did:web:affinidi.com", "did:webvh:acme1234:affinidi.com", "did:web:unknown.com"]});
+        let old_state = json!({"id": "did:webvh:acme1234:affinidi.com", "alsoKnownAs": ["did:web:affinidi.com", "did:webvh:acme1234:affinidi.com", "did:web:unknown.com", "did:web:another.alias"]});
 
         let did_web = to_web_did(&old_state).expect("Couldn't convert to did:web");
 

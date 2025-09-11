@@ -2,7 +2,12 @@
 *   creates a new webvh DID
 */
 
-use crate::{resolve::resolve, updating::edit_did, witness::witness_log_entry};
+use crate::{
+    did_web::{insert_also_known_as, save_did_web},
+    resolve::resolve,
+    updating::edit_did,
+    witness::witness_log_entry,
+};
 use affinidi_secrets_resolver::secrets::Secret;
 use affinidi_tdk::dids::{DID, KeyType};
 use ahash::HashMap;
@@ -22,6 +27,7 @@ use tracing::debug;
 use tracing_subscriber::filter;
 use url::Url;
 
+mod did_web;
 mod resolve;
 mod updating;
 mod witness;
@@ -240,7 +246,7 @@ async fn create_new_did() -> Result<()> {
     // ************************************************************************
     // Step 3: Create the DID Document
     // ************************************************************************
-    let did_document = loop {
+    let mut did_document = loop {
         match create_did_document(&webvh_did, &mut authorization_secrets) {
             Ok(doc) => break doc,
             Err(_) => {
@@ -291,7 +297,23 @@ async fn create_new_did() -> Result<()> {
     debug!("Parameters: {parameters:#?}");
 
     // ************************************************************************
-    // Step 5: Create preliminary JSON Log Entry
+    // Step 6: Export this as a did:web?
+    // ************************************************************************
+
+    let export_did_web = if Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt("Would you like to export this DID as a did:web document as well?")
+        .default(true)
+        .interact()?
+    {
+        // Insert alsoKnownAs if not already there?
+        insert_also_known_as(&mut did_document, &webvh_did)?;
+        true
+    } else {
+        false
+    };
+
+    // ************************************************************************
+    // Step 7: Create preliminary JSON Log Entry
     // ************************************************************************
 
     let log_entry = didwebvh.create_log_entry(
@@ -308,7 +330,7 @@ async fn create_new_did() -> Result<()> {
     );
 
     // ************************************************************************
-    // Step 6: Validate the LogEntry
+    // Step 8: Validate the LogEntry
     // ************************************************************************
     // Validate the Log Entry
     let validated_params = log_entry.log_entry.verify_log_entry(None, None)?;
@@ -320,7 +342,7 @@ async fn create_new_did() -> Result<()> {
     );
 
     // ************************************************************************
-    // Step 7: Create the witness proofs if needed?
+    // Step 9: Create the witness proofs if needed?
     // ************************************************************************
     let mut witness_proofs = WitnessProofCollection::default();
     let new_proofs = witness_log_entry(
@@ -370,6 +392,11 @@ async fn create_new_did() -> Result<()> {
                 style("Witness Proofs saved to :").color256(69),
                 style([start, "-witness.json"].concat()).color256(214),
             );
+        }
+
+        // Export did:web document?
+        if export_did_web {
+            save_did_web(log_entry)?;
         }
     }
 
