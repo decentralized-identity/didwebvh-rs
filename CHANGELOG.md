@@ -1,5 +1,11 @@
 # didwebvh-rs Changelog history
 
+## 13th September 2025
+
+### Release 0.1.7
+
+* **IMPROVEMENT:** `didwebvh-rs` is now WASM compile friendly.
+
 ## 11th September 2025
 
 ### Release 0.1.6
