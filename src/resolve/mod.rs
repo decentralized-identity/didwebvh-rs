@@ -17,6 +17,8 @@ use crate::{
 use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode};
 use std::time::Duration;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use tracing::trace;
 use tracing::{Instrument, Level, span, warn};
 use url::Url;
 
@@ -136,29 +138,28 @@ impl DIDWebVHState {
             }
 
             if !self.validated || self.expires < Utc::now() {
-                // Set network timeout values. Will default to 10 seconds for any reasons
-                let network_timeout = if let Some(timeout) = timeout {
-                    timeout
-                } else {
-                    Duration::from_secs(10)
-                };
-
                 // If building for WASM then don't use tokio::spawn
                 // This means sequential retrieval of files
                 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
                 let (r1, r2) = {
-                    let client = reqwest::ClientBuilder::new()
-                        .timeout(network_timeout)
-                        .build()
-                        .unwrap();
+                    trace!("timeout is not available in WASM builds! {timeout:#?}");
+                    let client = reqwest::Client::new();
+
                     let r1 = DIDWebVH::get_log_entries(parsed_did_url.clone(), client.clone());
-                    let r1 = DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone());
-                    (Ok(r1), Ok(r2))
+                    let r2 = DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone());
+                    (r1.await, r2.await)
                 };
 
                 // Otherwise use tokio::spawn to do async downloads
                 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
                 let (r1, r2) = {
+                    // Set network timeout values. Will default to 10 seconds for any reasons
+                    let network_timeout = if let Some(timeout) = timeout {
+                        timeout
+                    } else {
+                        Duration::from_secs(10)
+                    };
+
                     // Async download did.jsonl and did-witness.json
                     let client = reqwest::ClientBuilder::new()
                         .timeout(network_timeout)
@@ -174,35 +175,41 @@ impl DIDWebVHState {
                         client.clone(),
                     ));
 
-                    (r1.await, r2.await)
-                };
-
-                // LogEntry
-                let log_entries = match r1 {
-                    Ok(log_entries) => match log_entries {
-                        Ok(entries) => {
-                            let mut log_entries = Vec::new();
-                            let mut version = None;
-                            for line in entries.lines() {
-                                let log_entry = LogEntry::deserialize_string(line, version)?;
-
-                                version = Some(log_entry.get_webvh_version());
-
-                                log_entries.push(LogEntryState {
-                                    log_entry: log_entry.clone(),
-                                    version_number: log_entry.get_version_id_fields()?.0,
-                                    validation_status: LogEntryValidationStatus::NotValidated,
-                                    validated_parameters: Parameters::default(),
-                                });
-                            }
-                            log_entries
-                        }
+                    let r1 = match r1.await {
+                        Ok(log_entries) => log_entries,
                         Err(e) => {
                             return Err(DIDWebVHError::NetworkError(format!(
                                 "Error downloading LogEntries for DID: {e}"
                             )));
                         }
-                    },
+                    };
+
+                    let r2 = match r2.await {
+                        Ok(witness_proofs) => witness_proofs,
+                        Err(_) => Ok("{}".to_string()),
+                    };
+                    (r1, r2)
+                };
+
+                // LogEntry
+                let log_entries = match r1 {
+                    Ok(entries) => {
+                        let mut log_entries = Vec::new();
+                        let mut version = None;
+                        for line in entries.lines() {
+                            let log_entry = LogEntry::deserialize_string(line, version)?;
+
+                            version = Some(log_entry.get_webvh_version());
+
+                            log_entries.push(LogEntryState {
+                                log_entry: log_entry.clone(),
+                                version_number: log_entry.get_version_id_fields()?.0,
+                                validation_status: LogEntryValidationStatus::NotValidated,
+                                validated_parameters: Parameters::default(),
+                            });
+                        }
+                        log_entries
+                    }
                     Err(e) => {
                         return Err(DIDWebVHError::NetworkError(format!(
                             "Error downloading LogEntries for DID: {e}"
@@ -219,22 +226,16 @@ impl DIDWebVHState {
                 // WitnessProofCollection
                 // If a webvh DID is NOT using witnesses then it will still successfully validate
                 let witness_proofs = match r2 {
-                    Ok(proofs) => match proofs {
-                        Ok(proofs_string) => WitnessProofCollection {
-                            proofs: serde_json::from_str(&proofs_string).map_err(|e| {
-                                DIDWebVHError::WitnessProofError(format!(
-                                    "Couldn't deserialize Witness Proofs Data: {e}",
-                                ))
-                            })?,
-                            ..Default::default()
-                        },
-                        Err(e) => {
-                            warn!("Error downloading witness proofs: {e}");
-                            WitnessProofCollection::default()
-                        }
+                    Ok(proofs_string) => WitnessProofCollection {
+                        proofs: serde_json::from_str(&proofs_string).map_err(|e| {
+                            DIDWebVHError::WitnessProofError(format!(
+                                "Couldn't deserialize Witness Proofs Data: {e}",
+                            ))
+                        })?,
+                        ..Default::default()
                     },
                     Err(e) => {
-                        warn!("tokio join error: {e}");
+                        warn!("Error downloading witness proofs: {e}");
                         WitnessProofCollection::default()
                     }
                 };

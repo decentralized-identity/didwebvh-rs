@@ -18,7 +18,7 @@ ssi = ["dep:ssi"]
 
 [dependencies]
 affinidi-data-integrity = "0.2"
-affinidi-secrets-resolver = { version = "0.1", path = "../affinidi/affinidi-tdk-rs/crates/affinidi-tdk/common/affinidi-secrets-resolver/" }
+affinidi-secrets-resolver = "0.1"
 
 ahash = { version = "0.8", features = ["serde"] }
 base58 = "0.2"
@@ -57,9 +57,3 @@ tracing-subscriber = { version = "0.3", features = [
   "json",
   "valuable",
 ] }
-
-[target.wasm32-unknown-unknown]
-rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
-
-# [target.'cfg(target_arch = "wasm32")'.dependencies]
-# getrandom = { version = "0.3", features = ["wasm_js"] }
