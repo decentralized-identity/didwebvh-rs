@@ -25,6 +25,7 @@ site
 - [x] DID Query Parameters versionId and versionTime implemented
 - [x] WebVH DID specification version support (v1.0 and pre-v1.0)
 - [x] Export WebVH to a did:web document
+- [x] WASM friendly for inclusion in other projects
 
 ## Usage
 
@@ -32,7 +33,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.1.6"
+didwebvh-rs = "0.1.7"
 ```
 
 Then:
