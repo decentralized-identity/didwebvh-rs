@@ -1,5 +1,16 @@
 # didwebvh-rs Changelog history
 
+## September 2025
+
+### Release 0.1.8
+
+* **IMPROVEMENT:** Example `generate_history` now has interactive mode
+  * `cargo run --release --example generate_history -- -i`
+* **IMPROVEMENT:** `get_did_document()` added to `LogEntryState` and `LogEntry`
+  * Use `get_did_document()` to get a full DID Document including implied WebVH
+  Services
+  * Use `get_state()` if you want to access the raw un-modified DID Document
+
 ## 13th September 2025
 
 ### Release 0.1.7
