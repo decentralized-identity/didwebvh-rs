@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.1.7"
+version = "0.1.8"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -17,8 +17,8 @@ default = []
 ssi = ["dep:ssi"]
 
 [dependencies]
-affinidi-data-integrity = "0.2"
-affinidi-secrets-resolver = "0.1"
+affinidi-data-integrity = { version = "0.2", path = "../affinidi/affinidi-tdk-rs/crates/affinidi-tdk/common/affinidi-data-integrity/" }
+affinidi-secrets-resolver = { version = "0.1", path = "../affinidi/affinidi-tdk-rs/crates/affinidi-tdk/common/affinidi-secrets-resolver/" }
 
 ahash = { version = "0.8", features = ["serde"] }
 base58 = "0.2"
@@ -42,7 +42,7 @@ url = "2.5"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
-affinidi-tdk = "0.1"
+affinidi-tdk = { version = "0.1", path = "../affinidi/affinidi-tdk-rs/crates/affinidi-tdk/affinidi-tdk/" }
 
 anyhow = "1.0"
 byte-unit = "5.1"

@@ -32,8 +32,8 @@ site
 Add this to your `Cargo.toml`:
 
 ```toml
-[dependencies]
-didwebvh-rs = "0.1.7"
+[dependencies
+didwebvh-rs = "0.1.8"
 ```
 
 Then:
@@ -104,7 +104,7 @@ For example, to generate 200 LogEntries with 10 witnesses each, you can run:
 cargo run --release --example generate_histroy -- -c 200 -w 10
 ```
 
-This tool will generate the output to
+This tool will save the output to
 
 - did.jsonl (LogEntries)
 - did-witness.json (Witness Proofs)
