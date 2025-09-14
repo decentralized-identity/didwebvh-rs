@@ -16,6 +16,7 @@ use crate::{
     DIDWebVHError,
     log_entry::{LogEntry, LogEntryCreate, LogEntryMethods},
     parameters::{Parameters, spec_1_0_pre::Parameters1_0Pre},
+    resolve::implicit::update_implicit_services,
 };
 
 /// Each version of the DID gets a new log entry
@@ -154,5 +155,20 @@ impl LogEntryMethods for LogEntry1_0Pre {
 
     fn get_state(&self) -> &Value {
         &self.state
+    }
+
+    fn get_did_document(&self) -> Result<Value, DIDWebVHError> {
+        let services = self.state.get("service");
+        let mut new_state = self.state.clone();
+        if let Some(id) = self.state.get("id")
+            && let Some(id) = id.as_str()
+        {
+            update_implicit_services(services, &mut new_state, id)?;
+            Ok(new_state)
+        } else {
+            Err(DIDWebVHError::ValidationError(
+                "DID Document is missing 'id' field or it's not a string".to_string(),
+            ))
+        }
     }
 }

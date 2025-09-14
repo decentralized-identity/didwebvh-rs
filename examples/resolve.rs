@@ -43,10 +43,17 @@ async fn resolve(did: &str) -> TimeDelta {
     };
     let stop = Utc::now();
 
+    let did_document = match log_entry.get_did_document() {
+        Ok(doc) => doc,
+        Err(e) => {
+            panic!("Error: {e:?}");
+        }
+    };
+
     println!(
         "{}\n{}",
         style("DID Document:").color256(69),
-        style(serde_json::to_string_pretty(&log_entry.get_state()).unwrap()).color256(34)
+        style(serde_json::to_string_pretty(&did_document).unwrap()).color256(34)
     );
 
     println!();
