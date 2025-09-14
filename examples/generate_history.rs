@@ -43,6 +43,10 @@ struct Args {
     /// Enables Witnesses with a given threshold (set to 0 to disable)
     #[arg(short, long, default_value_t = 3)]
     witnesses: u32,
+
+    /// Enables Interactive mode (user presses enter to proceed to next step)
+    #[arg(short, long)]
+    interactive: bool,
 }
 
 #[tokio::main]
@@ -61,10 +65,35 @@ pub async fn main() -> Result<()> {
     let mut secrets = SimpleSecretsResolver::new(&[]).await;
 
     println!(
-        "{}",
-        style("System rest - Sleeping for 3 seconds...").color256(214)
+        "{}{}{}{}{}",
+        style("Generate History: LogEntries (").color256(34),
+        style(args.count).color256(69),
+        style(") Witnesses (").color256(34),
+        style(args.witnesses).color256(69),
+        style(")").color256(34),
     );
-    sleep(Duration::from_secs(3));
+
+    if args.interactive {
+        print!(
+            "{}",
+            style("Interactive mode enabled - press ENTER to proceed to each step").color256(214)
+        );
+        std::io::stdout().flush().unwrap();
+        let mut input = String::new();
+        let _ = std::io::stdin().read_line(&mut input);
+        println!();
+    } else {
+        println!(
+            "{}",
+            style("System rest - Sleeping for 3 seconds...").color256(214)
+        );
+        sleep(Duration::from_secs(3));
+    }
+
+    println!(
+        "{}",
+        style("Generating complete WebVH DID with history...").color256(214),
+    );
     let start = SystemTime::now();
 
     // Generate initial DID
@@ -76,16 +105,7 @@ pub async fn main() -> Result<()> {
     }
 
     let end = SystemTime::now();
-
-    println!(
-        "\t{}{}",
-        style("WebVH DID Generation Duration: ").color256(34),
-        style(format!(
-            "{}ms",
-            &end.duration_since(start).unwrap().as_millis()
-        ))
-        .color256(141)
-    );
+    let webvh_generate_duration = end.duration_since(start).unwrap().as_millis();
 
     // Write records to disk
     let start = SystemTime::now();
@@ -104,25 +124,49 @@ pub async fn main() -> Result<()> {
         byte_count += 2 + json_entry.len() as u64; // 2 for newline characters
     }
     let end = SystemTime::now();
+    let webvh_le_save_duration = end.duration_since(start).unwrap().as_millis();
 
     let bytes = Byte::from_u64(byte_count).get_appropriate_unit(UnitType::Decimal);
+
+    println!(
+        "\t{}{}",
+        style("DID First LogEntry created: ").color256(34),
+        style(&didwebvh.log_entries.first().unwrap().get_version_id()).color256(69)
+    );
+    println!(
+        "\t{}{}",
+        style("DID Last LogEntry created: ").color256(34),
+        style(&didwebvh.log_entries.last().unwrap().get_version_id()).color256(69)
+    );
 
     println!(
         "\t{}{} {}{}",
         style("LogEntries Count: ").color256(34),
         style(format_num!(",.0", didwebvh.log_entries.len() as f64)).color256(69),
         style("File Size (bytes): ").color256(34),
-        style(format!("{bytes:#.2}")).color256(69),
+        style(format!("{bytes:#.2}")).color256(199),
     );
 
+    let throughput = (1000.0 / (webvh_generate_duration + webvh_le_save_duration) as f64)
+        * didwebvh.log_entries.len() as f64;
+
+    let throughput = format_num!(",.02", throughput);
+
     println!(
-        "\t{}{}",
-        style("WebVH DID LogEntry Save Duration: ").color256(34),
+        "\t{}{}{}{}\n\t{}{}{}{}{}",
+        style("Timing: Generating WebVH: ").color256(34),
+        style(format!("{webvh_generate_duration}ms",)).color256(141),
+        style(", save to disk: ").color256(34),
+        style(format!("{webvh_le_save_duration}ms",)).color256(141),
+        style("Total Time: ").color256(34),
         style(format!(
             "{}ms",
-            &end.duration_since(start).unwrap().as_millis()
+            webvh_generate_duration + webvh_le_save_duration
         ))
-        .color256(141)
+        .color256(141),
+        style(" @ ").color256(34),
+        style(throughput).color256(69),
+        style(" LogEntries/Second").color256(34),
     );
 
     if args.witnesses > 0 {
@@ -144,7 +188,7 @@ pub async fn main() -> Result<()> {
             style("Witness Proof Count: ").color256(34),
             style(didwebvh.witness_proofs.get_total_count().to_string()).color256(69),
             style("File Size (bytes): ").color256(34),
-            style(format!("{bytes:#.2}")).color256(69),
+            style(format!("{bytes:#.2}")).color256(199),
         );
         println!(
             "\t{}{}",
@@ -160,12 +204,27 @@ pub async fn main() -> Result<()> {
     println!();
     println!(
         "{}",
-        style("Resetting state... ready for validation").color256(214)
+        style("Resetting state... ready for verification").color256(214)
     );
 
     let mut verify_state = DIDWebVHState::default();
-    println!("{}", style("Sleeping for 3 seconds...").color256(214));
-    sleep(Duration::from_secs(3));
+    if args.interactive {
+        print!(
+            "{}",
+            style("Press ENTER to proceed to verifying this WebVH DID").color256(214)
+        );
+        std::io::stdout().flush().unwrap();
+        let mut input = String::new();
+        let _ = std::io::stdin().read_line(&mut input);
+        println!();
+    } else {
+        println!(
+            "{}",
+            style("System rest - Sleeping for 3 seconds...").color256(214)
+        );
+        sleep(Duration::from_secs(3));
+    }
+
     let start = SystemTime::now();
     verify_state.load_log_entries_from_file("did.jsonl")?;
     let end = SystemTime::now();
@@ -175,6 +234,7 @@ pub async fn main() -> Result<()> {
 
     let throughput = format_num!(",.02", throughput);
 
+    println!("{}", style("Reading data - no validation").color256(214));
     println!(
         "\t{}{} {} {}{}",
         style("Reading LogEntries from file Duration: ").color256(34),
@@ -189,8 +249,11 @@ pub async fn main() -> Result<()> {
     );
     let mut total_validation = end.duration_since(start).unwrap().as_millis();
 
-    println!("{}", style("Sleeping for 3 seconds...").color256(214));
-    sleep(Duration::from_secs(3));
+    if !args.interactive {
+        println!("{}", style("Sleeping for 3 seconds...").color256(214));
+        sleep(Duration::from_secs(3));
+    }
+
     let start2 = SystemTime::now();
     verify_state.load_witness_proofs_from_file("did-witness.json");
     let end = SystemTime::now();
@@ -214,15 +277,20 @@ pub async fn main() -> Result<()> {
 
     total_validation += end.duration_since(start2).unwrap().as_millis();
 
-    println!("{}", style("Sleeping for 3 seconds...").color256(214));
-    sleep(Duration::from_secs(3));
+    if !args.interactive {
+        println!("{}", style("Sleeping for 3 seconds...").color256(214));
+        sleep(Duration::from_secs(3));
+    }
+
     let start3 = SystemTime::now();
     verify_state.validate()?;
     let end = SystemTime::now();
 
+    println!();
+    println!("{}", style("Validating history...").color256(214));
     println!(
         "\t{}{}",
-        style("Full WebVH DID Validation Duration: ").color256(34),
+        style("WebVH DID History Validation Duration: ").color256(34),
         style(format!(
             "{}ms",
             end.duration_since(start3).unwrap().as_millis()
@@ -344,13 +412,6 @@ async fn generate_did(
 
     // Witness LogEntry
     witness_log_entry(didwebvh, secrets).await?;
-
-    let log_entry = didwebvh.log_entries.last().unwrap();
-    println!(
-        "\t{}{}",
-        style("DID First LogEntry created: ").color256(34),
-        style(&log_entry.get_version_id()).color256(69)
-    );
 
     Ok(vec![next_key1, next_key2])
 }
