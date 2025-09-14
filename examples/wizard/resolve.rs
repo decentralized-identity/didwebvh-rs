@@ -45,23 +45,23 @@ pub async fn resolve() {
                 style("DID passed all verification and validation checks!").color256(34)
             );
 
-            println!();
-            println!(
-                "{}",
-                style(format!(
-                    "DID Doc:\n{}",
-                    serde_json::to_string_pretty(&log_entry.get_state())
-                        .expect("Failed to serialize DID Document")
-                ))
-                .color256(34)
-            );
+            let did_doc = match log_entry.get_did_document() {
+                Ok(doc) => serde_json::to_string_pretty(&doc).unwrap(),
+                Err(e) => {
+                    println!("Failed to get DID Document from log entry: {}", e);
+                    return;
+                }
+            };
 
             println!();
-            println!("{}", style(format!("{:#?}", metadata)).color256(141));
+            println!("{}", style(format!("DID Doc:\n{did_doc}")).color256(34));
+
+            println!();
+            println!("{}", style(format!("{metadata:#?}")).color256(141));
             println!();
         }
         Err(e) => {
-            println!("Couldn't resolve DID ({did} Reason: {}", e);
+            println!("Couldn't resolve DID ({did} Reason: {e}");
         }
     }
 }
