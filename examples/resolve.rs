@@ -60,7 +60,7 @@ async fn resolve(did: &str) -> TimeDelta {
     println!(
         "{}\n{}",
         style("WebVH Metadata:").color256(69),
-        style(format!("{:?}", meta)).color256(214)
+        style(serde_json::to_string_pretty(&meta).unwrap()).color256(214)
     );
 
     stop.signed_duration_since(start)
