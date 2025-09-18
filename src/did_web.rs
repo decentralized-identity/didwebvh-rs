@@ -288,7 +288,7 @@ mod tests {
         )
         .expect("Couldn't process alsoKnownAs attribute");
 
-        assert_eq!(also_known_as.len(), 2);
+        assert_eq!(also_known_as.len(), 3);
         assert!(!also_known_as.contains(&"did:web:affinidi.com".to_string()));
         assert!(also_known_as.contains(&"did:web:unknown.com".to_string()));
         assert!(also_known_as.contains(&"did:webvh:acme1234:affinidi.com".to_string()));
