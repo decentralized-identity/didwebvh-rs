@@ -71,8 +71,17 @@ impl LogEntryState {
     }
 
     /// Get LogEntry State (DID Document)
+    /// WARN: This returns the raw DID Document only! It does not augment with implied services
+    /// For use in a resolver please use [get_did_document](Self::get_did_document)
     pub fn get_state(&self) -> &Value {
         self.log_entry.get_state()
+    }
+
+    /// Returns a fully formed DID Document for this LogEntry
+    /// This will add implied services as defined by the WebVH Specification
+    /// To get the raw DID Document only, use [get_state](Self::get_state)
+    pub fn get_did_document(&self) -> Result<Value, DIDWebVHError> {
+        self.log_entry.get_did_document()
     }
 
     /// Get the version Number of this LogEntry

@@ -26,6 +26,8 @@ use url::Url;
 #[cfg(feature = "ssi")]
 pub mod ssi_resolve;
 
+pub mod implicit; // WebVH specification implies specific Services for a DID Document
+
 pub struct DIDWebVH;
 
 impl DIDWebVH {

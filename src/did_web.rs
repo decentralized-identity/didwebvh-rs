@@ -2,9 +2,12 @@
 *   Handles converting a WebVH DID to a Web DID Document
 */
 
-use crate::{DIDWebVHError, DIDWebVHState, log_entry_state::LogEntryState, url::WebVHURL};
+use crate::{
+    DIDWebVHError, DIDWebVHState, log_entry_state::LogEntryState,
+    resolve::implicit::update_implicit_services,
+};
 use regex::Regex;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 impl DIDWebVHState {
     /// Converts the last LogEntry to a DID Web Document
@@ -50,19 +53,8 @@ impl LogEntryState {
 }
 
 fn to_web_did(old_state: &Value) -> Result<Value, DIDWebVHError> {
-    let did_doc = serde_json::to_string(old_state)
-        .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't serialize state: {}", e)))?;
-
-    // Replace the existing did:webvh:<SCID> with did:web
-    let re = Regex::new(r"(did:webvh:[^:]+)")
-        .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't create regex: {}", e)))?;
-    let new_did_doc = re.replace_all(&did_doc, "did:web");
-
-    let mut new_state: Value = serde_json::from_str(&new_did_doc)
-        .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't parse new state: {}", e)))?;
-
     // What is the new DID?
-    let (old_did, new_did) = if let Some(id) = old_state.get("id")
+    let (webvh_did, web_did) = if let Some(id) = old_state.get("id")
         && let Some(id_str) = id.as_str()
     {
         (
@@ -75,28 +67,41 @@ fn to_web_did(old_state: &Value) -> Result<Value, DIDWebVHError> {
         ));
     };
 
+    let service = old_state.get("service");
+    let mut old_state = old_state.clone();
+    // Add implicit WebVH Services if not present
+    update_implicit_services(service, &mut old_state, &webvh_did)?;
+
+    let did_doc = serde_json::to_string(&old_state)
+        .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't serialize state: {}", e)))?;
+
+    // Replace the existing did:webvh:<SCID> with did:web
+    let re = Regex::new(r"(did:webvh:[^:]+)")
+        .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't create regex: {}", e)))?;
+    let new_did_doc = re.replace_all(&did_doc, "did:web");
+
+    let mut new_state: Value = serde_json::from_str(&new_did_doc)
+        .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't parse new state: {}", e)))?;
+
     // Set the DID id
     new_state
         .as_object_mut()
         .unwrap()
-        .insert("id".to_string(), Value::String(new_did.clone()));
+        .insert("id".to_string(), Value::String(web_did.clone()));
 
     // Reset the controller to be the webvh original ID
     new_state
         .as_object_mut()
         .unwrap()
-        .insert("controller".to_string(), Value::String(old_did.clone()));
+        .insert("controller".to_string(), Value::String(webvh_did.clone()));
 
     // Update alsoKnownAs
     update_also_known_as(
         old_state.get("alsoKnownAs"),
         &mut new_state,
-        &old_did,
-        &new_did,
+        &webvh_did,
+        &web_did,
     )?;
-
-    // Add implicit WebVH Services if not present
-    update_implicit_services(old_state.get("service"), &mut new_state, &old_did, &new_did)?;
 
     Ok(new_state)
 }
@@ -153,84 +158,6 @@ fn update_also_known_as(
         .insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
 
     Ok(())
-}
-
-// Checks and adds implicit services if not present (#files and #whois)
-fn update_implicit_services(
-    services: Option<&Value>,
-    new_state: &mut Value,
-    old_did: &str,
-    new_did: &str,
-) -> Result<(), DIDWebVHError> {
-    let url = WebVHURL::parse_did_url(old_did)?;
-
-    let Some(services) = services else {
-        // There are no services, add the implicit services
-        new_state.as_object_mut().unwrap().insert(
-            "service".to_string(),
-            Value::Array(vec![
-                get_service_whois(new_did, &url)?,
-                get_service_files(new_did, &url)?,
-            ]),
-        );
-        return Ok(());
-    };
-
-    if let Some(services) = services.as_array() {
-        let mut has_whois = false;
-        let mut has_files = false;
-
-        for service in services {
-            if let Some(id) = service.get("id").and_then(|v| v.as_str()) {
-                if id.ends_with("#whois") {
-                    has_whois = true;
-                } else if id.ends_with("#files") {
-                    has_files = true;
-                }
-            }
-        }
-
-        let mut new_services = services.clone();
-
-        if !has_whois {
-            new_services.push(get_service_whois(new_did, &url)?);
-        }
-        if !has_files {
-            new_services.push(get_service_files(new_did, &url)?);
-        }
-
-        new_state
-            .as_object_mut()
-            .unwrap()
-            .insert("service".to_string(), Value::Array(new_services));
-    } else {
-        return Err(DIDWebVHError::DIDError(
-            "services is not an array".to_string(),
-        ));
-    }
-
-    Ok(())
-}
-
-/// id: did:web ID
-/// url: did:webvh URL
-fn get_service_whois(id: &str, url: &WebVHURL) -> Result<Value, DIDWebVHError> {
-    Ok(json!({
-        "@context": "https://identity.foundation/linked-vp/contexts/v1",
-        "id": ([id, "#whois"].concat()),
-        "type": "LinkedVerifiablePresentation",
-        "serviceEndpoint": url.get_http_whois_url()?
-    }))
-}
-
-/// id: did:web ID
-/// url: did:webvh URL
-fn get_service_files(id: &str, url: &WebVHURL) -> Result<Value, DIDWebVHError> {
-    Ok(json!({
-        "id": ([id,"#files"].concat()),
-        "type": "relativeRef",
-        "serviceEndpoint": url.get_http_files_url()?
-    }))
 }
 
 #[cfg(test)]
@@ -361,7 +288,7 @@ mod tests {
         )
         .expect("Couldn't process alsoKnownAs attribute");
 
-        assert_eq!(also_known_as.len(), 2);
+        assert_eq!(also_known_as.len(), 3);
         assert!(!also_known_as.contains(&"did:web:affinidi.com".to_string()));
         assert!(also_known_as.contains(&"did:web:unknown.com".to_string()));
         assert!(also_known_as.contains(&"did:webvh:acme1234:affinidi.com".to_string()));

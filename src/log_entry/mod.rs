@@ -79,7 +79,12 @@ pub trait LogEntryMethods {
 
     fn get_scid(&self) -> Option<String>;
 
+    /// Get the raw DID Document state
+    /// Does NOT include implied services
     fn get_state(&self) -> &Value;
+
+    /// Returns a full DID Document including implied services
+    fn get_did_document(&self) -> Result<Value, DIDWebVHError>;
 }
 
 /// Where-ever we need to create a LogEntry across versions
@@ -399,16 +404,25 @@ impl LogEntryMethods for LogEntry {
             LogEntry::Spec1_0Pre(log_entry) => log_entry.get_scid(),
         }
     }
+
     fn get_version_time(&self) -> DateTime<FixedOffset> {
         match self {
             LogEntry::Spec1_0(log_entry) => log_entry.get_version_time(),
             LogEntry::Spec1_0Pre(log_entry) => log_entry.get_version_time(),
         }
     }
+
     fn get_state(&self) -> &Value {
         match self {
             LogEntry::Spec1_0(log_entry) => log_entry.get_state(),
             LogEntry::Spec1_0Pre(log_entry) => log_entry.get_state(),
+        }
+    }
+
+    fn get_did_document(&self) -> Result<Value, DIDWebVHError> {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.get_did_document(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_did_document(),
         }
     }
 }
