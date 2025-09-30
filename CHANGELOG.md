@@ -4,8 +4,9 @@
 
 ### Release 0.1.8
 
-- **FIX:** SSI crate is no longer working due to serde private methods being removed.
-  - A patched version of the SSI crate has been forked as a temporary fix.
+- **MAINTENANCE:** Crate dependencies updated
+  - Removes a lot of the SSI crate dependencies from downstream crates simplifying
+    the build
 - **IMPROVEMENT:** Example `generate_history` now has interactive mode
   - `cargo run --release --example generate_history -- -i`
 - **IMPROVEMENT:** `get_did_document()` added to `LogEntryState` and `LogEntry`
