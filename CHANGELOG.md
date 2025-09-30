@@ -1,6 +1,6 @@
 # didwebvh-rs Changelog history
 
-## September 2025
+## 30th September 2025
 
 ### Release 0.1.8
 

@@ -17,8 +17,8 @@ default = []
 ssi = ["dep:ssi"]
 
 [dependencies]
-affinidi-data-integrity = { version = "0.2" }
-affinidi-secrets-resolver = { version = "0.1" }
+affinidi-data-integrity = "0.2"
+affinidi-secrets-resolver = "0.2"
 
 ahash = { version = "0.8", features = ["serde"] }
 base58 = "0.2"
@@ -39,7 +39,7 @@ url = "2.5"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
-affinidi-tdk = { version = "0.1" }
+affinidi-tdk = "0.2"
 
 anyhow = "1.0"
 byte-unit = "5.1"
