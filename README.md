@@ -33,7 +33,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies
-didwebvh-rs = "0.1.8"
+didwebvh-rs = "0.1.9"
 ```
 
 Then:
@@ -67,11 +67,11 @@ installed on your machine.
 cargo run --example wizard -- --help
 ```
 
-> ***WARNING:*** *This wizard will generate secrets locally on your machine, and
-display the secret on the screen.*
+> **_WARNING:_** _This wizard will generate secrets locally on your machine, and
+> display the secret on the screen._
 >
 > **The wizard is meant for demonstration purposes only. Use in a production
-environment is not recommended.**
+> environment is not recommended.**
 
 ### Default Wizard Files
 
