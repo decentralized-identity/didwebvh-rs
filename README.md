@@ -32,8 +32,8 @@ site
 Add this to your `Cargo.toml`:
 
 ```toml
-[dependencies
-didwebvh-rs = "0.1.9"
+[dependencies]
+didwebvh-rs = "0.1.10"
 ```
 
 Then:

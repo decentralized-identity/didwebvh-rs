@@ -1,5 +1,11 @@
 # didwebvh-rs Changelog history
 
+## 3rd November 2025
+
+### Release 0.1.10
+
+- **MAINTENANCE:** Updated `affinidi-secrets-resolver` to 0.4.x release
+
 ## 3rd October 2025
 
 ### Release 0.1.9
