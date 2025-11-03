@@ -16,7 +16,6 @@ use serde_json::{Value, json};
 use serde_json_canonicalizer::to_string;
 use sha2::{Digest, Sha256};
 use std::{fs::OpenOptions, io::Write};
-
 use tracing::debug;
 
 pub mod read;

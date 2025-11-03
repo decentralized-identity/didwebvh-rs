@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.1.9"
+version = "0.1.10"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -18,22 +18,22 @@ ssi = ["dep:ssi"]
 
 [dependencies]
 affinidi-data-integrity = "0.2"
-affinidi-secrets-resolver = "0.3"
+affinidi-secrets-resolver = "0.4"
 
 ahash = { version = "0.8", features = ["serde"] }
 base58 = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
 multihash = "0.19"
-regex = "1.11"
+regex = "1.12"
 reqwest = "0.12"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 serde_json_canonicalizer = "0.3.1"
-serde_with = "3.14"
+serde_with = "3.15"
 sha2 = "0.10"
 ssi = { version = "0.12", features = ["secp384r1"], optional = true }
 thiserror = "2.0"
-tokio = { version = "1.47" }
+tokio = { version = "1.48" }
 tracing = { version = "0.1" }
 url = "2.5"
 getrandom = { version = "0.3", features = ["wasm_js"] }
