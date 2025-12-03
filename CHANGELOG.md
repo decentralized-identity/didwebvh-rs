@@ -1,16 +1,21 @@
 # didwebvh-rs Changelog history
 
-## 3rd November 2025
+## 3rd December 2025
 
-### Release 0.1.10
+### Release 0.1.11
 
 - **FEATURE:** Added the wizard the ability to easily add a did:scid:vh alsoKnownAs
   alias
   - This matches with making WebVH as reusable as possible, supporting did:web and
     did:scid in parallel
-- **MAINTENANCE:** Updated `affinidi-secrets-resolver` to 0.4.x release
 - **MAINTENANCE:** Updated `affinidi-data-integrity` to 0.3.x release
 - **MAINTENANCE:** Updated downstream dependencies
+
+## 3rd November 2025
+
+### Release 0.1.10
+
+- **MAINTENANCE:** Updated `affinidi-secrets-resolver` to 0.4.x release
 
 ## 3rd October 2025
 

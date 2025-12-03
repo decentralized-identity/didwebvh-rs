@@ -33,7 +33,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.1.10"
+didwebvh-rs = "0.1.11"
 ```
 
 Then:
