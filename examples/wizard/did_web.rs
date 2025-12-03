@@ -1,12 +1,11 @@
-use std::{fs::OpenOptions, io::Write};
-
 use console::style;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 use didwebvh_rs::{DIDWebVHError, DIDWebVHState, log_entry_state::LogEntryState};
 use serde_json::Value;
+use std::{fs::OpenOptions, io::Write};
 
 // Checks to see if the did:web needs to be added to alsoKnownAs
-pub fn insert_also_known_as(did_document: &mut Value, did: &str) -> Result<(), DIDWebVHError> {
+pub fn insert_web_also_known_as(did_document: &mut Value, did: &str) -> Result<(), DIDWebVHError> {
     let did_web_id = DIDWebVHState::convert_webvh_id_to_web_id(did);
 
     if Confirm::with_theme(&ColorfulTheme::default())

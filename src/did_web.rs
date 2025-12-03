@@ -21,7 +21,7 @@ impl DIDWebVHState {
             Err(DIDWebVHError::NotFound)
         }
     }
-    ///
+
     /// Takes a did:webvh ID and converts it to a did:web ID
     pub fn convert_webvh_id_to_web_id(id: &str) -> String {
         // input: did:webvh:<SCID>:<path>
@@ -31,6 +31,22 @@ impl DIDWebVHState {
         for p in parts[3..].iter() {
             new_did.push(':');
             new_did.push_str(p);
+        }
+        new_did
+    }
+
+    /// Takes a did:webvh ID and converts it to a did:scid:vh ID
+    pub fn convert_webvh_id_to_scid_id(id: &str) -> String {
+        // input: did:webvh:<SCID>:<path>
+        let mut new_did = String::new();
+        new_did.push_str("did:scid:vh:1:");
+        let re = Regex::new(r"^did:webvh:([^:]*):(.*)$").unwrap();
+        if let Some(captures) = re.captures(id) {
+            new_did.push_str(captures.get(1).unwrap().as_str()); // scid
+            new_did.push_str("?src=");
+            if let Some(path) = captures.get(2) {
+                new_did.push_str(&path.as_str().replace(":", "/"));
+            }
         }
         new_did
     }

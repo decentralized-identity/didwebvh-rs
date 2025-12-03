@@ -3,7 +3,8 @@
 */
 
 use crate::{
-    did_web::{insert_also_known_as, save_did_web},
+    did_scid::insert_scid_also_known_as,
+    did_web::{insert_web_also_known_as, save_did_web},
     resolve::resolve,
     updating::edit_did,
     witness::witness_log_entry,
@@ -27,6 +28,7 @@ use tracing::debug;
 use tracing_subscriber::filter;
 use url::Url;
 
+mod did_scid;
 mod did_web;
 mod resolve;
 mod updating;
@@ -297,7 +299,7 @@ async fn create_new_did() -> Result<()> {
     debug!("Parameters: {parameters:#?}");
 
     // ************************************************************************
-    // Step 6: Export this as a did:web?
+    // Step 6: Export this as a did:web and did:scid?
     // ************************************************************************
 
     let export_did_web = if Confirm::with_theme(&ColorfulTheme::default())
@@ -306,11 +308,20 @@ async fn create_new_did() -> Result<()> {
         .interact()?
     {
         // Insert alsoKnownAs if not already there?
-        insert_also_known_as(&mut did_document, &webvh_did)?;
+        insert_web_also_known_as(&mut did_document, &webvh_did)?;
         true
     } else {
         false
     };
+
+    if Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt("Would you like to refer to this DID as a did:scid:vh in alsoKnownAs?")
+        .default(true)
+        .interact()?
+    {
+        // Insert alsoKnownAs if not already there?
+        insert_scid_also_known_as(&mut did_document, &webvh_did)?;
+    }
 
     // ************************************************************************
     // Step 7: Create preliminary JSON Log Entry
@@ -611,10 +622,7 @@ pub fn get_keys() -> Result<Vec<Secret>> {
                 .interact()
                 .unwrap()
             {
-                keys.push(Secret::from_multibase(
-                    "", // No controller for this key
-                    &public, &private,
-                )?);
+                keys.push(Secret::from_multibase(&private, None)?);
             }
         } else {
             // Generate a new key
