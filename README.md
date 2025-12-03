@@ -25,6 +25,7 @@ site
 - [x] DID Query Parameters versionId and versionTime implemented
 - [x] WebVH DID specification version support (v1.0 and pre-v1.0)
 - [x] Export WebVH to a did:web document
+- [x] Generate did:scid:vh alsoKnownAs alias from did:webvh DIDs
 - [x] WASM friendly for inclusion in other projects
 
 ## Usage
