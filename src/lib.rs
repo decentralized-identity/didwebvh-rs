@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn webvh_create_log_entry() {
-        let key = Secret::generate_ed25519(None);
+        let key = Secret::generate_ed25519(None, None);
 
         let state = did_doc();
 
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn webvh_create_log_entry_no_update_keys() {
-        let key = Secret::generate_ed25519(None);
+        let key = Secret::generate_ed25519(None, None);
 
         let state = did_doc();
 
@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_no_previous() {
-        let secret = Secret::generate_ed25519(None);
+        let secret = Secret::generate_ed25519(None, None);
 
         let result = DIDWebVHState::check_signing_key(
             None,
@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_no_previous_error() {
-        let secret = Secret::generate_ed25519(None);
+        let secret = Secret::generate_ed25519(None, None);
 
         let result = DIDWebVHState::check_signing_key(
             None,
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_with_previous() {
-        let secret = Secret::generate_ed25519(None);
+        let secret = Secret::generate_ed25519(None, None);
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_with_previous_error() {
-        let secret = Secret::generate_ed25519(None);
+        let secret = Secret::generate_ed25519(None, None);
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
@@ -678,7 +678,7 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_pre_rotate_no_previous() {
-        let secret = Secret::generate_ed25519(None);
+        let secret = Secret::generate_ed25519(None, None);
 
         let result = DIDWebVHState::check_signing_key(
             None,
@@ -703,9 +703,9 @@ mod tests {
 
     #[test]
     fn webvh_check_signing_key_pre_rotate_previous() {
-        let secret = Secret::generate_ed25519(None);
+        let secret = Secret::generate_ed25519(None, None);
 
-        let next = Secret::generate_ed25519(None);
+        let next = Secret::generate_ed25519(None, None);
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),

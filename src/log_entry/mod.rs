@@ -7,7 +7,10 @@ use crate::{
     parameters::Parameters,
     witness::Witnesses,
 };
-use affinidi_data_integrity::{DataIntegrityProof, verification_proof::verify_data};
+use affinidi_data_integrity::{
+    DataIntegrityProof, verification_proof::verify_data_with_public_key,
+};
+use affinidi_secrets_resolver::secrets::Secret;
 use base58::ToBase58;
 use chrono::{DateTime, FixedOffset};
 use multihash::Multihash;
@@ -36,6 +39,28 @@ pub struct MetaData {
     pub deactivated: bool,
     pub witness: Option<Witnesses>,
     pub watchers: Option<Vec<String>>,
+}
+
+pub trait PublicKey {
+    fn get_public_key_bytes(&self) -> Result<Vec<u8>, DIDWebVHError>;
+}
+
+impl PublicKey for DataIntegrityProof {
+    fn get_public_key_bytes(&self) -> Result<Vec<u8>, DIDWebVHError> {
+        // Create public key bytes from Verification Material
+        if !self.verification_method.starts_with("did:key:") {
+            return Err(DIDWebVHError::InvalidMethodIdentifier(
+                "Verification method must start with 'did:key:'".to_string(),
+            ));
+        }
+        let Some((_, public_key)) = self.verification_method.split_once('#') else {
+            return Err(DIDWebVHError::InvalidMethodIdentifier(
+                "Invalid verification method format".to_string(),
+            ));
+        };
+        Secret::decode_multikey(public_key)
+            .map_err(|e| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid public key: {e}")))
+    }
 }
 
 /// Each version of the DID gets a new log entry
@@ -282,15 +307,17 @@ impl LogEntry {
         Ok(hash_encoded.to_bytes().to_base58())
     }
 
+    /// Validates a witness proof against the log entry
     pub fn validate_witness_proof(
         &self,
         witness_proof: &DataIntegrityProof,
     ) -> Result<bool, DIDWebVHError> {
         // Verify the Data Integrity Proof against the Signing Document
-        verify_data(
+        verify_data_with_public_key(
             &json!({"versionId": &self.get_version_id()}),
             None,
             witness_proof,
+            witness_proof.get_public_key_bytes()?.as_slice(),
         )
         .map_err(|e| {
             DIDWebVHError::LogEntryError(format!("Data Integrity Proof verification failed: {e}"))

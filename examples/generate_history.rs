@@ -508,7 +508,7 @@ async fn create_log_entry(
     }
 
     // Swap a watcher node?
-    if count % 6 == 0 {
+    if count.is_multiple_of(6) {
         swap_watcher(&mut new_params)?;
     }
 
