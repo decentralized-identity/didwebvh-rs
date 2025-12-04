@@ -8,7 +8,7 @@ use crate::{
     log_entry::{LogEntryMethods, PublicKey, spec_1_0::LogEntry1_0, spec_1_0_pre::LogEntry1_0Pre},
     parameters::Parameters,
 };
-use affinidi_data_integrity::verification_proof::verify_data;
+use affinidi_data_integrity::verification_proof::verify_data_with_public_key;
 use chrono::Utc;
 use std::{
     fs::File,
@@ -102,9 +102,13 @@ impl LogEntry {
             }),
         };
 
-        let verified = verify_data(&verify_doc, None, proof).map_err(|e| {
-            DIDWebVHError::LogEntryError(format!("Signature verification failed: {e}"))
-        })?;
+        let verified = verify_data_with_public_key(
+            &verify_doc,
+            None,
+            proof,
+            proof.get_public_key_bytes()?.as_slice(),
+        )
+        .map_err(|e| DIDWebVHError::LogEntryError(format!("Signature verification failed: {e}")))?;
         if !verified.verified {
             return Err(DIDWebVHError::LogEntryError(
                 "Signature verification failed".to_string(),

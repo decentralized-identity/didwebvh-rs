@@ -2,6 +2,11 @@
 
 ## 4th December 2025
 
+### Release 0.1.13
+
+- **FIX:** Updated back to `affinid-data-integrity` 0.3.x after fixing cyclic
+  dependency issue
+
 ### Release 0.1.12
 
 - **FIX:** Downgrading `affinidi-data-integrity` to 0.2.x due to cyclic dependency
