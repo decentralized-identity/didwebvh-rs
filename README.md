@@ -34,7 +34,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.1.11"
+didwebvh-rs = "0.1.13"
 ```
 
 Then:
