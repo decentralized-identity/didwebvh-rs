@@ -7,9 +7,7 @@ use crate::{
     parameters::Parameters,
     witness::Witnesses,
 };
-use affinidi_data_integrity::{
-    DataIntegrityProof, verification_proof::verify_data_with_public_key,
-};
+use affinidi_data_integrity::{DataIntegrityProof, verification_proof::verify_data};
 use affinidi_secrets_resolver::secrets::Secret;
 use base58::ToBase58;
 use chrono::{DateTime, FixedOffset};
@@ -313,11 +311,10 @@ impl LogEntry {
         witness_proof: &DataIntegrityProof,
     ) -> Result<bool, DIDWebVHError> {
         // Verify the Data Integrity Proof against the Signing Document
-        verify_data_with_public_key(
+        verify_data(
             &json!({"versionId": &self.get_version_id()}),
             None,
             witness_proof,
-            witness_proof.get_public_key_bytes()?.as_slice(),
         )
         .map_err(|e| {
             DIDWebVHError::LogEntryError(format!("Data Integrity Proof verification failed: {e}"))

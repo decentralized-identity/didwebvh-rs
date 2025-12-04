@@ -2,9 +2,7 @@
 //! This exists as there was a period of time where some LogEntries
 //! for version 1.0 may contain nulls instead of empty arrays
 
-use affinidi_data_integrity::{
-    DataIntegrityProof, verification_proof::verify_data_with_public_key,
-};
+use affinidi_data_integrity::{DataIntegrityProof, verification_proof::verify_data};
 use base58::ToBase58;
 use chrono::{DateTime, FixedOffset};
 use multihash::Multihash;
@@ -75,13 +73,7 @@ impl LogEntry1_0Pre {
         witness_proof: &DataIntegrityProof,
     ) -> Result<bool, DIDWebVHError> {
         // Verify the Data Integrity Proof against the Signing Document
-        verify_data_with_public_key(
-            &json!({"versionId": &self.version_id}),
-            None,
-            witness_proof,
-            witness_proof.get_public_key_bytes()?.as_slice(),
-        )
-        .map_err(|e| {
+        verify_data(&json!({"versionId": &self.version_id}), None, witness_proof).map_err(|e| {
             DIDWebVHError::LogEntryError(format!("Data Integrity Proof verification failed: {e}"))
         })?;
 

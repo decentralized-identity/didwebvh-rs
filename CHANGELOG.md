@@ -1,5 +1,12 @@
 # didwebvh-rs Changelog history
 
+## 4th December 2025
+
+### Release 0.1.12
+
+- **FIX:** Downgrading `affinidi-data-integrity` to 0.2.x due to cyclic dependency
+  issue
+
 ## 3rd December 2025
 
 ### Release 0.1.11
