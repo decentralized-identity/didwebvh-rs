@@ -1,5 +1,11 @@
 # didwebvh-rs Changelog history
 
+## 1st February 2026
+
+### Release 0.1.16
+
+- **MAINTENANCE:** Updated downstream dependencies
+
 ## 4th December 2025
 
 ### Release 0.1.13 --> 0.1.15
