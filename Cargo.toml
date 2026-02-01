@@ -10,7 +10,7 @@ keywords = ["ssi"]
 publish = true
 license = "Apache-2.0"
 readme = "README.md"
-rust-version = "1.88.0"
+rust-version = "1.90.0"
 
 [features]
 default = []
@@ -39,7 +39,7 @@ url = "2.5"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
-affinidi-tdk = "0.3"
+affinidi-tdk = "0.4"
 
 anyhow = "1.0"
 byte-unit = "5.2"
