@@ -15,6 +15,9 @@
     outside of the full creation flow
 - **IMPROVEMENT:** Wizard example updated to delegate core logic to the new
   library API, reducing code duplication between the library and the example
+- **MAINTENANCE:** Updated downstream dependencies
+  - `SSI` crate updated to 0.14
+- **MAINTENANCE:** Tests added for code coverage (@82.67% code coverage)
 
 ## 1st February 2026
 

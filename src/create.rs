@@ -1065,4 +1065,391 @@ mod tests {
         let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &HashMap::default());
         assert!(result.is_err());
     }
+
+    // -----------------------------------------------------------------------
+    // ensure_did_key_id tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ensure_did_key_id_normalizes_random_id() {
+        let mut key = Secret::generate_ed25519(None, None);
+        let pub_mb = key.get_public_keymultibase().unwrap();
+        // Default id is a random base64url value, not a did:key
+        assert!(!key.id.starts_with("did:key:"));
+
+        ensure_did_key_id(&mut key).unwrap();
+
+        assert_eq!(key.id, format!("did:key:{pub_mb}#{pub_mb}"));
+    }
+
+    #[test]
+    fn ensure_did_key_id_preserves_existing() {
+        let mut key = Secret::generate_ed25519(None, None);
+        let pub_mb = key.get_public_keymultibase().unwrap();
+        let did_key_id = format!("did:key:{pub_mb}#{pub_mb}");
+        key.id = did_key_id.clone();
+
+        ensure_did_key_id(&mut key).unwrap();
+
+        // Should be unchanged
+        assert_eq!(key.id, did_key_id);
+    }
+
+    #[test]
+    fn ensure_did_key_id_explicit_kid() {
+        // Key created with an explicit kid that is already a did:key
+        let pub_mb_source = Secret::generate_ed25519(None, None);
+        let pub_mb = pub_mb_source.get_public_keymultibase().unwrap();
+        let kid = format!("did:key:{pub_mb}#{pub_mb}");
+        let mut key = Secret::generate_ed25519(Some(&kid), None);
+
+        assert_eq!(key.id, kid);
+        ensure_did_key_id(&mut key).unwrap();
+        // Still unchanged
+        assert_eq!(key.id, kid);
+    }
+
+    // -----------------------------------------------------------------------
+    // Additional builder tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn builder_also_known_as_flags() {
+        let (key, params) = key_and_params();
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
+        let config = CreateDIDConfig::builder()
+            .address("https://example.com/")
+            .authorization_key(key)
+            .did_document(doc)
+            .parameters(params)
+            .also_known_as_web(true)
+            .also_known_as_scid(true)
+            .build()
+            .unwrap();
+
+        assert!(config.also_known_as_web);
+        assert!(config.also_known_as_scid);
+    }
+
+    #[test]
+    fn builder_multiple_authorization_keys_accumulate() {
+        let key1 = Secret::generate_ed25519(None, None);
+        let key2 = Secret::generate_ed25519(None, None);
+        let (_, params) = key_and_params();
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key1);
+
+        let config = CreateDIDConfig::builder()
+            .address("https://example.com/")
+            .authorization_key(key1)
+            .authorization_key(key2)
+            .did_document(doc)
+            .parameters(params)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.authorization_keys.len(), 2);
+    }
+
+    #[test]
+    fn builder_witness_secrets_bulk_replaces() {
+        let (key, params) = key_and_params();
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
+        let w1 = Secret::generate_ed25519(None, None);
+        let w2 = Secret::generate_ed25519(None, None);
+
+        let mut bulk = HashMap::default();
+        bulk.insert("did:key:z6MkBulk".to_string(), w2);
+
+        let config = CreateDIDConfig::builder()
+            .address("https://example.com/")
+            .authorization_key(key)
+            .did_document(doc)
+            .parameters(params)
+            .witness_secret("did:key:z6MkSingle", w1)
+            .witness_secrets(bulk)
+            .build()
+            .unwrap();
+
+        // Bulk setter replaces the individual one
+        assert_eq!(config.witness_secrets.len(), 1);
+        assert!(config.witness_secrets.contains_key("did:key:z6MkBulk"));
+        assert!(!config.witness_secrets.contains_key("did:key:z6MkSingle"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Additional create_did tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn create_did_key_with_existing_did_key_id() {
+        let mut key = Secret::generate_ed25519(None, None);
+        let pub_mb = key.get_public_keymultibase().unwrap();
+        key.id = format!("did:key:{pub_mb}#{pub_mb}");
+
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![pub_mb])),
+            ..Default::default()
+        };
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
+
+        let config = CreateDIDConfig::builder()
+            .address("https://example.com/")
+            .authorization_key(key)
+            .did_document(doc)
+            .parameters(params)
+            .build()
+            .unwrap();
+
+        let result = create_did(config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn create_did_state_has_no_scid_placeholder() {
+        let (key, params) = key_and_params();
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
+        let config = CreateDIDConfig::builder()
+            .address("https://example.com/")
+            .authorization_key(key)
+            .did_document(doc)
+            .parameters(params)
+            .build()
+            .unwrap();
+
+        let result = create_did(config).unwrap();
+
+        // Verify SCID placeholder is replaced everywhere
+        let state_str = serde_json::to_string(result.log_entry.get_state()).unwrap();
+        assert!(!state_str.contains("{SCID}"));
+        assert!(!result.did.contains("{SCID}"));
+    }
+
+    #[test]
+    fn create_did_log_entry_has_proof() {
+        let (key, params) = key_and_params();
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
+        let config = CreateDIDConfig::builder()
+            .address("https://example.com/")
+            .authorization_key(key)
+            .did_document(doc)
+            .parameters(params)
+            .build()
+            .unwrap();
+
+        let result = create_did(config).unwrap();
+        assert!(!result.log_entry.get_proofs().is_empty());
+    }
+
+    #[test]
+    fn create_did_version_id_starts_with_one() {
+        let (key, params) = key_and_params();
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
+        let config = CreateDIDConfig::builder()
+            .address("https://example.com/")
+            .authorization_key(key)
+            .did_document(doc)
+            .parameters(params)
+            .build()
+            .unwrap();
+
+        let result = create_did(config).unwrap();
+        let version_id = result.log_entry.get_version_id();
+        assert!(version_id.starts_with("1-"));
+    }
+
+    #[test]
+    fn create_did_with_url_path() {
+        let (key, params) = key_and_params();
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com:dids:alice", &key);
+        let config = CreateDIDConfig::builder()
+            .address("https://example.com/dids/alice/")
+            .authorization_key(key)
+            .did_document(doc)
+            .parameters(params)
+            .build()
+            .unwrap();
+
+        let result = create_did(config).unwrap();
+        assert!(result.did.starts_with("did:webvh:"));
+        assert!(result.did.contains("example.com"));
+    }
+
+    #[test]
+    fn create_did_result_did_matches_state_id() {
+        let (key, params) = key_and_params();
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
+        let config = CreateDIDConfig::builder()
+            .address("https://example.com/")
+            .authorization_key(key)
+            .did_document(doc)
+            .parameters(params)
+            .build()
+            .unwrap();
+
+        let result = create_did(config).unwrap();
+        let state_id = result.log_entry.get_state()
+            .get("id").unwrap()
+            .as_str().unwrap();
+        assert_eq!(result.did, state_id);
+    }
+
+    // -----------------------------------------------------------------------
+    // Additional add_web_also_known_as tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn add_web_also_known_as_empty_array() {
+        let mut doc = json!({
+            "id": "did:webvh:abc123:example.com",
+            "alsoKnownAs": []
+        });
+        add_web_also_known_as(&mut doc, "did:webvh:abc123:example.com").unwrap();
+
+        let aliases = doc.get("alsoKnownAs").unwrap().as_array().unwrap();
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(aliases[0].as_str().unwrap(), "did:web:example.com");
+    }
+
+    #[test]
+    fn add_web_also_known_as_idempotent() {
+        let mut doc = json!({"id": "did:webvh:abc123:example.com"});
+        add_web_also_known_as(&mut doc, "did:webvh:abc123:example.com").unwrap();
+        add_web_also_known_as(&mut doc, "did:webvh:abc123:example.com").unwrap();
+
+        let aliases = doc.get("alsoKnownAs").unwrap().as_array().unwrap();
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(aliases[0].as_str().unwrap(), "did:web:example.com");
+    }
+
+    #[test]
+    fn add_web_also_known_as_preserves_all_existing() {
+        let mut doc = json!({
+            "id": "did:webvh:abc123:example.com",
+            "alsoKnownAs": ["did:example:a", "did:example:b", "did:web:example.com"]
+        });
+        add_web_also_known_as(&mut doc, "did:webvh:abc123:example.com").unwrap();
+
+        let aliases = doc.get("alsoKnownAs").unwrap().as_array().unwrap();
+        assert_eq!(aliases.len(), 3);
+        assert!(aliases.iter().any(|v| v.as_str() == Some("did:example:a")));
+        assert!(aliases.iter().any(|v| v.as_str() == Some("did:example:b")));
+        assert!(aliases.iter().any(|v| v.as_str() == Some("did:web:example.com")));
+    }
+
+    // -----------------------------------------------------------------------
+    // Additional add_scid_also_known_as tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn add_scid_also_known_as_empty_array() {
+        let mut doc = json!({
+            "id": "did:webvh:abc123:example.com",
+            "alsoKnownAs": []
+        });
+        add_scid_also_known_as(&mut doc, "did:webvh:abc123:example.com").unwrap();
+
+        let aliases = doc.get("alsoKnownAs").unwrap().as_array().unwrap();
+        assert_eq!(aliases.len(), 1);
+        assert!(aliases[0].as_str().unwrap().starts_with("did:scid:vh:1:"));
+    }
+
+    #[test]
+    fn add_scid_also_known_as_idempotent() {
+        let mut doc = json!({"id": "did:webvh:abc123:example.com"});
+        add_scid_also_known_as(&mut doc, "did:webvh:abc123:example.com").unwrap();
+        add_scid_also_known_as(&mut doc, "did:webvh:abc123:example.com").unwrap();
+
+        let aliases = doc.get("alsoKnownAs").unwrap().as_array().unwrap();
+        assert_eq!(aliases.len(), 1);
+    }
+
+    #[test]
+    fn add_scid_also_known_as_preserves_all_existing() {
+        let scid_id = DIDWebVHState::convert_webvh_id_to_scid_id("did:webvh:abc123:example.com");
+        let mut doc = json!({
+            "id": "did:webvh:abc123:example.com",
+            "alsoKnownAs": ["did:example:a", "did:example:b", scid_id]
+        });
+        add_scid_also_known_as(&mut doc, "did:webvh:abc123:example.com").unwrap();
+
+        let aliases = doc.get("alsoKnownAs").unwrap().as_array().unwrap();
+        assert_eq!(aliases.len(), 3);
+        assert!(aliases.iter().any(|v| v.as_str() == Some("did:example:a")));
+        assert!(aliases.iter().any(|v| v.as_str() == Some("did:example:b")));
+    }
+
+    // -----------------------------------------------------------------------
+    // Additional sign_witness_proofs tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn sign_witness_proofs_are_verifiable() {
+        let (key, _) = key_and_params();
+        let witness1 = Secret::generate_ed25519(None, None);
+        let w1_id = witness1.get_public_keymultibase().unwrap();
+
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            witness: Some(Arc::new(Witnesses::Value {
+                threshold: 1,
+                witnesses: vec![Witness { id: w1_id.clone() }],
+            })),
+            ..Default::default()
+        };
+
+        let (state, version_id) = create_log_entry_state(&key, &params);
+        let log_entry_state = state.log_entries.last().unwrap();
+
+        let mut secrets = HashMap::default();
+        secrets.insert(w1_id, witness1);
+
+        let witnesses = log_entry_state.get_active_witnesses();
+        let mut proofs = WitnessProofCollection::default();
+        sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).unwrap();
+
+        // Verify the proof can be validated by the log entry
+        let witness_proof = proofs.get_proofs(&version_id).unwrap();
+        let validation = log_entry_state.log_entry.validate_witness_proof(
+            witness_proof.proof.first().unwrap(),
+        );
+        assert!(validation.is_ok());
+    }
+
+    #[test]
+    fn sign_witness_proofs_returns_true_with_witnesses() {
+        let (key, _) = key_and_params();
+        let witness1 = Secret::generate_ed25519(None, None);
+        let w1_id = witness1.get_public_keymultibase().unwrap();
+
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            witness: Some(Arc::new(Witnesses::Value {
+                threshold: 1,
+                witnesses: vec![Witness { id: w1_id.clone() }],
+            })),
+            ..Default::default()
+        };
+
+        let (state, _) = create_log_entry_state(&key, &params);
+        let log_entry_state = state.log_entries.last().unwrap();
+
+        let mut secrets = HashMap::default();
+        secrets.insert(w1_id, witness1);
+
+        let witnesses = log_entry_state.get_active_witnesses();
+        let mut proofs = WitnessProofCollection::default();
+        let signed = sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).unwrap();
+        assert!(signed);
+    }
+
+    #[test]
+    fn sign_witness_proofs_returns_false_no_witnesses() {
+        let (key, params) = key_and_params();
+        let (state, _) = create_log_entry_state(&key, &params);
+        let log_entry = state.log_entries.last().unwrap();
+
+        let mut proofs = WitnessProofCollection::default();
+        let signed = sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default()).unwrap();
+        assert!(!signed);
+    }
 }
