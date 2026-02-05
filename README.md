@@ -27,6 +27,7 @@ site
 - [x] Export WebVH to a did:web document
 - [x] Generate did:scid:vh alsoKnownAs alias from did:webvh DIDs
 - [x] WASM friendly for inclusion in other projects
+- [x] WebVH DID Create routines to make it easier to create DIDs programmatically
 
 ## Usage
 
@@ -34,7 +35,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.1.16"
+didwebvh-rs = "0.1.17"
 ```
 
 Then:
@@ -109,6 +110,84 @@ This tool will save the output to
 
 - did.jsonl (LogEntries)
 - did-witness.json (Witness Proofs)
+
+## Creating a DID Programmatically
+
+The `create` module provides a library API for creating a DID without any
+interactive prompts. Use `CreateDIDConfig::builder()` to construct the
+configuration:
+
+```rust
+use didwebvh_rs::{
+    create::{CreateDIDConfig, create_did},
+    parameters::Parameters,
+};
+use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
+use serde_json::json;
+use std::sync::Arc;
+
+// Generate or load a signing key
+let signing_key = Secret::generate_ed25519(None, None);
+
+// Build parameters with the signing key as an update key
+let parameters = Parameters {
+    update_keys: Some(Arc::new(vec![
+        signing_key.get_public_keymultibase().unwrap(),
+    ])),
+    portable: Some(true),
+    ..Default::default()
+};
+
+// Build the DID document
+let did_document = json!({
+    "id": "did:webvh:{SCID}:example.com",
+    "@context": ["https://www.w3.org/ns/did/v1"],
+    "verificationMethod": [{
+        "id": "did:webvh:{SCID}:example.com#key-0",
+        "type": "Multikey",
+        "publicKeyMultibase": signing_key.get_public_keymultibase().unwrap(),
+        "controller": "did:webvh:{SCID}:example.com"
+    }],
+    "authentication": ["did:webvh:{SCID}:example.com#key-0"],
+    "assertionMethod": ["did:webvh:{SCID}:example.com#key-0"],
+});
+
+// Create the DID
+let config = CreateDIDConfig::builder()
+    .address("https://example.com/")
+    .authorization_key(signing_key)
+    .did_document(did_document)
+    .parameters(parameters)
+    .also_known_as_web(true)
+    .also_known_as_scid(true)
+    .build()
+    .unwrap();
+
+let result = create_did(config).unwrap();
+
+// result.did        — the resolved DID identifier (with SCID)
+// result.log_entry  — the signed first log entry (serialize to JSON for did.jsonl)
+// result.witness_proofs — witness proofs (empty if no witnesses configured)
+```
+
+### Witness Support
+
+If your DID uses witnesses, provide the witness secrets via the builder:
+
+```rust
+// For each witness, add its DID and secret
+let config = CreateDIDConfig::builder()
+    .address("https://example.com/")
+    .authorization_key(signing_key)
+    .did_document(did_document)
+    .parameters(parameters)
+    .witness_secret("z6Mkw...", witness_key)
+    .build()
+    .unwrap();
+```
+
+The `sign_witness_proofs()` function is also available separately if you need
+to sign witness proofs outside of the full DID creation flow.
 
 ## License
 

@@ -1,5 +1,21 @@
 # didwebvh-rs Changelog history
 
+## 5th February 2026
+
+### Release 0.1.17
+
+- **FEATURE:** New `create` module with a library API for programmatic DID creation
+  - `create_did()` encapsulates the full DID creation flow (log entry creation,
+    validation, witness signing) without any interactive prompts
+  - `CreateDIDConfig::builder()` provides a fluent builder for constructing the
+    configuration
+  - `add_web_also_known_as()` and `add_scid_also_known_as()` are non-interactive
+    helpers for adding aliases to the DID document
+  - `sign_witness_proofs()` is a standalone function for signing witness proofs
+    outside of the full creation flow
+- **IMPROVEMENT:** Wizard example updated to delegate core logic to the new
+  library API, reducing code duplication between the library and the example
+
 ## 1st February 2026
 
 ### Release 0.1.16
