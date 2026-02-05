@@ -18,6 +18,7 @@ use std::{fmt, sync::Arc};
 use thiserror::Error;
 use tracing::debug;
 
+pub mod create;
 pub mod did_web;
 pub mod log_entry;
 pub mod log_entry_state;
