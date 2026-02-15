@@ -221,6 +221,8 @@ pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWeb
         add_scid_also_known_as(&mut config.did_document, &webvh_did)?;
     }
 
+    replace_did_placeholder(&mut config.did_document, &webvh_did);
+
     // Ensure authorization keys have proper did:key IDs for Data Integrity Proofs
     for key in &mut config.authorization_keys {
         ensure_did_key_id(key)?;
@@ -267,6 +269,36 @@ pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWeb
         log_entry,
         witness_proofs,
     })
+}
+
+/// Recursively replaces all occurrences of the string "{DID}" in leaf string values of a JSON document.
+///
+/// Traverses the provided `did_document` (serde_json::Value), and for every string value found,
+/// replaces all instances of "{DID}" with the provided `did` value. This is useful for templating
+/// DID documents where placeholders need to be replaced with the actual DID.
+///
+/// # Arguments
+/// * `did_document` - A mutable reference to a serde_json::Value representing the DID document.
+/// * `did` - The DID string to substitute for the "{DID}" placeholder.
+fn replace_did_placeholder(did_document: &mut Value, did: &String) {
+    match did_document {
+        Value::Object(map) => {
+            for value in map.values_mut() {
+                replace_did_placeholder(value, did);
+            }
+        }
+        Value::Array(arr) => {
+            for value in arr.iter_mut() {
+                replace_did_placeholder(value, did);
+            }
+        }
+        Value::String(s) => {
+            if s.contains("{DID}") {
+                *s = s.replace("{DID}", did);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Add a `did:web` alias to `alsoKnownAs` in the DID document (non-interactive).
@@ -1451,5 +1483,63 @@ mod tests {
         let mut proofs = WitnessProofCollection::default();
         let signed = sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default()).unwrap();
         assert!(!signed);
+    }
+
+    #[test]
+    fn replace_did_placeholder_replaces_all_occurrences() {
+        let did = "did:webvh:abc:example.com".to_string();
+
+        let mut did_document = json!({
+            "id": "{DID}",
+            "@context": ["https://www.w3.org/ns/did/v1"],
+            "verificationMethod": [{
+                "id": "{DID}#key-0",
+                "type": "Multikey",
+                "publicKeyMultibase": "abcd",
+                "controller": "{DID}"
+            }],
+            "authentication": ["{DID}#key-0"],
+            "assertionMethod": ["{DID}#key-0"],
+        });
+
+        let expected_document = json!({
+            "id": "did:webvh:abc:example.com",
+            "@context": ["https://www.w3.org/ns/did/v1"],
+            "verificationMethod": [{
+                "id": "did:webvh:abc:example.com#key-0",
+                "type": "Multikey",
+                "publicKeyMultibase": "abcd",
+                "controller": did
+            }],
+            "authentication": ["did:webvh:abc:example.com#key-0"],
+            "assertionMethod": ["did:webvh:abc:example.com#key-0"],
+        });
+
+        replace_did_placeholder(&mut did_document, &did);
+
+        assert_eq!(did_document, expected_document);
+    }
+
+    #[test]
+    fn replace_did_placeholder_no_op() {
+        let did = "did:webvh:abc:example.com".to_string();
+
+        let mut did_document = json!({
+            "a": 1,
+            "b": {
+                "c": null
+            }
+        });
+
+        let expected_document = json!({
+            "a": 1,
+            "b": {
+                "c": null
+            }
+        });
+
+        replace_did_placeholder(&mut did_document, &did);
+
+        assert_eq!(did_document, expected_document);
     }
 }
