@@ -1,13 +1,12 @@
+use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::{
     create::{CreateDIDConfig, create_did},
     parameters::Parameters,
 };
-use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use serde_json::json;
 use std::sync::Arc;
 
 fn main() {
-
     // Generate or load a signing key
     let signing_key = Secret::generate_ed25519(None, None);
 
@@ -21,7 +20,7 @@ fn main() {
     };
 
     // Build the DID document
-    // "{DID}" can be used a placehoder that will be replaced by the builder with the final value
+    // "{DID}" can be used a placeholder that will be replaced by the builder with the final value
     let did_document = json!({
         "id": "{DID}",
         "@context": ["https://www.w3.org/ns/did/v1"],
@@ -52,5 +51,9 @@ fn main() {
     // result.log_entry  — the signed first log entry (serialize to JSON for did.jsonl)
     // result.witness_proofs — witness proofs (empty if no witnesses configured)
     println!("DID: {}", result.did);
-    println!("Log Entry: {}", serde_json::to_string_pretty(&result.log_entry).unwrap());
+    println!(
+        "Log Entry: {}",
+        serde_json::to_string_pretty(&result.log_entry).unwrap()
+    );
 }
+
