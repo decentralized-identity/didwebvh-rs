@@ -64,6 +64,14 @@ impl LogEntry {
             ));
         };
 
+        // Ensure proofPurpose is assertionMethod as required by the spec
+        if proof.proof_purpose != "assertionMethod" {
+            return Err(DIDWebVHError::ValidationError(format!(
+                "Invalid proofPurpose '{}': must be 'assertionMethod'",
+                proof.proof_purpose
+            )));
+        }
+
         // Ensure the Parameters are correctly setup
         let parameters = match self.get_parameters().validate(previous_parameters) {
             Ok(params) => params,
@@ -306,6 +314,8 @@ impl LogEntry {
 mod tests {
     use std::sync::Arc;
 
+    use affinidi_data_integrity::{DataIntegrityProof, crypto_suites::CryptoSuite};
+    use crate::DIDWebVHError;
     use crate::log_entry::LogEntry;
     use crate::log_entry::spec_1_0::LogEntry1_0;
     use crate::parameters::Parameters;
@@ -335,6 +345,37 @@ mod tests {
             state: json!({"id": "did:webvh:abc123:example.com"}),
             proof: vec![],
         })
+    }
+
+    /// Tests that all non-assertionMethod proof purposes are rejected.
+    /// Expected: Each bad purpose returns a ValidationError mentioning "assertionMethod".
+    /// This matters because the WebVH spec mandates assertionMethod as the only
+    /// valid proof purpose for log entry signatures.
+    #[test]
+    fn test_invalid_proof_purpose_rejected() {
+        for bad_purpose in ["authentication", "keyAgreement", "capabilityInvocation", ""] {
+            let entry = LogEntry::Spec1_0(LogEntry1_0 {
+                version_id: "1-abcdef".to_string(),
+                version_time: Utc::now().fixed_offset(),
+                parameters: Parameters1_0::default(),
+                state: json!({}),
+                proof: vec![DataIntegrityProof {
+                    type_: "DataIntegrityProof".to_string(),
+                    cryptosuite: CryptoSuite::EddsaJcs2022,
+                    created: None,
+                    verification_method: "did:key:z6Mk#z6Mk".to_string(),
+                    proof_purpose: bad_purpose.to_string(),
+                    proof_value: Some("zDummy".to_string()),
+                    context: None,
+                }],
+            });
+
+            let result = entry.verify_log_entry(None, None);
+            assert!(
+                matches!(result, Err(DIDWebVHError::ValidationError(ref msg)) if msg.contains("assertionMethod")),
+                "Expected assertionMethod error for proofPurpose '{bad_purpose}', got: {result:?}",
+            );
+        }
     }
 
     #[test]
