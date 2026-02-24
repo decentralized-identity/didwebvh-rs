@@ -286,6 +286,332 @@ mod tests {
         assert!(diff.is_some_and(|a| a.first().unwrap().as_str() == "new"));
     }
 
+    // ****** Witness parameter tests
+
+    /// Helper to create a minimal valid first-entry Parameters
+    fn first_entry_params() -> Parameters {
+        Parameters {
+            scid: Some(Arc::new(SCID_HOLDER.to_string())),
+            update_keys: Some(Arc::new(vec![
+                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY".to_string(),
+            ])),
+            ..Default::default()
+        }
+    }
+
+    fn sample_witnesses() -> Arc<Witnesses> {
+        Arc::new(Witnesses::Value {
+            threshold: 1,
+            witnesses: vec![Witness {
+                id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+            }],
+        })
+    }
+
+    fn sample_witnesses_2() -> Arc<Witnesses> {
+        Arc::new(Witnesses::Value {
+            threshold: 2,
+            witnesses: vec![
+                Witness {
+                    id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+                },
+                Witness {
+                    id: "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp".to_string(),
+                },
+            ],
+        })
+    }
+
+    // -- First log entry validate() tests --
+
+    #[test]
+    fn validate_first_entry_witness_none() {
+        let params = first_entry_params();
+        let validated = params.validate(None).expect("Should succeed");
+        assert!(validated.witness.is_none());
+        assert!(validated.active_witness.is_none());
+    }
+
+    #[test]
+    fn validate_first_entry_witness_empty_object() {
+        // witness: {} is valid per spec — means no witnesses configured
+        let params = Parameters {
+            witness: Some(Arc::new(Witnesses::Empty {})),
+            ..first_entry_params()
+        };
+        let validated = params.validate(None).expect("witness: {} on first entry should succeed");
+        assert!(validated.witness.is_none());
+        assert!(validated.active_witness.is_none());
+    }
+
+    #[test]
+    fn validate_first_entry_witness_with_values() {
+        let params = Parameters {
+            witness: Some(sample_witnesses()),
+            ..first_entry_params()
+        };
+        let validated = params.validate(None).expect("Should succeed");
+        assert!(validated.witness.is_some());
+        assert!(validated.active_witness.is_some());
+        assert!(!validated.witness.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn validate_first_entry_witness_invalid_threshold() {
+        let params = Parameters {
+            witness: Some(Arc::new(Witnesses::Value {
+                threshold: 0,
+                witnesses: vec![Witness {
+                    id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+                }],
+            })),
+            ..first_entry_params()
+        };
+        assert!(params.validate(None).is_err());
+    }
+
+    #[test]
+    fn validate_first_entry_witness_threshold_exceeds_count() {
+        let params = Parameters {
+            witness: Some(Arc::new(Witnesses::Value {
+                threshold: 3,
+                witnesses: vec![Witness {
+                    id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+                }],
+            })),
+            ..first_entry_params()
+        };
+        assert!(params.validate(None).is_err());
+    }
+
+    // -- Subsequent log entry validate() tests --
+
+    #[test]
+    fn validate_subsequent_witness_absent_inherits_none() {
+        let previous = Parameters {
+            witness: None,
+            active_witness: None,
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: None,
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Should succeed");
+        assert!(validated.witness.is_none());
+        assert!(validated.active_witness.is_none());
+    }
+
+    #[test]
+    fn validate_subsequent_witness_absent_inherits_value() {
+        let previous = Parameters {
+            witness: Some(sample_witnesses()),
+            active_witness: Some(sample_witnesses()),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: None,
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Should succeed");
+        // Inherits previous witness config
+        assert!(validated.witness.is_some());
+        assert!(validated.active_witness.is_some());
+    }
+
+    #[test]
+    fn validate_subsequent_witness_empty_deactivates() {
+        // Setting witness: {} on a subsequent entry deactivates witnessing
+        let previous = Parameters {
+            witness: Some(sample_witnesses()),
+            active_witness: Some(sample_witnesses()),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: Some(Arc::new(Witnesses::Empty {})),
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Deactivating witnesses should succeed");
+        // witness config cleared, but active_witness still set for this entry's proof requirements
+        assert!(validated.witness.is_none());
+        assert!(validated.active_witness.is_some());
+    }
+
+    #[test]
+    fn validate_subsequent_witness_new_value() {
+        let previous = Parameters {
+            witness: Some(sample_witnesses()),
+            active_witness: Some(sample_witnesses()),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: Some(sample_witnesses_2()),
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Should succeed");
+        // New witness config set, active_witness uses previous entry's witnesses
+        assert_eq!(validated.witness, Some(sample_witnesses_2()));
+        assert_eq!(validated.active_witness, Some(sample_witnesses()));
+    }
+
+    #[test]
+    fn validate_subsequent_witness_activate_from_none() {
+        let previous = Parameters {
+            witness: None,
+            active_witness: None,
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: Some(sample_witnesses()),
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Activating witnesses should succeed");
+        assert_eq!(validated.witness, Some(sample_witnesses()));
+        // active_witness is previous (None) — new witnesses take effect after publication
+        assert!(validated.active_witness.is_none());
+    }
+
+    // -- diff_witness() tests --
+
+    #[test]
+    fn diff_witness_both_absent() {
+        let diff = Parameters::diff_witness(&None, &None).expect("Should succeed");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_witness_current_absent() {
+        // Current None means "keep previous", so diff is None
+        let diff = Parameters::diff_witness(&Some(sample_witnesses()), &None)
+            .expect("Should succeed");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_witness_previous_absent_current_empty() {
+        // Absent -> Empty = emit Empty (deactivation from no prior state)
+        let diff =
+            Parameters::diff_witness(&None, &Some(Arc::new(Witnesses::Empty {})))
+                .expect("Should succeed");
+        assert!(diff.is_some());
+        assert!(diff.unwrap().is_empty());
+    }
+
+    #[test]
+    fn diff_witness_previous_value_current_empty() {
+        // Value -> Empty = emit Empty (deactivation)
+        let diff = Parameters::diff_witness(
+            &Some(sample_witnesses()),
+            &Some(Arc::new(Witnesses::Empty {})),
+        )
+        .expect("Should succeed");
+        assert!(diff.is_some());
+        assert!(diff.unwrap().is_empty());
+    }
+
+    #[test]
+    fn diff_witness_both_empty() {
+        // Both empty -> no change (not an error)
+        let diff = Parameters::diff_witness(
+            &Some(Arc::new(Witnesses::Empty {})),
+            &Some(Arc::new(Witnesses::Empty {})),
+        )
+        .expect("Both empty should not error");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_witness_same_value() {
+        // Same value -> no change
+        let diff = Parameters::diff_witness(&Some(sample_witnesses()), &Some(sample_witnesses()))
+            .expect("Should succeed");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_witness_different_value() {
+        // Different values -> emit new value
+        let diff =
+            Parameters::diff_witness(&Some(sample_witnesses()), &Some(sample_witnesses_2()))
+                .expect("Should succeed");
+        assert_eq!(diff, Some(sample_witnesses_2()));
+    }
+
+    #[test]
+    fn diff_witness_absent_to_value() {
+        // None -> Value = emit new value
+        let diff = Parameters::diff_witness(&None, &Some(sample_witnesses()))
+            .expect("Should succeed");
+        assert_eq!(diff, Some(sample_witnesses()));
+    }
+
+    #[test]
+    fn diff_witness_empty_to_value() {
+        // Empty -> Value = emit new value (activation)
+        let diff = Parameters::diff_witness(
+            &Some(Arc::new(Witnesses::Empty {})),
+            &Some(sample_witnesses()),
+        )
+        .expect("Should succeed");
+        assert_eq!(diff, Some(sample_witnesses()));
+    }
+
+    // -- Serialization tests --
+
+    #[test]
+    fn witness_empty_serializes_to_empty_object() {
+        let w = Witnesses::Empty {};
+        let json = serde_json::to_string(&w).unwrap();
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn witness_empty_deserializes_from_empty_object() {
+        let w: Witnesses = serde_json::from_str("{}").unwrap();
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn witness_value_roundtrips() {
+        let w = Witnesses::Value {
+            threshold: 2,
+            witnesses: vec![
+                Witness {
+                    id: "witness1".to_string(),
+                },
+                Witness {
+                    id: "witness2".to_string(),
+                },
+            ],
+        };
+        let json = serde_json::to_string(&w).unwrap();
+        let w2: Witnesses = serde_json::from_str(&json).unwrap();
+        assert_eq!(w, w2);
+    }
+
+    #[test]
+    fn parameters_with_witness_empty_serializes_without_witness() {
+        // After validation, witness: {} on first entry is normalized to None,
+        // so it should not appear in serialized output
+        let params = Parameters {
+            witness: Some(Arc::new(Witnesses::Empty {})),
+            ..first_entry_params()
+        };
+        let validated = params.validate(None).unwrap();
+        let json = serde_json::to_value(&validated).unwrap();
+        assert!(json.get("witness").is_none());
+    }
+
     #[test]
     fn diff_update_keys_pre_rotation_empty() {
         let previous = Parameters {

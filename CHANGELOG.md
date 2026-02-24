@@ -1,5 +1,22 @@
 # didwebvh-rs Changelog history
 
+## 25th February 2026
+
+### Release 0.2.0
+
+- **FIX:** Witness parameter `{}` (empty object) now correctly handled per the
+  did:webvh v1.0 specification
+  - First log entry with `"witness":{}` no longer rejected during validation;
+    it is treated as "no witnesses configured"
+  - Subsequent log entries repeating `"witness":{}` no longer error in diff
+    calculation; treated as no change
+  - Fixes interoperability with other did:webvh implementations (e.g. didwebvh-ts)
+- **MAINTENANCE:** Updated downstream dependencies
+  - `ssi` crate updated from 0.14 to 0.15
+  - `rand` crate updated from 0.9 to 0.10 (dev-dependency)
+- **MAINTENANCE:** Added comprehensive witness parameter tests covering
+  validation, diff, and serialization scenarios
+
 ## 5th February 2026
 
 ### Release 0.1.17
