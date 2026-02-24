@@ -818,10 +818,36 @@ mod tests {
 
     use super::Parameters1_0;
 
-    #[test]
-    fn parameters_1_0_roundtrip_with_all_empty_values() {
-        // Simulates the didwebvh-ts first entry parameters
+    /// Helper: assert that a Parameters1_0 JSON round-trips losslessly
+    fn assert_params_roundtrip(json: serde_json::Value) {
+        let params: Parameters1_0 = serde_json::from_value(json.clone())
+            .expect("Parameters1_0 deserialization failed");
+        let re_serialized = serde_json::to_value(&params)
+            .expect("Parameters1_0 re-serialization failed");
+        assert_eq!(json, re_serialized, "Parameters1_0 round-trip must be lossless");
+    }
+
+    /// Helper: assert a field is absent after round-trip when omitted from JSON
+    fn assert_field_absent_roundtrip(field: &str) {
         let json = serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test-scid",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"]
+        });
+        let params: Parameters1_0 = serde_json::from_value(json).unwrap();
+        let re_serialized = serde_json::to_value(&params).unwrap();
+        assert!(
+            re_serialized.get(field).is_none(),
+            "{field} must be absent when not in source JSON"
+        );
+    }
+
+    // -- Full round-trip: all fields present with empty/default values --
+
+    #[test]
+    fn roundtrip_all_empty_values() {
+        // Simulates the didwebvh-ts first entry parameters
+        assert_params_roundtrip(serde_json::json!({
             "method": "did:webvh:1.0",
             "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
             "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"],
@@ -830,81 +856,286 @@ mod tests {
             "watchers": [],
             "witness": {},
             "deactivated": false
-        });
-
-        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
-        let re_serialized = serde_json::to_value(&params).unwrap();
-
-        assert_eq!(json, re_serialized, "Parameters1_0 round-trip must be lossless");
+        }));
     }
 
+    // -- Full round-trip: all fields present with actual values --
+
     #[test]
-    fn parameters_1_0_roundtrip_minimal() {
-        // Only required fields, no optional fields
-        let json = serde_json::json!({
+    fn roundtrip_all_actual_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"],
+            "portable": true,
+            "nextKeyHashes": ["zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155"],
+            "watchers": ["https://watcher.example.com"],
+            "witness": {
+                "threshold": 1,
+                "witnesses": [{"id": "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"}]
+            },
+            "deactivated": false,
+            "ttl": 7200
+        }));
+    }
+
+    // -- Full round-trip: minimal (only required fields) --
+
+    #[test]
+    fn roundtrip_minimal() {
+        assert_params_roundtrip(serde_json::json!({
             "method": "did:webvh:1.0",
             "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
             "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"]
-        });
+        }));
+    }
 
+    // -- Per-field: method --
+
+    #[test]
+    fn roundtrip_method_absent() {
+        // method is optional on subsequent entries
+        let json = serde_json::json!({
+            "scid": "test",
+            "updateKeys": ["key1"]
+        });
         let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
         let re_serialized = serde_json::to_value(&params).unwrap();
-
-        assert_eq!(json, re_serialized, "Minimal parameters round-trip must be lossless");
+        assert!(re_serialized.get("method").is_none());
+        assert_eq!(json, re_serialized);
     }
 
     #[test]
-    fn parameters_1_0_roundtrip_deactivated_false_preserved() {
-        let json = serde_json::json!({
+    fn roundtrip_method_present() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"]
+        }));
+    }
+
+    // -- Per-field: scid --
+
+    #[test]
+    fn roundtrip_scid_absent() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "updateKeys": ["key1"]
+        }));
+    }
+
+    #[test]
+    fn roundtrip_scid_present() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
+            "updateKeys": ["key1"]
+        }));
+    }
+
+    // -- Per-field: updateKeys --
+
+    #[test]
+    fn roundtrip_update_keys_absent() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test"
+        }));
+    }
+
+    #[test]
+    fn roundtrip_update_keys_empty() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": []
+        }));
+    }
+
+    #[test]
+    fn roundtrip_update_keys_with_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT", "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"]
+        }));
+    }
+
+    // -- Per-field: portable --
+
+    #[test]
+    fn roundtrip_portable_absent() {
+        assert_field_absent_roundtrip("portable");
+    }
+
+    #[test]
+    fn roundtrip_portable_false() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "portable": false
+        }));
+    }
+
+    #[test]
+    fn roundtrip_portable_true() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "portable": true
+        }));
+    }
+
+    // -- Per-field: nextKeyHashes --
+
+    #[test]
+    fn roundtrip_next_key_hashes_absent() {
+        assert_field_absent_roundtrip("nextKeyHashes");
+    }
+
+    #[test]
+    fn roundtrip_next_key_hashes_empty() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "nextKeyHashes": []
+        }));
+    }
+
+    #[test]
+    fn roundtrip_next_key_hashes_with_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "nextKeyHashes": ["zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155", "zQmctZhRGCKrE2R58K9rkfA1aUL74mecrrJRvicz42resii"]
+        }));
+    }
+
+    // -- Per-field: witness --
+
+    #[test]
+    fn roundtrip_witness_absent() {
+        assert_field_absent_roundtrip("witness");
+    }
+
+    #[test]
+    fn roundtrip_witness_empty_object() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "witness": {}
+        }));
+    }
+
+    #[test]
+    fn roundtrip_witness_with_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "witness": {
+                "threshold": 2,
+                "witnesses": [
+                    {"id": "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"},
+                    {"id": "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"}
+                ]
+            }
+        }));
+    }
+
+    // -- Per-field: watchers --
+
+    #[test]
+    fn roundtrip_watchers_absent() {
+        assert_field_absent_roundtrip("watchers");
+    }
+
+    #[test]
+    fn roundtrip_watchers_empty() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "watchers": []
+        }));
+    }
+
+    #[test]
+    fn roundtrip_watchers_with_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "watchers": ["https://watcher1.example.com", "https://watcher2.example.com"]
+        }));
+    }
+
+    // -- Per-field: deactivated --
+
+    #[test]
+    fn roundtrip_deactivated_absent() {
+        assert_field_absent_roundtrip("deactivated");
+    }
+
+    #[test]
+    fn roundtrip_deactivated_false() {
+        assert_params_roundtrip(serde_json::json!({
             "method": "did:webvh:1.0",
             "scid": "test",
             "updateKeys": ["key1"],
             "deactivated": false
-        });
-
-        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
-        let re_serialized = serde_json::to_value(&params).unwrap();
-
-        assert_eq!(
-            re_serialized.get("deactivated"),
-            Some(&serde_json::json!(false)),
-            "deactivated:false must be preserved in round-trip"
-        );
+        }));
     }
 
     #[test]
-    fn parameters_1_0_roundtrip_deactivated_absent_stays_absent() {
-        let json = serde_json::json!({
-            "method": "did:webvh:1.0",
-            "scid": "test",
-            "updateKeys": ["key1"]
-        });
-
-        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
-        let re_serialized = serde_json::to_value(&params).unwrap();
-
-        assert!(
-            re_serialized.get("deactivated").is_none(),
-            "absent deactivated must remain absent in round-trip"
-        );
-    }
-
-    #[test]
-    fn parameters_1_0_roundtrip_deactivated_true() {
-        let json = serde_json::json!({
+    fn roundtrip_deactivated_true() {
+        assert_params_roundtrip(serde_json::json!({
             "method": "did:webvh:1.0",
             "scid": "test",
             "updateKeys": [],
             "deactivated": true
-        });
+        }));
+    }
 
-        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
-        let re_serialized = serde_json::to_value(&params).unwrap();
+    // -- Per-field: ttl --
 
-        assert_eq!(
-            re_serialized.get("deactivated"),
-            Some(&serde_json::json!(true)),
-            "deactivated:true must be preserved"
-        );
+    #[test]
+    fn roundtrip_ttl_absent() {
+        assert_field_absent_roundtrip("ttl");
+    }
+
+    #[test]
+    fn roundtrip_ttl_zero() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "ttl": 0
+        }));
+    }
+
+    #[test]
+    fn roundtrip_ttl_default() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "ttl": 3600
+        }));
+    }
+
+    #[test]
+    fn roundtrip_ttl_custom() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "ttl": 86400
+        }));
     }
 }
