@@ -252,11 +252,8 @@ impl Parameters {
             if let Some(previous) = previous
                 && previous.is_empty()
             {
-                // attribute was already empty, and thus setting it again to empty would be
-                // invalid
-                return Err(DIDWebVHError::ParametersError(
-                    "Witnesses cannot be empty when previous was also empty!".to_string(),
-                ));
+                // Both empty, no change
+                return Ok(None);
             }
             Ok(Some(Arc::new(Witnesses::Empty {})))
         } else {
@@ -444,10 +441,16 @@ impl Parameters {
                     new_parameters.witness = None;
                 }
                 Some(witnesses) => {
-                    // Replace witness with the new value
-                    witnesses.validate()?;
-                    new_parameters.witness = Some(witnesses.clone());
-                    new_parameters.active_witness = Some(witnesses.clone());
+                    if witnesses.is_empty() {
+                        // Empty witness object means no witnesses configured
+                        new_parameters.active_witness = None;
+                        new_parameters.witness = None;
+                    } else {
+                        // Replace witness with the new value
+                        witnesses.validate()?;
+                        new_parameters.witness = Some(witnesses.clone());
+                        new_parameters.active_witness = Some(witnesses.clone());
+                    }
                 }
             }
         }
