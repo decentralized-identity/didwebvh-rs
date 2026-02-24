@@ -4,6 +4,15 @@
 
 ### Release 0.2.0
 
+- **IMPROVEMENT:** `resolve()` now conditionally downloads `did-witness.json`
+  - New `eager_witness_download` parameter controls download strategy
+  - `false` (default): downloads `did.jsonl` first, only fetches witness proofs
+    when log entries actually configure witnesses — avoids unnecessary network
+    requests and suppresses the warning for DIDs without witnesses
+  - `true`: downloads both files concurrently (previous behavior, useful when
+    witnesses are expected)
+  - When witnesses are configured but the witness proof file cannot be
+    downloaded, an error is returned instead of silently using empty proofs
 - **FIX:** Witness parameter `{}` (empty object) now correctly handled per the
   did:webvh v1.0 specification
   - First log entry with `"witness":{}` no longer rejected during validation;
@@ -29,6 +38,7 @@
   - `rand` crate updated from 0.9 to 0.10 (dev-dependency)
 - **MAINTENANCE:** Added comprehensive witness and watcher parameter tests
   covering validation, diff, and serialization scenarios
+- **MAINTENANCE:** Code test coverage @ 84.78%
 
 ## 5th February 2026
 

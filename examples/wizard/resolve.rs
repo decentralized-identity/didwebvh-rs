@@ -28,7 +28,7 @@ pub async fn resolve() {
     );
 
     let start = Utc::now();
-    match webvh.resolve(&did, None).await {
+    match webvh.resolve(&did, None, false).await {
         Ok((log_entry, metadata)) => {
             let end = Utc::now();
             println!(

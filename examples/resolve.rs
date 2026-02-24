@@ -35,7 +35,7 @@ async fn main() {
 async fn resolve(did: &str) -> TimeDelta {
     let mut webvh = DIDWebVHState::default();
     let start = Utc::now();
-    let (log_entry, meta) = match webvh.resolve(did, None).await {
+    let (log_entry, meta) = match webvh.resolve(did, None, false).await {
         Ok(res) => res,
         Err(e) => {
             panic!("Error: {e:?}");
