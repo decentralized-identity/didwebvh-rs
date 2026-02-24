@@ -5,7 +5,7 @@
 
 use crate::{Version, parameters::Parameters, witness::Witnesses};
 use serde::{Deserialize, Serialize};
-use std::{ops::Not, sync::Arc};
+use std::sync::Arc;
 
 /// [https://identity.foundation/didwebvh/v1.0/#didwebvh-did-method-parameters]
 /// Parameters that help with the resolution of a webvh DID
@@ -50,8 +50,8 @@ pub struct Parameters1_0 {
     pub watchers: Option<Arc<Vec<String>>>,
 
     /// Has this DID been revoked?
-    #[serde(skip_serializing_if = "<&bool>::not", default)]
-    pub deactivated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deactivated: Option<bool>,
 
     /// time to live in seconds for a resolved DID document
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,7 +69,7 @@ impl Default for Parameters1_0 {
             next_key_hashes: None,
             witness: None,
             watchers: None,
-            deactivated: false,
+            deactivated: None,
             ttl: Some(3600),
         }
     }
@@ -78,7 +78,7 @@ impl Default for Parameters1_0 {
 impl From<Parameters> for Parameters1_0 {
     fn from(value: Parameters) -> Self {
         Parameters1_0 {
-            deactivated: value.deactivated.unwrap_or_default(),
+            deactivated: value.deactivated,
             pre_rotation_active: value.pre_rotation_active,
             method: value.method.map(|_| Version::V1_0.to_string()),
             next_key_hashes: value.next_key_hashes.clone(),
@@ -95,7 +95,7 @@ impl From<Parameters> for Parameters1_0 {
 impl From<Parameters1_0> for Parameters {
     fn from(value: Parameters1_0) -> Parameters {
         Parameters {
-            deactivated: Some(value.deactivated),
+            deactivated: value.deactivated,
             pre_rotation_active: value.pre_rotation_active,
             method: value.method.map(|_| Version::V1_0),
             next_key_hashes: value.next_key_hashes.clone(),
@@ -809,5 +809,102 @@ mod tests {
             ..Default::default()
         };
         assert!(previous.diff(&current).is_err());
+    }
+
+    // ****** Parameters1_0 round-trip serialization tests
+    //
+    // These verify that deserialize → serialize produces identical JSON,
+    // which is critical for signature and entry hash verification.
+
+    use super::Parameters1_0;
+
+    #[test]
+    fn parameters_1_0_roundtrip_with_all_empty_values() {
+        // Simulates the didwebvh-ts first entry parameters
+        let json = serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"],
+            "portable": false,
+            "nextKeyHashes": [],
+            "watchers": [],
+            "witness": {},
+            "deactivated": false
+        });
+
+        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
+        let re_serialized = serde_json::to_value(&params).unwrap();
+
+        assert_eq!(json, re_serialized, "Parameters1_0 round-trip must be lossless");
+    }
+
+    #[test]
+    fn parameters_1_0_roundtrip_minimal() {
+        // Only required fields, no optional fields
+        let json = serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"]
+        });
+
+        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
+        let re_serialized = serde_json::to_value(&params).unwrap();
+
+        assert_eq!(json, re_serialized, "Minimal parameters round-trip must be lossless");
+    }
+
+    #[test]
+    fn parameters_1_0_roundtrip_deactivated_false_preserved() {
+        let json = serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "deactivated": false
+        });
+
+        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
+        let re_serialized = serde_json::to_value(&params).unwrap();
+
+        assert_eq!(
+            re_serialized.get("deactivated"),
+            Some(&serde_json::json!(false)),
+            "deactivated:false must be preserved in round-trip"
+        );
+    }
+
+    #[test]
+    fn parameters_1_0_roundtrip_deactivated_absent_stays_absent() {
+        let json = serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"]
+        });
+
+        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
+        let re_serialized = serde_json::to_value(&params).unwrap();
+
+        assert!(
+            re_serialized.get("deactivated").is_none(),
+            "absent deactivated must remain absent in round-trip"
+        );
+    }
+
+    #[test]
+    fn parameters_1_0_roundtrip_deactivated_true() {
+        let json = serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": [],
+            "deactivated": true
+        });
+
+        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
+        let re_serialized = serde_json::to_value(&params).unwrap();
+
+        assert_eq!(
+            re_serialized.get("deactivated"),
+            Some(&serde_json::json!(true)),
+            "deactivated:true must be preserved"
+        );
     }
 }
