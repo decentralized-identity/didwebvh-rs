@@ -5,7 +5,7 @@
 
 use crate::{Version, parameters::Parameters, witness::Witnesses};
 use serde::{Deserialize, Serialize};
-use std::{ops::Not, sync::Arc};
+use std::sync::Arc;
 
 /// [https://identity.foundation/didwebvh/v1.0/#didwebvh-did-method-parameters]
 /// Parameters that help with the resolution of a webvh DID
@@ -67,8 +67,8 @@ pub struct Parameters1_0Pre {
     pub watchers: Option<Option<Arc<Vec<String>>>>,
 
     /// Has this DID been revoked?
-    #[serde(skip_serializing_if = "<&bool>::not", default)]
-    pub deactivated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deactivated: Option<bool>,
 
     /// time to live in seconds for a resolved DID document
     #[serde(
@@ -90,7 +90,7 @@ impl Default for Parameters1_0Pre {
             next_key_hashes: None,
             witness: None,
             watchers: None,
-            deactivated: false,
+            deactivated: None,
             ttl: None,
         }
     }
@@ -154,7 +154,7 @@ impl From<Parameters> for Parameters1_0Pre {
         };
 
         Parameters1_0Pre {
-            deactivated: value.deactivated.unwrap_or_default(),
+            deactivated: value.deactivated,
             pre_rotation_active: value.pre_rotation_active,
             method: value.method.map(|_| Version::V1_0Pre.to_string()),
             next_key_hashes,
@@ -201,7 +201,7 @@ impl From<Parameters1_0Pre> for Parameters {
         };
 
         Parameters {
-            deactivated: Some(value.deactivated),
+            deactivated: value.deactivated,
             pre_rotation_active: value.pre_rotation_active,
             method: value.method.map(|_| Version::V1_0),
             next_key_hashes,

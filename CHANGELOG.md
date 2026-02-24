@@ -18,6 +18,12 @@
   - Repeated empty arrays `[]` for array parameters (`watchers`,
     `nextKeyHashes`, `updateKeys`) no longer error in diff calculation;
     treated as no change
+- **FIX:** `Parameters1_0` serialization round-trip now lossless for all fields
+  - `deactivated` field changed from `bool` to `Option<bool>` so that
+    `"deactivated":false` is preserved during re-serialization instead of
+    being silently dropped
+  - Fixes signature and entry hash verification failures when resolving
+    DIDs from other implementations that explicitly include all parameters
 - **MAINTENANCE:** Updated downstream dependencies
   - `ssi` crate updated from 0.14 to 0.15
   - `rand` crate updated from 0.9 to 0.10 (dev-dependency)
