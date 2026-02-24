@@ -245,14 +245,14 @@ mod tests {
 
     #[test]
     fn diff_tri_state_double_empty() {
-        assert!(
-            Parameters::diff_tri_state(
-                &Some(Arc::new(Vec::new())),
-                &Some(Arc::new(Vec::new())),
-                "test"
-            )
-            .is_err()
-        );
+        // Both empty -> no change (not an error)
+        let diff = Parameters::diff_tri_state(
+            &Some(Arc::new(Vec::new())),
+            &Some(Arc::new(Vec::new())),
+            "test",
+        )
+        .expect("Both empty should not error");
+        assert!(diff.is_none());
     }
 
     #[test]
@@ -610,6 +610,177 @@ mod tests {
         let validated = params.validate(None).unwrap();
         let json = serde_json::to_value(&validated).unwrap();
         assert!(json.get("witness").is_none());
+    }
+
+    // ****** Watcher parameter tests
+
+    // -- First log entry validate() tests --
+
+    #[test]
+    fn validate_first_entry_watchers_none() {
+        let params = first_entry_params();
+        let validated = params.validate(None).expect("Should succeed");
+        assert!(validated.watchers.is_none());
+    }
+
+    #[test]
+    fn validate_first_entry_watchers_empty_array() {
+        // watchers: [] is valid per spec — means no watchers configured
+        let params = Parameters {
+            watchers: Some(Arc::new(Vec::new())),
+            ..first_entry_params()
+        };
+        let validated = params
+            .validate(None)
+            .expect("watchers: [] on first entry should succeed");
+        assert!(validated.watchers.is_none());
+    }
+
+    #[test]
+    fn validate_first_entry_watchers_with_values() {
+        let params = Parameters {
+            watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let validated = params.validate(None).expect("Should succeed");
+        assert!(validated.watchers.is_some());
+        assert_eq!(validated.watchers.as_ref().unwrap().len(), 1);
+    }
+
+    // -- Subsequent log entry validate() tests --
+
+    #[test]
+    fn validate_subsequent_watchers_absent_inherits_none() {
+        let previous = Parameters {
+            watchers: None,
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: None,
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Should succeed");
+        assert!(validated.watchers.is_none());
+    }
+
+    #[test]
+    fn validate_subsequent_watchers_absent_inherits_value() {
+        let previous = Parameters {
+            watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: None,
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Should succeed");
+        assert_eq!(
+            validated.watchers,
+            Some(Arc::new(vec!["https://watcher.example.com".to_string()]))
+        );
+    }
+
+    #[test]
+    fn validate_subsequent_watchers_empty_deactivates() {
+        let previous = Parameters {
+            watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: Some(Arc::new(Vec::new())),
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Deactivating watchers should succeed");
+        assert!(validated.watchers.is_none());
+    }
+
+    #[test]
+    fn validate_subsequent_watchers_new_value() {
+        let previous = Parameters {
+            watchers: Some(Arc::new(vec!["https://old.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: Some(Arc::new(vec!["https://new.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Should succeed");
+        assert_eq!(
+            validated.watchers,
+            Some(Arc::new(vec!["https://new.example.com".to_string()]))
+        );
+    }
+
+    #[test]
+    fn validate_subsequent_watchers_activate_from_none() {
+        let previous = Parameters {
+            watchers: None,
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Should succeed");
+        assert!(validated.watchers.is_some());
+    }
+
+    // -- diff_tri_state watchers-specific tests --
+
+    #[test]
+    fn diff_watchers_both_empty() {
+        // Both empty -> no change
+        let diff = Parameters::diff_tri_state(
+            &Some(Arc::new(Vec::new())),
+            &Some(Arc::new(Vec::new())),
+            "watchers",
+        )
+        .expect("Both empty watchers should not error");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_watchers_value_to_empty() {
+        let diff = Parameters::diff_tri_state(
+            &Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            &Some(Arc::new(Vec::new())),
+            "watchers",
+        )
+        .expect("Should succeed");
+        assert!(diff.is_some_and(|a| a.is_empty()));
+    }
+
+    #[test]
+    fn diff_watchers_absent_to_empty() {
+        let diff = Parameters::diff_tri_state(
+            &None,
+            &Some(Arc::new(Vec::new())),
+            "watchers",
+        )
+        .expect("Should succeed");
+        assert!(diff.is_some_and(|a| a.is_empty()));
+    }
+
+    #[test]
+    fn parameters_with_watchers_empty_serializes_without_watchers() {
+        // After validation, watchers: [] on first entry is normalized to None
+        let params = Parameters {
+            watchers: Some(Arc::new(Vec::new())),
+            ..first_entry_params()
+        };
+        let validated = params.validate(None).unwrap();
+        let json = serde_json::to_value(&validated).unwrap();
+        assert!(json.get("watchers").is_none());
     }
 
     #[test]

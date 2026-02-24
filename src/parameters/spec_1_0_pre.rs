@@ -351,14 +351,14 @@ mod tests {
 
     #[test]
     fn diff_tri_state_double_empty() {
-        assert!(
-            Parameters::diff_tri_state(
-                &Some(Arc::new(Vec::new())),
-                &Some(Arc::new(Vec::new())),
-                "test"
-            )
-            .is_err()
-        );
+        // Both empty -> no change (not an error)
+        let diff = Parameters::diff_tri_state(
+            &Some(Arc::new(Vec::new())),
+            &Some(Arc::new(Vec::new())),
+            "test",
+        )
+        .expect("Both empty should not error");
+        assert!(diff.is_none());
     }
 
     #[test]

@@ -207,7 +207,7 @@ impl Parameters {
     fn diff_tri_state(
         previous: &Option<Arc<Vec<String>>>,
         current: &Option<Arc<Vec<String>>>,
-        attribute_name: &str,
+        _attribute_name: &str,
     ) -> Result<Option<Arc<Vec<String>>>, DIDWebVHError> {
         let Some(current_value) = current else {
             // If current is None, then keep previous value
@@ -218,11 +218,8 @@ impl Parameters {
             if let Some(previous) = previous
                 && previous.is_empty()
             {
-                // attribute was already empty, and thus setting it again to empty would be
-                // invalid
-                return Err(DIDWebVHError::ParametersError(format!(
-                    "{attribute_name} cannot be empty when previous was also empty!"
-                )));
+                // Both empty, no change
+                return Ok(None);
             }
             Ok(Some(Arc::new(Vec::new())))
         } else {
@@ -479,13 +476,13 @@ impl Parameters {
                     new_parameters.watchers = None;
                 }
                 Some(watchers) => {
-                    // Replace watchers with the new value
                     if watchers.is_empty() {
-                        return Err(DIDWebVHError::ParametersError(
-                            "watchers cannot be empty".to_string(),
-                        ));
+                        // Empty watchers array means no watchers configured
+                        new_parameters.watchers = None;
+                    } else {
+                        // Replace watchers with the new value
+                        new_parameters.watchers = Some(watchers.clone());
                     }
-                    new_parameters.watchers = Some(watchers.clone());
                 }
             }
         }

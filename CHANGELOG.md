@@ -11,11 +11,18 @@
   - Subsequent log entries repeating `"witness":{}` no longer error in diff
     calculation; treated as no change
   - Fixes interoperability with other did:webvh implementations (e.g. didwebvh-ts)
+- **FIX:** Watchers parameter `[]` (empty array) now correctly handled per the
+  did:webvh v1.0 specification
+  - First log entry with `"watchers":[]` no longer rejected during validation;
+    it is treated as "no watchers configured"
+  - Repeated empty arrays `[]` for array parameters (`watchers`,
+    `nextKeyHashes`, `updateKeys`) no longer error in diff calculation;
+    treated as no change
 - **MAINTENANCE:** Updated downstream dependencies
   - `ssi` crate updated from 0.14 to 0.15
   - `rand` crate updated from 0.9 to 0.10 (dev-dependency)
-- **MAINTENANCE:** Added comprehensive witness parameter tests covering
-  validation, diff, and serialization scenarios
+- **MAINTENANCE:** Added comprehensive witness and watcher parameter tests
+  covering validation, diff, and serialization scenarios
 
 ## 5th February 2026
 
