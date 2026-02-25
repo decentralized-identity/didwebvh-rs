@@ -31,10 +31,11 @@ impl DIDWebVHState {
                         "There was an issue with LogEntry: {}! Reason: {e}",
                         entry.get_version_id()
                     );
-                    warn!("Falling back to last known good LogEntry!");
                     if previous_entry.is_some() {
-                        // Return last known good LogEntry
-                        break;
+                        return Err(DIDWebVHError::ValidationError(format!(
+                            "Invalid LogEntry found! Version ID: {:?} Reason: {:?}",
+                            entry.get_version_id(), e
+                        )));
                     }
                     return Err(DIDWebVHError::ValidationError(format!(
                         "No valid LogEntry found! Reason: {e}",
