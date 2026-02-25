@@ -75,6 +75,18 @@ impl LogEntry {
         };
         debug!("Validated parameters: {parameters:#?}");
 
+        // Make sure the DID is portable if there is a previous DID and the new DIDs don't match
+        if previous_log_entry.is_some()
+            && previous_log_entry.unwrap().get_state().get("id") != self.get_state().get("id")
+            && parameters.portable != Some(true)
+        {
+            return Err(DIDWebVHError::ValidationError(format!(
+                "The DID is not portable and the previous DID ({}) does not match the current DID ({})",
+                previous_log_entry.unwrap().get_state().get("id").unwrap(),
+                self.get_state().get("id").unwrap()
+            )));
+        }
+
         // Ensure that the signed proof key is part of the authorized keys
         if !LogEntry::check_signing_key_authorized(
             &parameters.active_update_keys,
