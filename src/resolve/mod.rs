@@ -158,6 +158,40 @@ impl DIDWebVHState {
         })
     }
 
+    /// Validate that parsed log entries are non-empty, returning a contextual error.
+    fn validate_log_entries(
+        log_entries: &[LogEntryState],
+        did: &str,
+    ) -> Result<(), DIDWebVHError> {
+        if log_entries.is_empty() {
+            warn!("No LogEntries found for DID: {did}");
+            return Err(DIDWebVHError::NotFound(format!(
+                "No LogEntries found for DID: {did}",
+            )));
+        }
+        Ok(())
+    }
+
+    /// Resolve witness proofs from a download result, applying the
+    /// "witnesses configured but download failed" policy.
+    fn resolve_witness_proofs(
+        raw_result: Result<String, DIDWebVHError>,
+        needs_witnesses: bool,
+    ) -> Result<WitnessProofCollection, DIDWebVHError> {
+        match raw_result {
+            Ok(raw) => Self::parse_witness_proofs(&raw),
+            Err(e) => {
+                if needs_witnesses {
+                    Err(DIDWebVHError::WitnessProofError(format!(
+                        "Witnesses are configured but witness proofs could not be downloaded: {e}"
+                    )))
+                } else {
+                    Ok(WitnessProofCollection::default())
+                }
+            }
+        }
+    }
+
     /// Resolves a webvh DID fetched using HTTP(S)
     ///
     /// Inputs:
@@ -195,23 +229,12 @@ impl DIDWebVHState {
                     let raw_entries =
                         DIDWebVH::get_log_entries(parsed_did_url.clone(), client.clone()).await?;
                     let log_entries = Self::parse_log_entries(&raw_entries)?;
-                    if log_entries.is_empty() {
-                        warn!("No LogEntries found for DID: {did}");
-                        return Err(DIDWebVHError::NotFound);
-                    }
+                    Self::validate_log_entries(&log_entries, did)?;
 
-                    let witness_proofs = if eager_witness_download || Self::needs_witness_proofs(&log_entries) {
-                        match DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone()).await {
-                            Ok(raw) => Self::parse_witness_proofs(&raw)?,
-                            Err(e) => {
-                                if Self::needs_witness_proofs(&log_entries) {
-                                    return Err(DIDWebVHError::WitnessProofError(format!(
-                                        "Witnesses are configured but witness proofs could not be downloaded: {e}"
-                                    )));
-                                }
-                                WitnessProofCollection::default()
-                            }
-                        }
+                    let needs_witnesses = Self::needs_witness_proofs(&log_entries);
+                    let witness_proofs = if eager_witness_download || needs_witnesses {
+                        let raw_result = DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone()).await;
+                        Self::resolve_witness_proofs(raw_result, needs_witnesses)?
                     } else {
                         WitnessProofCollection::default()
                     };
@@ -228,7 +251,11 @@ impl DIDWebVHState {
                     let client = reqwest::ClientBuilder::new()
                         .timeout(network_timeout)
                         .build()
-                        .unwrap();
+                        .map_err(|e| {
+                            DIDWebVHError::NetworkError(format!(
+                                "Failed to build HTTP client: {e}"
+                            ))
+                        })?;
 
                     if eager_witness_download {
                         // Eager path: download both files concurrently
@@ -252,24 +279,11 @@ impl DIDWebVHState {
                         };
 
                         let log_entries = Self::parse_log_entries(&raw_entries)?;
-                        if log_entries.is_empty() {
-                            warn!("No LogEntries found for DID: {did}");
-                            return Err(DIDWebVHError::NotFound);
-                        }
+                        Self::validate_log_entries(&log_entries, did)?;
 
                         let needs_witnesses = Self::needs_witness_proofs(&log_entries);
-                        let witness_proofs = match witness_result {
-                            Ok(raw) => Self::parse_witness_proofs(&raw)?,
-                            Err(e) => {
-                                if needs_witnesses {
-                                    return Err(DIDWebVHError::WitnessProofError(format!(
-                                        "Witnesses are configured but witness proofs could not be downloaded: {e}"
-                                    )));
-                                }
-                                // No witnesses configured — silently use empty collection
-                                WitnessProofCollection::default()
-                            }
-                        };
+                        let witness_proofs =
+                            Self::resolve_witness_proofs(witness_result, needs_witnesses)?;
 
                         (log_entries, witness_proofs)
                     } else {
@@ -286,23 +300,15 @@ impl DIDWebVHState {
                         })??;
 
                         let log_entries = Self::parse_log_entries(&raw_entries)?;
-                        if log_entries.is_empty() {
-                            warn!("No LogEntries found for DID: {did}");
-                            return Err(DIDWebVHError::NotFound);
-                        }
+                        Self::validate_log_entries(&log_entries, did)?;
 
                         let witness_proofs = if Self::needs_witness_proofs(&log_entries) {
-                            let raw = DIDWebVH::get_witness_proofs(
+                            let raw_result = DIDWebVH::get_witness_proofs(
                                 parsed_did_url.clone(),
                                 client.clone(),
                             )
-                            .await
-                            .map_err(|e| {
-                                DIDWebVHError::WitnessProofError(format!(
-                                    "Witnesses are configured but witness proofs could not be downloaded: {e}"
-                                ))
-                            })?;
-                            Self::parse_witness_proofs(&raw)?
+                            .await;
+                            Self::resolve_witness_proofs(raw_result, true)?
                         } else {
                             WitnessProofCollection::default()
                         };
@@ -333,7 +339,11 @@ impl DIDWebVHState {
 
         // Ensure metadata is set for the DID
         if let Some(first) = self.log_entries.first() {
-            self.scid = first.get_scid().unwrap();
+            self.scid = first.get_scid().ok_or_else(|| {
+                DIDWebVHError::ValidationError(
+                    "First log entry is missing SCID".to_string(),
+                )
+            })?;
             self.meta_first_ts = first.get_version_time_string();
         }
         if let Some(last) = self.log_entries.last() {
@@ -354,13 +364,17 @@ impl DIDWebVHState {
                     let metadata = self.generate_meta_data(entry);
                     Ok((&entry.log_entry, metadata))
                 }
-                Err(_) => Err(DIDWebVHError::NotFound),
+                Err(e) => Err(DIDWebVHError::NotFound(format!(
+                    "Query matched no log entry: {e}"
+                ))),
             }
         } else if let Some(last) = self.log_entries.last() {
             let metadata = self.generate_meta_data(last);
             Ok((&last.log_entry, metadata))
         } else {
-            Err(DIDWebVHError::NotFound)
+            Err(DIDWebVHError::NotFound(
+                "No LogEntries found after validation".to_string(),
+            ))
         }
     }
 }

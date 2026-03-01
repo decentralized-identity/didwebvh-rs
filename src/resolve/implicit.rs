@@ -1,4 +1,4 @@
-use crate::{DIDWebVHError, url::WebVHURL};
+use crate::{DIDWebVHError, ensure_object_mut, url::WebVHURL};
 /// The WebVH DID Specification implies specific services for DID Documents
 /// This checks a resolved DID Document and adds implied services as needed
 use serde_json::{Value, json};
@@ -13,7 +13,7 @@ pub(crate) fn update_implicit_services(
 
     let Some(services) = services else {
         // There are no services, add the implicit services
-        new_state.as_object_mut().unwrap().insert(
+        ensure_object_mut(new_state)?.insert(
             "service".to_string(),
             Value::Array(vec![
                 get_service_whois(did_id, &url)?,
@@ -46,9 +46,7 @@ pub(crate) fn update_implicit_services(
             new_services.push(get_service_files(did_id, &url)?);
         }
 
-        new_state
-            .as_object_mut()
-            .unwrap()
+        ensure_object_mut(new_state)?
             .insert("service".to_string(), Value::Array(new_services));
     } else {
         return Err(DIDWebVHError::DIDError(

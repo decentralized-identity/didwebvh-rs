@@ -71,7 +71,11 @@ impl DIDWebVHState {
         // Step 1: COMPLETED. LogEntries are verified and only contains good Entries
 
         // Step 2: Get the highest validated version number
-        let highest_version_number = self.log_entries.last().unwrap().get_version_number();
+        let highest_version_number = self
+            .log_entries
+            .last()
+            .expect("guarded by empty check above")
+            .get_version_number();
         debug!("Latest LogEntry ID = ({})", highest_version_number);
 
         // Step 3: Recalculate witness proofs based on the highest LogEntry version
@@ -88,7 +92,10 @@ impl DIDWebVHState {
 
         // Set to validated and timestamp
         self.validated = true;
-        let last_log_entry = self.log_entries.last().unwrap();
+        let last_log_entry = self
+            .log_entries
+            .last()
+            .expect("guarded by empty check above");
         self.scid = if let Some(scid) = &last_log_entry.validated_parameters.scid {
             scid.to_string()
         } else {

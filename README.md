@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/didwebvh-rs.svg)](https://crates.io/crates/didwebvh-rs)
 [![Documentation](https://docs.rs/didwebvh-rs/badge.svg)](https://docs.rs/didwebvh-rs)
-[![Rust](https://img.shields.io/badge/rust-1.88.0%2B-blue.svg?maxAge=3600)](https://github.com/decentralized-identity/didwebvh-rs)
+[![Rust](https://img.shields.io/badge/rust-1.90.0%2B-blue.svg?maxAge=3600)](https://github.com/decentralized-identity/didwebvh-rs)
 
 A complete implementation of the [did:webvh](https://identity.foundation/didwebvh/v1.0/)
 method in Rust. Supports version 1.0 spec.
@@ -41,13 +41,17 @@ didwebvh-rs = "0.2.0"
 Then:
 
 ```rust
-use didwebvh_rs::DIDWebVHState;
+use didwebvh_rs::prelude::*;
 
 let mut webvh = DIDWebVHState::default();
 
 // Load LogEntries from a file
 webvh.load_log_entries_from_file("did.jsonl")?;
 ```
+
+The `prelude` module re-exports the most commonly needed types:
+`DIDWebVHError`, `DIDWebVHState`, `LogEntryMethods`, `Parameters`,
+`CreateDIDConfig`, `create_did`, `Witnesses`, and `WitnessProofCollection`.
 
 ## Feature Flags
 
@@ -103,7 +107,7 @@ cargo run --release --example generate_history -- --help
 For example, to generate 200 LogEntries with 10 witnesses each, you can run:
 
 ```Bash
-cargo run --release --example generate_histroy -- -c 200 -w 10
+cargo run --release --example generate_history -- -c 200 -w 10
 ```
 
 This tool will save the output to
@@ -118,10 +122,7 @@ interactive prompts. Use `CreateDIDConfig::builder()` to construct the
 configuration:
 
 ```rust
-use didwebvh_rs::{
-    create::{CreateDIDConfig, create_did},
-    parameters::Parameters,
-};
+use didwebvh_rs::prelude::*;
 use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use serde_json::json;
 use std::sync::Arc;

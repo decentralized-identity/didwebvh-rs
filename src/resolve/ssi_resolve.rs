@@ -51,7 +51,7 @@ impl DIDMethodResolver for DIDWebVH {
                         resolution::Metadata::from_content_type(Some(content_type.to_string())),
                     ))
                 }
-                Err(DIDWebVHError::NotFound) => Err(Error::NotFound),
+                Err(DIDWebVHError::NotFound(_)) => Err(Error::NotFound),
                 Err(e) => Err(Error::Internal(e.to_string())),
             }
         }

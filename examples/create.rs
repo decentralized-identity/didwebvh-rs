@@ -1,8 +1,5 @@
 use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
-use didwebvh_rs::{
-    create::{CreateDIDConfig, create_did},
-    parameters::Parameters,
-};
+use didwebvh_rs::prelude::*;
 use serde_json::json;
 use std::sync::Arc;
 

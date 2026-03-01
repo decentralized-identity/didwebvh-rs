@@ -3,7 +3,7 @@
 */
 
 use crate::{
-    DIDWebVHError, DIDWebVHState, log_entry_state::LogEntryState,
+    DIDWebVHError, DIDWebVHState, ensure_object_mut, log_entry_state::LogEntryState,
     resolve::implicit::update_implicit_services,
 };
 use regex::Regex;
@@ -18,7 +18,9 @@ impl DIDWebVHState {
             log_entry.to_web_did()
         } else {
             // There is no Log Entry
-            Err(DIDWebVHError::NotFound)
+            Err(DIDWebVHError::NotFound(
+                "No log entries available for did:web conversion".to_string(),
+            ))
         }
     }
 
@@ -100,15 +102,11 @@ fn to_web_did(old_state: &Value) -> Result<Value, DIDWebVHError> {
         .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't parse new state: {}", e)))?;
 
     // Set the DID id
-    new_state
-        .as_object_mut()
-        .unwrap()
+    ensure_object_mut(&mut new_state)?
         .insert("id".to_string(), Value::String(web_did.clone()));
 
     // Reset the controller to be the webvh original ID
-    new_state
-        .as_object_mut()
-        .unwrap()
+    ensure_object_mut(&mut new_state)?
         .insert("controller".to_string(), Value::String(webvh_did.clone()));
 
     // Update alsoKnownAs
@@ -133,7 +131,7 @@ fn update_also_known_as(
 ) -> Result<(), DIDWebVHError> {
     let Some(also_known_as) = also_known_as else {
         // There is no alsoKnownAs, add the old_did
-        new_state.as_object_mut().unwrap().insert(
+        ensure_object_mut(new_state)?.insert(
             "alsoKnownAs".to_string(),
             Value::Array(vec![Value::String(old_did.to_string())]),
         );
@@ -168,9 +166,7 @@ fn update_also_known_as(
         new_aliases.push(Value::String(old_did.to_string()));
     }
 
-    new_state
-        .as_object_mut()
-        .unwrap()
+    ensure_object_mut(new_state)?
         .insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
 
     Ok(())
