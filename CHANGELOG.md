@@ -43,11 +43,6 @@
   - Removed dead code (unreachable `update_keys.is_empty()` check)
   - Consolidated TTL validation from 22 lines to a 4-line match expression
 - **MAINTENANCE:** Fixed minimum Rust version badge in README (1.88 → 1.90)
-
-## 25th February 2026
-
-### Release 0.2.0
-
 - **FIX:** DID portability is now enforced during log entry verification
   - When the DID document `id` changes between consecutive log entries,
     the `portable` parameter must be `true`; otherwise verification fails
