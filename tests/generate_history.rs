@@ -15,10 +15,10 @@ fn load_generate_history() {
 #[tokio::test]
 async fn get_specific_version_number() {
     let mut webvh = DIDWebVHState::default();
-    let (log_entry, _) = webvh.resolve_file("did:webvh:QmbHT3Eexjb4TFhjnHapNmFHxAVQZnDTrTCeYfHqvTArBz:test.affinidi.com?versionNumber=20", "tests/test_vectors/did-generate_history.jsonl", Some("tests/test_vectors/did-witness-generate_history.json")).await.expect("Couldn't resolve DID");
+    let (log_entry, _) = webvh.resolve_file("did:webvh:QmSnw6YkSm2Tu8pASb6VdxuSU2PetvSoLumFfVh5VafiKT:test.affinidi.com?versionNumber=20", "tests/test_vectors/did-generate_history.jsonl", Some("tests/test_vectors/did-witness-generate_history.json")).await.expect("Couldn't resolve DID");
 
     assert_eq!(
         log_entry.get_version_id(),
-        "20-QmS2VU5uh7zQYrgxmHewH6ZQBLMP1q2u8ighCfveFJiHEY"
+        "20-QmXxgJRibisqnyXNEeAHLrW3qmu5vhmH5QgSttMgvDmwvp"
     );
 }
