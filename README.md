@@ -115,6 +115,40 @@ This tool will save the output to
 - did.jsonl (LogEntries)
 - did-witness.json (Witness Proofs)
 
+### Criterion Benchmarks (stable Rust)
+
+Run the full benchmark suite using [Criterion](https://crates.io/crates/criterion):
+
+```Bash
+cargo bench --bench did_benchmarks
+```
+
+Run a specific benchmark group or individual benchmark:
+
+```Bash
+cargo bench --bench did_benchmarks -- "did_creation"
+cargo bench --bench did_benchmarks -- "did_creation/basic"
+```
+
+HTML reports are generated in `target/criterion/`.
+
+### Nightly Benchmarks
+
+If you have the Rust nightly toolchain installed, you can also run the built-in
+`#[bench]` benchmarks:
+
+```Bash
+cargo +nightly bench --bench did_benchmarks_nightly
+```
+
+### Benchmark Groups
+
+| Group | Benchmarks | Description |
+|-------|-----------|-------------|
+| `did_creation` | `basic`, `with_aliases` | DID creation with minimal config and with alsoKnownAs aliases |
+| `did_resolution` | `single_entry`, `large_with_witnesses_120_entries` | File-based DID resolution with 1 and 120+ log entries |
+| `validation` | `single_entry`, `large_with_witnesses_120_entries` | Log entry and witness proof validation |
+
 ## Creating a DID Programmatically
 
 The `create` module provides a library API for creating a DID without any

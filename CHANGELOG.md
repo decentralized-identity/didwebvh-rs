@@ -4,6 +4,11 @@
 
 ### Release 0.2.0 (continued)
 
+- **FEATURE:** Added benchmark harness for measuring DID performance
+  - Criterion benchmarks (`cargo bench --bench did_benchmarks`) with HTML reports
+  - Nightly benchmarks (`cargo +nightly bench --bench did_benchmarks_nightly`)
+  - Covers DID creation, resolution, and validation across single-entry and
+    large (120+ entries with witnesses) scenarios
 - **IMPROVEMENT:** Added `prelude` module for convenient imports
   - `use didwebvh_rs::prelude::*` re-exports the most commonly needed types:
     `DIDWebVHError`, `DIDWebVHState`, `LogEntryMethods`, `Parameters`,
