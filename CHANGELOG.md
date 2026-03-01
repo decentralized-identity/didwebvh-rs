@@ -4,6 +4,20 @@
 
 ### Release 0.2.0
 
+- **FIX:** DID portability is now enforced during log entry verification
+  - When the DID document `id` changes between consecutive log entries,
+    the `portable` parameter must be `true`; otherwise verification fails
+    with a portability error
+  - When a portable DID is moved, the previous DID string must appear in
+    the `alsoKnownAs` array per the did:webvh v1.0 specification
+- **FIX:** `versionTime` ordering now uses strict greater-than comparison
+  - The spec requires each `versionTime` to be strictly greater than the
+    previous entry's time; equal timestamps are now correctly rejected
+- **FIX:** `generate_history` example now uses deterministic timestamps
+  - Uses a fixed start date with 1-second increments per entry to
+    guarantee strictly increasing `versionTime` values
+  - Also fixes `rand` crate import (`Rng` → `RngExt`) for compatibility
+    with rand 0.10
 - **IMPROVEMENT:** `resolve()` now conditionally downloads `did-witness.json`
   - New `eager_witness_download` parameter controls download strategy
   - `false` (default): downloads `did.jsonl` first, only fetches witness proofs
