@@ -250,8 +250,8 @@ impl LogEntry {
         }
 
         if let Some(previous) = previous {
-            // Current time must be greater than the previous time
-            if self.get_version_time() < previous.get_version_time() {
+            // Current time must be strictly greater than the previous time (per spec)
+            if self.get_version_time() <= previous.get_version_time() {
                 return Err(DIDWebVHError::ValidationError(format!(
                     "Current versionTime ({}) must be greater than previous versionTime ({})",
                     self.get_version_time_string(),
@@ -310,7 +310,7 @@ mod tests {
     use crate::log_entry::spec_1_0::LogEntry1_0;
     use crate::parameters::Parameters;
     use crate::parameters::spec_1_0::Parameters1_0;
-    use chrono::Utc;
+    use chrono::{Duration, Utc};
     use serde_json::json;
 
     /// Helper to create a minimal LogEntry with a given DID document state
@@ -320,6 +320,19 @@ mod tests {
             version_time: Utc::now().fixed_offset(),
             parameters: Parameters1_0::default(),
             state,
+            proof: vec![],
+        })
+    }
+
+    /// Helper to create a minimal LogEntry with a specific timestamp
+    fn make_log_entry_with_time(
+        time: chrono::DateTime<chrono::FixedOffset>,
+    ) -> LogEntry {
+        LogEntry::Spec1_0(LogEntry1_0 {
+            version_id: "1-abc123".to_string(),
+            version_time: time,
+            parameters: Parameters1_0::default(),
+            state: json!({"id": "did:webvh:abc123:example.com"}),
             proof: vec![],
         })
     }
@@ -460,6 +473,59 @@ mod tests {
         };
 
         assert!(current.verify_portability(&previous, &params).is_ok());
+    }
+
+    #[test]
+    fn test_version_time_strictly_after_previous() {
+        // Current versionTime is after previous → should pass
+        let now = Utc::now().fixed_offset();
+        let previous = make_log_entry_with_time(now - Duration::seconds(10));
+        let current = make_log_entry_with_time(now);
+
+        assert!(current.verify_version_time(Some(&previous)).is_ok());
+    }
+
+    #[test]
+    fn test_version_time_equal_to_previous() {
+        // Current versionTime equals previous → must fail (spec requires strictly greater)
+        let now = Utc::now().fixed_offset();
+        let previous = make_log_entry_with_time(now);
+        let current = make_log_entry_with_time(now);
+
+        let result = current.verify_version_time(Some(&previous));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must be greater than previous versionTime")
+        );
+    }
+
+    #[test]
+    fn test_version_time_before_previous() {
+        // Current versionTime is before previous → must fail
+        let now = Utc::now().fixed_offset();
+        let previous = make_log_entry_with_time(now);
+        let current = make_log_entry_with_time(now - Duration::seconds(10));
+
+        let result = current.verify_version_time(Some(&previous));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must be greater than previous versionTime")
+        );
+    }
+
+    #[test]
+    fn test_version_time_no_previous() {
+        // First entry (no previous) → should pass
+        let now = Utc::now().fixed_offset();
+        let current = make_log_entry_with_time(now);
+
+        assert!(current.verify_version_time(None).is_ok());
     }
 
     #[test]
