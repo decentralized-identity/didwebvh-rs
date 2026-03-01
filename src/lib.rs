@@ -23,6 +23,7 @@ pub mod did_web;
 pub mod log_entry;
 pub mod log_entry_state;
 pub mod parameters;
+pub mod prelude;
 pub mod resolve;
 pub mod url;
 pub mod validate;
@@ -77,6 +78,15 @@ impl Version {
 /// Magic string used for first LogEntry
 pub const SCID_HOLDER: &str = "{SCID}";
 
+/// Helper to safely get a mutable reference to a JSON object map.
+pub(crate) fn ensure_object_mut(
+    value: &mut Value,
+) -> Result<&mut serde_json::Map<String, Value>, DIDWebVHError> {
+    value
+        .as_object_mut()
+        .ok_or_else(|| DIDWebVHError::DIDError("Expected a JSON object".to_string()))
+}
+
 /// Error types for WebVH method
 #[derive(Error, Debug)]
 pub enum DIDWebVHError {
@@ -90,8 +100,8 @@ pub enum DIDWebVHError {
     LogEntryError(String),
     #[error("NetworkError: {0}")]
     NetworkError(String),
-    #[error("DID Query NotFound")]
-    NotFound,
+    #[error("DID Query NotFound: {0}")]
+    NotFound(String),
     #[error("NotImplemented: {0}")]
     NotImplemented(String),
     #[error("ParametersError: {0}")]
@@ -100,8 +110,8 @@ pub enum DIDWebVHError {
     SCIDError(String),
     #[error("ServerError: {0}")]
     ServerError(String),
-    #[error("UnsupportedMethod: Must be did:webvh")]
-    UnsupportedMethod,
+    #[error("UnsupportedMethod: {0}")]
+    UnsupportedMethod(String),
     /// There was an error in validating the DID
     #[error("ValidationError: {0}")]
     ValidationError(String),
@@ -349,7 +359,10 @@ impl DIDWebVHState {
                     if let Some(version_time) = version_time
                         && version_time < log_entry.get_version_time()
                     {
-                        return Err(DIDWebVHError::NotFound);
+                        return Err(DIDWebVHError::NotFound(format!(
+                            "versionId '{}' exists but versionTime {} is before entry time {}",
+                            version_id, version_time, log_entry.get_version_time()
+                        )));
                     }
                     return Ok(log_entry);
                 }
@@ -360,7 +373,10 @@ impl DIDWebVHState {
                     if let Some(version_time) = version_time
                         && version_time < log_entry.get_version_time()
                     {
-                        return Err(DIDWebVHError::NotFound);
+                        return Err(DIDWebVHError::NotFound(format!(
+                            "versionNumber {} exists but versionTime {} is before entry time {}",
+                            version_number, version_time, log_entry.get_version_time()
+                        )));
                     }
                     return Ok(log_entry);
                 }
@@ -381,7 +397,10 @@ impl DIDWebVHState {
             }
         }
 
-        Err(DIDWebVHError::NotFound)
+        Err(DIDWebVHError::NotFound(format!(
+            "No matching log entry for versionId={:?}, versionTime={:?}, versionNumber={:?}",
+            version_id, version_time, version_number
+        )))
     }
 
     /// Creates a MatatData struct from a validaed LogEntryState

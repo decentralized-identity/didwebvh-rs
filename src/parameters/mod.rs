@@ -342,35 +342,27 @@ impl Parameters {
                         // If empty, turn off updateKeys
                         new_parameters.update_keys = Some(Arc::new(Vec::new()));
                         new_parameters.active_update_keys = previous.active_update_keys.clone();
+                    } else if !new_parameters.pre_rotation_active && pre_rotation_previous_value {
+                        // Key pre-rotation has been turned off
+                        // Update keys must be part of the previous nextKeyHashes
+                        Self::validate_pre_rotation_keys(
+                            &previous.next_key_hashes,
+                            update_keys,
+                        )?;
+                        new_parameters.update_keys = Some(update_keys.clone());
+                        new_parameters.active_update_keys = update_keys.clone();
+                    } else if new_parameters.pre_rotation_active {
+                        // Key pre-rotation is active
+                        // Update keys must be part of the previous nextKeyHashes
+                        Self::validate_pre_rotation_keys(
+                            &previous.next_key_hashes,
+                            update_keys,
+                        )?;
+                        new_parameters.active_update_keys = update_keys.clone();
                     } else {
-                        // If pre-rotation is enabled, then validate and add immediately to active keys
-                        if update_keys.is_empty() {
-                            return Err(DIDWebVHError::ParametersError(
-                                "updateKeys cannot be empty".to_string(),
-                            ));
-                        }
-                        if !new_parameters.pre_rotation_active && pre_rotation_previous_value {
-                            // Key pre-rotation has been turned off
-                            // Update keys must be part of the previous nextKeyHashes
-                            Self::validate_pre_rotation_keys(
-                                &previous.next_key_hashes,
-                                update_keys,
-                            )?;
-                            new_parameters.update_keys = Some(update_keys.clone());
-                            new_parameters.active_update_keys = update_keys.clone();
-                        } else if new_parameters.pre_rotation_active {
-                            // Key pre-rotation is active
-                            // Update keys must be part of the previous nextKeyHashes
-                            Self::validate_pre_rotation_keys(
-                                &previous.next_key_hashes,
-                                update_keys,
-                            )?;
-                            new_parameters.active_update_keys = update_keys.clone();
-                        } else {
-                            // No Key pre-rotation is active
-                            new_parameters.update_keys = Some(update_keys.clone());
-                            new_parameters.active_update_keys = update_keys.clone();
-                        }
+                        // No Key pre-rotation is active
+                        new_parameters.update_keys = Some(update_keys.clone());
+                        new_parameters.active_update_keys = update_keys.clone();
                     }
                 }
             }
@@ -511,30 +503,11 @@ impl Parameters {
 
         new_parameters.deactivated = self.deactivated;
 
-        // Determine TTL
-        if let Some(previous) = previous {
-            match &self.ttl {
-                None => {
-                    // If absent, keep current TTL
-                    new_parameters.ttl = previous.ttl;
-                }
-                Some(ttl) => {
-                    // Replace ttl with the new value
-                    new_parameters.ttl = Some(*ttl);
-                }
-            }
-        } else {
-            // First Log Entry
-            match &self.ttl {
-                None => {
-                    new_parameters.ttl = None;
-                }
-                Some(ttl) => {
-                    // Replace ttl with the new value
-                    new_parameters.ttl = Some(*ttl);
-                }
-            }
-        }
+        // Determine TTL: use new value if specified, otherwise inherit from previous
+        new_parameters.ttl = match &self.ttl {
+            Some(ttl) => Some(*ttl),
+            None => previous.map_or(None, |p| p.ttl),
+        };
 
         debug!("Parameters successfully validated");
         debug!("Validated Parameters: {new_parameters:#?}");

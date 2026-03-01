@@ -121,6 +121,154 @@ pub(crate) trait LogEntryCreate {
     ) -> Result<LogEntry, DIDWebVHError>;
 }
 
+/// Shared helper: serialize versionTime with seconds-only precision
+pub(crate) fn format_version_time<S>(
+    date: &DateTime<FixedOffset>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&date.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+}
+
+/// Shared helper: split a versionId into (number, hash)
+pub fn parse_version_id_fields(version_id: &str) -> Result<(u32, String), DIDWebVHError> {
+    let Some((id, hash)) = version_id.split_once('-') else {
+        return Err(DIDWebVHError::ValidationError(format!(
+            "versionID ({version_id}) doesn't match format <int>-<hash>",
+        )));
+    };
+    let id = id.parse::<u32>().map_err(|e| {
+        DIDWebVHError::ValidationError(format!(
+            "Failed to parse version ID ({id}) as u32: {e}",
+        ))
+    })?;
+    Ok((id, hash.to_string()))
+}
+
+/// Implements the common inherent methods and `LogEntryMethods` trait for a log entry struct.
+///
+/// The struct must have fields: `version_id`, `version_time`, `parameters`, `state`, `proof`.
+/// The parameters type must implement `Into<Parameters>` and `Clone`.
+macro_rules! impl_log_entry_common {
+    ($type:ty) => {
+        impl $type {
+            /// Calculates a Log Entry hash
+            pub fn generate_log_entry_hash(&self) -> Result<String, DIDWebVHError> {
+                let jcs = serde_json_canonicalizer::to_string(self).map_err(|e| {
+                    DIDWebVHError::SCIDError(format!(
+                        "Couldn't generate JCS from LogEntry. Reason: {e}",
+                    ))
+                })?;
+                tracing::debug!("JCS for LogEntry hash: {}", jcs);
+
+                let hash_encoded =
+                    multihash::Multihash::<32>::wrap(0x12, <sha2::Sha256 as sha2::Digest>::digest(jcs.as_bytes()).as_slice())
+                        .map_err(|e| {
+                            DIDWebVHError::SCIDError(format!(
+                                "Couldn't create multihash encoding for LogEntry. Reason: {e}",
+                            ))
+                        })?;
+                Ok(base58::ToBase58::to_base58(hash_encoded.to_bytes().as_slice()))
+            }
+
+            pub fn validate_witness_proof(
+                &self,
+                witness_proof: &affinidi_data_integrity::DataIntegrityProof,
+            ) -> Result<bool, DIDWebVHError> {
+                use crate::log_entry::PublicKey;
+                affinidi_data_integrity::verification_proof::verify_data_with_public_key(
+                    &serde_json::json!({"versionId": &self.version_id}),
+                    None,
+                    witness_proof,
+                    witness_proof.get_public_key_bytes()?.as_slice(),
+                )
+                .map_err(|e| {
+                    DIDWebVHError::LogEntryError(format!(
+                        "Data Integrity Proof verification failed: {e}"
+                    ))
+                })?;
+                Ok(true)
+            }
+
+            /// Splits the version number and the version hash for a DID versionId
+            pub fn get_version_id_fields(&self) -> Result<(u32, String), DIDWebVHError> {
+                crate::log_entry::parse_version_id_fields(&self.version_id)
+            }
+
+            /// Splits the version number and the version hash for a DID versionId
+            pub fn parse_version_id_fields(
+                version_id: &str,
+            ) -> Result<(u32, String), DIDWebVHError> {
+                crate::log_entry::parse_version_id_fields(version_id)
+            }
+        }
+
+        impl crate::log_entry::LogEntryMethods for $type {
+            fn get_version_time_string(&self) -> String {
+                self.version_time
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            }
+
+            fn get_version_time(&self) -> chrono::DateTime<chrono::FixedOffset> {
+                self.version_time
+            }
+
+            fn get_version_id(&self) -> String {
+                self.version_id.clone()
+            }
+
+            fn set_version_id(&mut self, version_id: &str) {
+                self.version_id = version_id.to_string();
+            }
+
+            fn get_parameters(&self) -> crate::parameters::Parameters {
+                self.parameters.clone().into()
+            }
+
+            fn add_proof(&mut self, proof: affinidi_data_integrity::DataIntegrityProof) {
+                self.proof.push(proof);
+            }
+
+            fn get_proofs(&self) -> &Vec<affinidi_data_integrity::DataIntegrityProof> {
+                &self.proof
+            }
+
+            fn clear_proofs(&mut self) {
+                self.proof.clear();
+            }
+
+            fn get_scid(&self) -> Option<String> {
+                self.parameters.scid.clone().map(|scid| scid.to_string())
+            }
+
+            fn get_state(&self) -> &serde_json::Value {
+                &self.state
+            }
+
+            fn get_did_document(&self) -> Result<serde_json::Value, DIDWebVHError> {
+                let services = self.state.get("service");
+                let mut new_state = self.state.clone();
+                if let Some(id) = self.state.get("id")
+                    && let Some(id) = id.as_str()
+                {
+                    crate::resolve::implicit::update_implicit_services(
+                        services, &mut new_state, id,
+                    )?;
+                    Ok(new_state)
+                } else {
+                    Err(DIDWebVHError::ValidationError(
+                        "DID Document is missing 'id' field or it's not a string".to_string(),
+                    ))
+                }
+            }
+        }
+    };
+}
+
+pub(crate) use impl_log_entry_common;
+
 impl LogEntry {
     /// Reading in a LogEntry and converting it requires custom logic.
     /// [deserialize_string] handles detecting the version and deserializing the LogEntry correctly
@@ -329,28 +477,14 @@ impl LogEntry {
     /// Splits the version number and the version hash for a DID versionId
     pub fn get_version_id_fields(&self) -> Result<(u32, String), DIDWebVHError> {
         match self {
-            LogEntry::Spec1_0(log_entry) => {
-                LogEntry::parse_version_id_fields(&log_entry.version_id)
-            }
-            LogEntry::Spec1_0Pre(log_entry) => {
-                LogEntry::parse_version_id_fields(&log_entry.version_id)
-            }
+            LogEntry::Spec1_0(log_entry) => parse_version_id_fields(&log_entry.version_id),
+            LogEntry::Spec1_0Pre(log_entry) => parse_version_id_fields(&log_entry.version_id),
         }
     }
 
     /// Splits the version number and the version hash for a DID versionId
     pub fn parse_version_id_fields(version_id: &str) -> Result<(u32, String), DIDWebVHError> {
-        let Some((id, hash)) = version_id.split_once('-') else {
-            return Err(DIDWebVHError::ValidationError(format!(
-                "versionID ({version_id}) doesn't match format <int>-<hash>",
-            )));
-        };
-        let id = id.parse::<u32>().map_err(|e| {
-            DIDWebVHError::ValidationError(
-                format!("Failed to parse version ID ({id}) as u32: {e}",),
-            )
-        })?;
-        Ok((id, hash.to_string()))
+        parse_version_id_fields(version_id)
     }
 
     /// Create a new LogEntry depending on the WebVH Version

@@ -66,7 +66,9 @@ impl WebVHURL {
         let url = if let Some(prefix) = url.strip_prefix("did:webvh:") {
             prefix
         } else if url.starts_with("did:") {
-            return Err(DIDWebVHError::UnsupportedMethod);
+            return Err(DIDWebVHError::UnsupportedMethod(
+                format!("Expected did:webvh, got: {}", url.split(':').take(3).collect::<Vec<_>>().join(":")),
+            ));
         } else {
             url
         };

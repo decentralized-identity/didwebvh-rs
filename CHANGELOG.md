@@ -1,5 +1,44 @@
 # didwebvh-rs Changelog history
 
+## 2nd March 2026
+
+### Release 0.2.0 (continued)
+
+- **IMPROVEMENT:** Added `prelude` module for convenient imports
+  - `use didwebvh_rs::prelude::*` re-exports the most commonly needed types:
+    `DIDWebVHError`, `DIDWebVHState`, `LogEntryMethods`, `Parameters`,
+    `CreateDIDConfig`, `create_did`, `Witnesses`, and `WitnessProofCollection`
+  - Examples updated to use the prelude
+- **IMPROVEMENT:** `NotFound` and `UnsupportedMethod` error variants now carry
+  context strings describing what was not found or which method was unsupported,
+  making debugging significantly easier
+- **FIX:** Replaced all `unwrap()` calls in production code with proper error
+  handling
+  - `reqwest::ClientBuilder::build()` in resolver now returns `NetworkError`
+    instead of panicking
+  - `get_scid()` in `resolve_state` now returns `ValidationError` instead of
+    panicking
+  - All `as_object_mut().unwrap()` calls replaced with a shared
+    `ensure_object_mut()` helper that returns `DIDError`
+  - Two guarded-by-prior-check `.last().unwrap()` calls in `validate.rs`
+    switched to `.expect()` with explanatory messages
+- **IMPROVEMENT:** Deduplicated `add_web_also_known_as` and
+  `add_scid_also_known_as` via shared `build_alias_list()` helper
+- **IMPROVEMENT:** Deduplicated log entry spec implementations using
+  `impl_log_entry_common!` macro
+  - 16 identical method implementations between `LogEntry1_0` and
+    `LogEntry1_0Pre` now share a single macro definition
+  - `format_version_time()` and `parse_version_id_fields()` extracted as
+    shared functions
+  - Eliminates ~150 lines of duplicated code and prevents spec version drift
+- **IMPROVEMENT:** Extracted `validate_log_entries()` and
+  `resolve_witness_proofs()` helpers in the resolver, reducing duplication
+  across WASM, eager, and deferred download paths
+- **IMPROVEMENT:** Simplified `Parameters::validate()` method
+  - Removed dead code (unreachable `update_keys.is_empty()` check)
+  - Consolidated TTL validation from 22 lines to a 4-line match expression
+- **MAINTENANCE:** Fixed minimum Rust version badge in README (1.88 → 1.90)
+
 ## 25th February 2026
 
 ### Release 0.2.0
@@ -52,7 +91,7 @@
   - `rand` crate updated from 0.9 to 0.10 (dev-dependency)
 - **MAINTENANCE:** Added comprehensive witness and watcher parameter tests
   covering validation, diff, and serialization scenarios
-- **MAINTENANCE:** Code test coverage @ 86.13%
+- **MAINTENANCE:** Code test coverage @ 87.48%
 
 ## 5th February 2026
 

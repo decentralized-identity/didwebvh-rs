@@ -1,6 +1,6 @@
 use chrono::{TimeDelta, Utc};
 use console::style;
-use didwebvh_rs::{DIDWebVHState, log_entry::LogEntryMethods};
+use didwebvh_rs::prelude::*;
 use std::env;
 use tracing_subscriber::filter;
 

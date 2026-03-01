@@ -5,7 +5,7 @@
 */
 
 use crate::{
-    DIDWebVHError, DIDWebVHState,
+    DIDWebVHError, DIDWebVHState, ensure_object_mut,
     log_entry::{LogEntry, LogEntryMethods},
     log_entry_state::LogEntryState,
     parameters::Parameters,
@@ -312,40 +312,16 @@ pub fn add_web_also_known_as(did_document: &mut Value, did: &str) -> Result<(), 
 
     let Some(also_known_as) = also_known_as else {
         // There is no alsoKnownAs, add the did:web
-        did_document.as_object_mut().unwrap().insert(
+        ensure_object_mut(did_document)?.insert(
             "alsoKnownAs".to_string(),
             Value::Array(vec![Value::String(did_web_id.to_string())]),
         );
         return Ok(());
     };
 
-    let mut new_aliases = vec![];
-    let mut skip_flag = false;
+    let new_aliases = build_alias_list(also_known_as, &did_web_id)?;
 
-    if let Some(aliases) = also_known_as.as_array() {
-        for alias in aliases {
-            if let Some(alias_str) = alias.as_str() {
-                if alias_str == did_web_id {
-                    // did:web already exists, don't duplicate
-                    skip_flag = true;
-                }
-                new_aliases.push(alias.clone());
-            }
-        }
-    } else {
-        return Err(DIDWebVHError::DIDError(
-            "alsoKnownAs is not an array".to_string(),
-        ));
-    }
-
-    if !skip_flag {
-        // web DID isn't an alias, add it
-        new_aliases.push(Value::String(did_web_id.to_string()));
-    }
-
-    did_document
-        .as_object_mut()
-        .unwrap()
+    ensure_object_mut(did_document)?
         .insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
 
     Ok(())
@@ -362,22 +338,34 @@ pub fn add_scid_also_known_as(did_document: &mut Value, did: &str) -> Result<(),
 
     let Some(also_known_as) = also_known_as else {
         // There is no alsoKnownAs, add the did:scid
-        did_document.as_object_mut().unwrap().insert(
+        ensure_object_mut(did_document)?.insert(
             "alsoKnownAs".to_string(),
             Value::Array(vec![Value::String(did_scid_id.to_string())]),
         );
         return Ok(());
     };
 
+    let new_aliases = build_alias_list(also_known_as, &did_scid_id)?;
+
+    ensure_object_mut(did_document)?
+        .insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
+
+    Ok(())
+}
+
+/// Shared helper: collects existing aliases, appending `new_alias` if not already present.
+fn build_alias_list(
+    also_known_as: &Value,
+    new_alias: &str,
+) -> Result<Vec<Value>, DIDWebVHError> {
     let mut new_aliases = vec![];
-    let mut skip_flag = false;
+    let mut already_exists = false;
 
     if let Some(aliases) = also_known_as.as_array() {
         for alias in aliases {
             if let Some(alias_str) = alias.as_str() {
-                if alias_str == did_scid_id {
-                    // did:scid already exists, don't duplicate
-                    skip_flag = true;
+                if alias_str == new_alias {
+                    already_exists = true;
                 }
                 new_aliases.push(alias.clone());
             }
@@ -388,17 +376,11 @@ pub fn add_scid_also_known_as(did_document: &mut Value, did: &str) -> Result<(),
         ));
     }
 
-    if !skip_flag {
-        // scid DID isn't an alias, add it
-        new_aliases.push(Value::String(did_scid_id.to_string()));
+    if !already_exists {
+        new_aliases.push(Value::String(new_alias.to_string()));
     }
 
-    did_document
-        .as_object_mut()
-        .unwrap()
-        .insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
-
-    Ok(())
+    Ok(new_aliases)
 }
 
 /// Sign witness proofs for a log entry using provided witness secrets (non-interactive).
