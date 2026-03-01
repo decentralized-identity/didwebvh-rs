@@ -14,6 +14,7 @@ use affinidi_secrets_resolver::{SecretsResolver, SimpleSecretsResolver, secrets:
 use affinidi_tdk::dids::{DID, KeyType};
 use anyhow::{Result, anyhow, bail};
 use byte_unit::{Byte, UnitType};
+use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
 use clap::Parser;
 use console::style;
 use didwebvh_rs::{
@@ -22,7 +23,7 @@ use didwebvh_rs::{
     witness::{Witness, Witnesses},
 };
 use format_num::format_num;
-use rand::{Rng, distr::Alphabetic};
+use rand::{RngExt, distr::Alphabetic};
 use serde_json::json;
 use std::{
     fs::OpenOptions,
@@ -96,12 +97,19 @@ pub async fn main() -> Result<()> {
     );
     let start = SystemTime::now();
 
+    // Use a fixed start date in the past with 1-second increments to ensure
+    // each versionTime is strictly greater than the previous (required by spec)
+    let base_time: DateTime<FixedOffset> =
+        (Utc::now() - ChronoDuration::seconds(args.count as i64 + 10)).fixed_offset();
+
     // Generate initial DID
-    let mut next = generate_did(&mut didwebvh, &mut secrets, &args).await?;
+    let mut next = generate_did(&mut didwebvh, &mut secrets, &args, base_time).await?;
 
     // Loop for count months (first entry represents the first month)
     for i in 2..(args.count + 1) {
-        next = create_log_entry(&mut didwebvh, &mut secrets, &next, i, &args).await?;
+        let version_time = base_time + ChronoDuration::seconds(i as i64);
+        next =
+            create_log_entry(&mut didwebvh, &mut secrets, &next, i, &args, version_time).await?;
     }
 
     let end = SystemTime::now();
@@ -318,6 +326,7 @@ async fn generate_did(
     didwebvh: &mut DIDWebVHState,
     secrets: &mut SimpleSecretsResolver,
     args: &Args,
+    version_time: DateTime<FixedOffset>,
 ) -> Result<Vec<Secret>> {
     let raw_did = r#"{
     "@context": [
@@ -404,7 +413,7 @@ async fn generate_did(
         .build();
 
     let _ = didwebvh.create_log_entry(
-        None,
+        Some(version_time),
         &did_document,
         &params,
         &secrets.get_secret(&signing_did1_secret.id).await.unwrap(),
@@ -475,6 +484,7 @@ async fn create_log_entry(
     previous_keys: &[Secret],
     count: u32,
     args: &Args,
+    version_time: DateTime<FixedOffset>,
 ) -> Result<Vec<Secret>> {
     let old_log_entry = didwebvh
         .log_entries
@@ -513,7 +523,7 @@ async fn create_log_entry(
     }
 
     let _ = didwebvh.create_log_entry(
-        None,
+        Some(version_time),
         &new_state,
         &new_params,
         previous_keys
