@@ -126,6 +126,12 @@ impl LogEntry {
         // Validate the version timestamp
         self.verify_version_time(previous_log_entry)?;
 
+        // Check DID portability: if the DID document `id` changed, `portable` must be true
+        // and the previous DID must appear in `alsoKnownAs` (per spec)
+        if let Some(previous) = previous_log_entry {
+            self.verify_portability(previous, &parameters)?;
+        }
+
         // Do we need to calculate the SCID for the first logEntry?
         if previous_log_entry.is_none() {
             // First LogEntry and we must validate the SCID
@@ -188,6 +194,47 @@ impl LogEntry {
             return Err(DIDWebVHError::ValidationError(format!(
                 "Current LogEntry version ID ({current_id}) hash ({current_hash}) does not match calculated hash ({entry_hash})",
             )));
+        }
+
+        Ok(())
+    }
+
+    /// Verifies that DID portability rules are respected.
+    /// If the DID document `id` has changed from the previous entry, the `portable` parameter
+    /// must be `true`, and the previous DID must appear in the `alsoKnownAs` array.
+    fn verify_portability(
+        &self,
+        previous: &LogEntry,
+        parameters: &Parameters,
+    ) -> Result<(), DIDWebVHError> {
+        let current_id = self.get_state().get("id").and_then(|v| v.as_str());
+        let previous_id = previous.get_state().get("id").and_then(|v| v.as_str());
+
+        if let (Some(current), Some(previous_did)) = (current_id, previous_id) {
+            if current != previous_did {
+                // DID identifier changed — this is a move/rename
+                if parameters.portable != Some(true) {
+                    return Err(DIDWebVHError::ValidationError(
+                        "DID document id has changed but portable is not enabled".to_string(),
+                    ));
+                }
+
+                // Per spec: the previous DID string MUST appear in alsoKnownAs
+                let has_previous_in_also_known_as = self
+                    .get_state()
+                    .get("alsoKnownAs")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|arr| {
+                        arr.iter()
+                            .any(|v| v.as_str().is_some_and(|s| s == previous_did))
+                    });
+
+                if !has_previous_in_also_known_as {
+                    return Err(DIDWebVHError::ValidationError(format!(
+                        "DID has been moved but previous DID ({previous_did}) is not in alsoKnownAs",
+                    )));
+                }
+            }
         }
 
         Ok(())
@@ -260,6 +307,160 @@ mod tests {
     use std::sync::Arc;
 
     use crate::log_entry::LogEntry;
+    use crate::log_entry::spec_1_0::LogEntry1_0;
+    use crate::parameters::Parameters;
+    use crate::parameters::spec_1_0::Parameters1_0;
+    use chrono::Utc;
+    use serde_json::json;
+
+    /// Helper to create a minimal LogEntry with a given DID document state
+    fn make_log_entry(state: serde_json::Value) -> LogEntry {
+        LogEntry::Spec1_0(LogEntry1_0 {
+            version_id: "1-abc123".to_string(),
+            version_time: Utc::now().fixed_offset(),
+            parameters: Parameters1_0::default(),
+            state,
+            proof: vec![],
+        })
+    }
+
+    #[test]
+    fn test_portability_same_id_not_portable() {
+        // Same DID id between entries, portable=false → should pass
+        let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let current = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let params = Parameters {
+            portable: Some(false),
+            ..Default::default()
+        };
+
+        assert!(current.verify_portability(&previous, &params).is_ok());
+    }
+
+    #[test]
+    fn test_portability_different_id_not_portable() {
+        // DID id changed, portable=false → must fail
+        let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let current = make_log_entry(json!({"id": "did:webvh:abc123:newdomain.com"}));
+        let params = Parameters {
+            portable: Some(false),
+            ..Default::default()
+        };
+
+        let result = current.verify_portability(&previous, &params);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("portable is not enabled")
+        );
+    }
+
+    #[test]
+    fn test_portability_different_id_portable_none() {
+        // DID id changed, portable=None (defaults to false) → must fail
+        let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let current = make_log_entry(json!({"id": "did:webvh:abc123:newdomain.com"}));
+        let params = Parameters {
+            portable: None,
+            ..Default::default()
+        };
+
+        let result = current.verify_portability(&previous, &params);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("portable is not enabled")
+        );
+    }
+
+    #[test]
+    fn test_portability_different_id_portable_missing_also_known_as() {
+        // DID id changed, portable=true, but no alsoKnownAs → must fail
+        let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let current = make_log_entry(json!({"id": "did:webvh:abc123:newdomain.com"}));
+        let params = Parameters {
+            portable: Some(true),
+            ..Default::default()
+        };
+
+        let result = current.verify_portability(&previous, &params);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not in alsoKnownAs")
+        );
+    }
+
+    #[test]
+    fn test_portability_different_id_portable_wrong_also_known_as() {
+        // DID id changed, portable=true, alsoKnownAs exists but doesn't contain previous DID
+        let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let current = make_log_entry(json!({
+            "id": "did:webvh:abc123:newdomain.com",
+            "alsoKnownAs": ["did:webvh:abc123:other.com"]
+        }));
+        let params = Parameters {
+            portable: Some(true),
+            ..Default::default()
+        };
+
+        let result = current.verify_portability(&previous, &params);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not in alsoKnownAs")
+        );
+    }
+
+    #[test]
+    fn test_portability_different_id_portable_with_also_known_as() {
+        // DID id changed, portable=true, alsoKnownAs contains previous DID → should pass
+        let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let current = make_log_entry(json!({
+            "id": "did:webvh:abc123:newdomain.com",
+            "alsoKnownAs": ["did:webvh:abc123:example.com"]
+        }));
+        let params = Parameters {
+            portable: Some(true),
+            ..Default::default()
+        };
+
+        assert!(current.verify_portability(&previous, &params).is_ok());
+    }
+
+    #[test]
+    fn test_portability_same_id_portable_enabled() {
+        // Same DID id, portable=true → should pass (no move happened)
+        let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let current = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let params = Parameters {
+            portable: Some(true),
+            ..Default::default()
+        };
+
+        assert!(current.verify_portability(&previous, &params).is_ok());
+    }
+
+    #[test]
+    fn test_portability_missing_id_fields() {
+        // Missing id fields in state → should pass (no comparison possible)
+        let previous = make_log_entry(json!({}));
+        let current = make_log_entry(json!({}));
+        let params = Parameters {
+            portable: Some(false),
+            ..Default::default()
+        };
+
+        assert!(current.verify_portability(&previous, &params).is_ok());
+    }
 
     #[test]
     fn test_authorized_keys_fail() {
