@@ -39,7 +39,7 @@ url = "2.5"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [dev-dependencies]
-affinidi-tdk = "0.4"
+affinidi-tdk = "0.5"
 
 anyhow = "1.0"
 byte-unit = "5.2"

@@ -52,7 +52,7 @@
   - `rand` crate updated from 0.9 to 0.10 (dev-dependency)
 - **MAINTENANCE:** Added comprehensive witness and watcher parameter tests
   covering validation, diff, and serialization scenarios
-- **MAINTENANCE:** Code test coverage @ 84.78%
+- **MAINTENANCE:** Code test coverage @ 86.13%
 
 ## 5th February 2026
 
