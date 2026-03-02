@@ -17,7 +17,7 @@ default = []
 ssi = ["dep:ssi"]
 
 [dependencies]
-affinidi-data-integrity = { version = "0.3" }
+affinidi-data-integrity = { version = "0.4" }
 affinidi-secrets-resolver = "0.5"
 
 ahash = { version = "0.8", features = ["serde"] }
@@ -48,7 +48,7 @@ console = "0.16"
 dialoguer = "0.12"
 format_num = "0.1.0"
 rand = "0.10"
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 tokio = { version = "1.49", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = { version = "0.3", features = [
   "env-filter",

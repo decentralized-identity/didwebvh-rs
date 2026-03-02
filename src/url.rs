@@ -350,6 +350,24 @@ impl WebVHURL {
     }
 }
 
+impl WebVHURL {
+    /// Returns the base DID string (without query parameters or fragment).
+    /// This is the format expected as the top-level `id` in a DID Document.
+    pub fn to_did_base(&self) -> String {
+        let mut url_string = String::from("did:webvh:");
+        url_string.push_str(&self.scid);
+        url_string.push(':');
+        url_string.push_str(&self.domain);
+        if let Some(port) = self.port {
+            url_string.push_str(&format!("%3A{port}"));
+        }
+        if self.path != "/.well-known/" {
+            url_string.push_str(&self.path.trim_end_matches("/").replace('/', ":"));
+        }
+        url_string
+    }
+}
+
 impl Display for WebVHURL {
     /// Handles converting a WebVHURL to a WebVH DID representation
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -590,6 +608,42 @@ mod tests {
         let result = webvh.get_http_files_url()?;
 
         assert_eq!(result.as_str(), "http://localhost/test/path/");
+        Ok(())
+    }
+
+    #[test]
+    fn to_did_base_simple() -> Result<(), DIDWebVHError> {
+        let webvh = WebVHURL::parse_did_url("did:webvh:scid:example.com")?;
+        assert_eq!(webvh.to_did_base(), "did:webvh:scid:example.com");
+        Ok(())
+    }
+
+    #[test]
+    fn to_did_base_with_port() -> Result<(), DIDWebVHError> {
+        let webvh = WebVHURL::parse_did_url("did:webvh:scid:example.com%3A8080")?;
+        assert_eq!(webvh.to_did_base(), "did:webvh:scid:example.com%3A8080");
+        Ok(())
+    }
+
+    #[test]
+    fn to_did_base_with_path() -> Result<(), DIDWebVHError> {
+        let webvh = WebVHURL::parse_did_url("did:webvh:scid:example.com:custom:path")?;
+        assert_eq!(
+            webvh.to_did_base(),
+            "did:webvh:scid:example.com:custom:path"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn to_did_base_strips_query_and_fragment() -> Result<(), DIDWebVHError> {
+        let webvh = WebVHURL::parse_did_url(
+            "did:webvh:scid:example.com%3A8080:custom:path?versionId=1-xyz#fragment",
+        )?;
+        assert_eq!(
+            webvh.to_did_base(),
+            "did:webvh:scid:example.com%3A8080:custom:path"
+        );
         Ok(())
     }
 }
