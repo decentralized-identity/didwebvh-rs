@@ -337,6 +337,22 @@ impl DIDWebVHState {
         let _span = span!(Level::DEBUG, "resolve_state").entered();
         self.validate()?;
 
+        // Per spec (Read/Resolve step 6): the DID being resolved MUST match the
+        // top-level `id` in at least one version of the DIDDoc.
+        let resolved_did = parsed_did_url.to_did_base();
+        let did_matches_any = self.log_entries.iter().any(|entry| {
+            entry
+                .get_state()
+                .get("id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|id| id == resolved_did)
+        });
+        if !did_matches_any {
+            return Err(DIDWebVHError::ValidationError(format!(
+                "DID being resolved ({resolved_did}) does not match the top-level 'id' in any DIDDoc version",
+            )));
+        }
+
         // Ensure metadata is set for the DID
         if let Some(first) = self.log_entries.first() {
             self.scid = first.get_scid().ok_or_else(|| {

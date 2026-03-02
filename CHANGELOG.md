@@ -1,5 +1,19 @@
 # didwebvh-rs Changelog history
 
+## 3rd March 2026
+
+### Release 0.2.0 (continued)
+
+- **FIX:** Resolved DID is now validated against DID Document `id` per spec
+  - During resolution, the DID being resolved MUST match the top-level `id`
+    in at least one version of the DIDDoc (Read/Resolve step 6 of the
+    did:webvh v1.0 specification)
+  - Added `WebVHURL::to_did_base()` helper that returns the base DID string
+    without query parameters or fragment for comparison
+- **MAINTENANCE:** Updated dependencies
+  - `affinidi-data-integrity` updated from 0.3 to 0.4
+  - `criterion` updated from 0.5 to 0.8
+
 ## 2nd March 2026
 
 ### Release 0.2.0 (continued)
