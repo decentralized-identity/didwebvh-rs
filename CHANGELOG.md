@@ -27,6 +27,7 @@
 - **MAINTENANCE:** Updated dependencies
   - `affinidi-data-integrity` updated from 0.3 to 0.4
   - `criterion` updated from 0.5 to 0.8
+- **MAINTENANCE:** Code test coverage @ 87.98%
 
 ## 2nd March 2026
 
@@ -119,7 +120,6 @@
   - `rand` crate updated from 0.9 to 0.10 (dev-dependency)
 - **MAINTENANCE:** Added comprehensive witness and watcher parameter tests
   covering validation, diff, and serialization scenarios
-- **MAINTENANCE:** Code test coverage @ 87.48%
 
 ## 5th February 2026
 
