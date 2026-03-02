@@ -4,6 +4,20 @@
 
 ### Release 0.2.0 (continued)
 
+- **FIX:** IP addresses are now rejected in DID URLs per the did:webvh spec
+  - `parse_did_url()` rejects IPv4 addresses (e.g. `192.168.1.1`) including
+    with ports (e.g. `192.168.1.1%3A8080`)
+  - `parse_url()` rejects both IPv4 and IPv6 addresses (e.g. `https://[::1]/`)
+    with a specific error message instead of the generic "Must contain domain"
+  - `localhost` and fully qualified domain names continue to work as expected
+- **FIX:** Query parameter mutual exclusivity now enforced at parse time
+  - Only one of `versionId`, `versionTime`, or `versionNumber` may be specified;
+    combining them now returns an error during URL parsing
+  - `get_specific_log_entry()` simplified to rely on parse-time validation,
+    with clearer per-parameter error messages
+- **MAINTENANCE:** Improved `generate_history` integration tests
+  - Extracted shared constants for base DID, log file, and witness file paths
+  - Added test cases for `versionId`, `versionTime`, and latest resolution
 - **FIX:** Resolved DID is now validated against DID Document `id` per spec
   - During resolution, the DID being resolved MUST match the top-level `id`
     in at least one version of the DIDDoc (Read/Resolve step 6 of the

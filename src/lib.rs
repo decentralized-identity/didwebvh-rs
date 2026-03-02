@@ -346,7 +346,8 @@ impl DIDWebVHState {
         })
     }
 
-    /// Gets a specific LogEntry based on versionId and versionTime
+    /// Gets a specific LogEntry based on versionId, versionTime, or versionNumber
+    /// Only one parameter should be set (mutual exclusivity enforced at parse time)
     pub fn get_specific_log_entry(
         &self,
         version_id: Option<&str>,
@@ -356,31 +357,23 @@ impl DIDWebVHState {
         if let Some(version_id) = version_id {
             for log_entry in self.log_entries.iter() {
                 if log_entry.get_version_id() == version_id {
-                    if let Some(version_time) = version_time
-                        && version_time < log_entry.get_version_time()
-                    {
-                        return Err(DIDWebVHError::NotFound(format!(
-                            "versionId '{}' exists but versionTime {} is before entry time {}",
-                            version_id, version_time, log_entry.get_version_time()
-                        )));
-                    }
                     return Ok(log_entry);
                 }
             }
-        } else if let Some(version_number) = version_number {
+            return Err(DIDWebVHError::NotFound(format!(
+                "No matching log entry for versionId={version_id}",
+            )));
+        }
+
+        if let Some(version_number) = version_number {
             for log_entry in self.log_entries.iter() {
                 if log_entry.get_version_number() == version_number {
-                    if let Some(version_time) = version_time
-                        && version_time < log_entry.get_version_time()
-                    {
-                        return Err(DIDWebVHError::NotFound(format!(
-                            "versionNumber {} exists but versionTime {} is before entry time {}",
-                            version_number, version_time, log_entry.get_version_time()
-                        )));
-                    }
                     return Ok(log_entry);
                 }
             }
+            return Err(DIDWebVHError::NotFound(format!(
+                "No matching log entry for versionNumber={version_number}",
+            )));
         }
 
         if let Some(version_time) = version_time {
@@ -395,12 +388,14 @@ impl DIDWebVHState {
             if let Some(found) = found {
                 return Ok(found);
             }
+            return Err(DIDWebVHError::NotFound(format!(
+                "No matching log entry for versionTime={version_time}",
+            )));
         }
 
-        Err(DIDWebVHError::NotFound(format!(
-            "No matching log entry for versionId={:?}, versionTime={:?}, versionNumber={:?}",
-            version_id, version_time, version_number
-        )))
+        Err(DIDWebVHError::NotFound(
+            "No query parameter specified (versionId, versionTime, or versionNumber)".to_string(),
+        ))
     }
 
     /// Creates a MatatData struct from a validaed LogEntryState

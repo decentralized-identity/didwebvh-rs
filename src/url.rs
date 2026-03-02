@@ -1,6 +1,7 @@
 use crate::DIDWebVHError;
 use chrono::{DateTime, FixedOffset};
 use std::fmt::{Display, Formatter};
+use std::net::IpAddr;
 use url::Url;
 
 type QueryPairs = (Option<String>, Option<DateTime<FixedOffset>>, Option<u32>);
@@ -115,6 +116,8 @@ impl WebVHURL {
             None => (parts[1].to_string(), None),
         };
 
+        Self::reject_ip_address(&domain)?;
+
         let mut path = String::new();
         let mut file_name = String::new();
         for part in parts[2..].iter() {
@@ -170,11 +173,20 @@ impl WebVHURL {
             Self::parse_query(url.query())?;
 
         let Some(domain) = url.domain() else {
+            // url::Url::domain() returns None for IP addresses — provide a specific error
+            if let Some(host) = url.host_str() {
+                return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                    "Invalid URL: IP addresses are not allowed, use a domain name instead: {host}",
+                )));
+            }
             return Err(DIDWebVHError::InvalidMethodIdentifier(
                 "Invalid URL: Must contain domain".to_string(),
             ));
         };
         let port = url.port();
+
+        // Defense-in-depth: reject IP addresses even if they somehow pass domain()
+        Self::reject_ip_address(domain)?;
 
         let (type_, path, file_name) = if url.path() == "/" {
             (
@@ -221,6 +233,19 @@ impl WebVHURL {
         })
     }
 
+    /// Rejects IP addresses (both IPv4 and IPv6) as the domain component.
+    /// The did:webvh spec requires domain names, not IP addresses.
+    fn reject_ip_address(domain: &str) -> Result<(), DIDWebVHError> {
+        // Strip brackets for IPv6 (e.g., "[::1]" -> "::1")
+        let bare = domain.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(domain);
+        if bare.parse::<IpAddr>().is_ok() {
+            return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                "Invalid URL: IP addresses are not allowed, use a domain name instead: {domain}",
+            )));
+        }
+        Ok(())
+    }
+
     /// Parses URL query parameters and returns:
     /// Error if versionTime or VersionId are invalid parameters
     /// None if there is no valid qauery
@@ -255,6 +280,18 @@ impl WebVHURL {
                     )));
                 }
             }
+            // Only one of versionId, versionTime, or versionNumber may be specified
+            let count = [version_id.is_some(), version_time.is_some(), version_number.is_some()]
+                .iter()
+                .filter(|&&v| v)
+                .count();
+            if count > 1 {
+                return Err(DIDWebVHError::DIDError(
+                    "Only one of versionId, versionTime, or versionNumber may be specified"
+                        .to_string(),
+                ));
+            }
+
             Ok((version_id, version_time, version_number))
         } else {
             Ok((None, None, None))
@@ -636,6 +673,53 @@ mod tests {
     }
 
     #[test]
+    fn parse_query_version_id_and_version_time_rejects() {
+        let result = WebVHURL::parse_did_url(
+            "did:webvh:scid:example.com?versionId=1-xyz&versionTime=2024-01-01T00:00:00Z",
+        );
+        let err = result.err().expect("expected error");
+        assert!(
+            err.to_string()
+                .contains("Only one of versionId, versionTime, or versionNumber")
+        );
+    }
+
+    #[test]
+    fn parse_query_version_id_and_version_number_rejects() {
+        let result =
+            WebVHURL::parse_did_url("did:webvh:scid:example.com?versionId=1-xyz&versionNumber=5");
+        let err = result.err().expect("expected error");
+        assert!(
+            err.to_string()
+                .contains("Only one of versionId, versionTime, or versionNumber")
+        );
+    }
+
+    #[test]
+    fn parse_query_version_time_and_version_number_rejects() {
+        let result = WebVHURL::parse_did_url(
+            "did:webvh:scid:example.com?versionTime=2024-01-01T00:00:00Z&versionNumber=5",
+        );
+        let err = result.err().expect("expected error");
+        assert!(
+            err.to_string()
+                .contains("Only one of versionId, versionTime, or versionNumber")
+        );
+    }
+
+    #[test]
+    fn parse_query_all_three_rejects() {
+        let result = WebVHURL::parse_did_url(
+            "did:webvh:scid:example.com?versionId=1-xyz&versionTime=2024-01-01T00:00:00Z&versionNumber=5",
+        );
+        let err = result.err().expect("expected error");
+        assert!(
+            err.to_string()
+                .contains("Only one of versionId, versionTime, or versionNumber")
+        );
+    }
+
+    #[test]
     fn to_did_base_strips_query_and_fragment() -> Result<(), DIDWebVHError> {
         let webvh = WebVHURL::parse_did_url(
             "did:webvh:scid:example.com%3A8080:custom:path?versionId=1-xyz#fragment",
@@ -644,6 +728,73 @@ mod tests {
             webvh.to_did_base(),
             "did:webvh:scid:example.com%3A8080:custom:path"
         );
+        Ok(())
+    }
+
+    // --- IP address rejection tests for parse_did_url ---
+
+    #[test]
+    fn parse_did_url_rejects_ipv4() {
+        let result = WebVHURL::parse_did_url("did:webvh:scid:192.168.1.1");
+        let err = result.err().expect("expected error for IPv4 address");
+        assert!(err.to_string().contains("IP addresses are not allowed"));
+    }
+
+    #[test]
+    fn parse_did_url_rejects_ipv4_loopback() {
+        let result = WebVHURL::parse_did_url("did:webvh:scid:127.0.0.1");
+        let err = result.err().expect("expected error for IPv4 loopback");
+        assert!(err.to_string().contains("IP addresses are not allowed"));
+    }
+
+    #[test]
+    fn parse_did_url_rejects_ipv4_with_port() {
+        let result = WebVHURL::parse_did_url("did:webvh:scid:192.168.1.1%3A8080");
+        let err = result.err().expect("expected error for IPv4 with port");
+        assert!(err.to_string().contains("IP addresses are not allowed"));
+    }
+
+    #[test]
+    fn parse_did_url_allows_localhost() {
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:localhost").is_ok());
+    }
+
+    #[test]
+    fn parse_did_url_allows_fqdn() {
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com").is_ok());
+    }
+
+    // --- IP address rejection tests for parse_url ---
+
+    #[test]
+    fn parse_url_rejects_ipv4() {
+        let url = Url::parse("https://192.168.1.1/").unwrap();
+        let result = WebVHURL::parse_url(&url);
+        let err = result.err().expect("expected error for IPv4 address");
+        assert!(err.to_string().contains("IP addresses are not allowed"));
+    }
+
+    #[test]
+    fn parse_url_rejects_ipv6() {
+        let url = Url::parse("https://[::1]/").unwrap();
+        let result = WebVHURL::parse_url(&url);
+        let err = result.err().expect("expected error for IPv6 address");
+        assert!(err.to_string().contains("IP addresses are not allowed"));
+    }
+
+    #[test]
+    fn parse_url_allows_localhost() -> Result<(), DIDWebVHError> {
+        let url = Url::parse("http://localhost:8000/").unwrap();
+        let result = WebVHURL::parse_url(&url)?;
+        assert_eq!(result.domain, "localhost");
+        Ok(())
+    }
+
+    #[test]
+    fn parse_url_allows_fqdn() -> Result<(), DIDWebVHError> {
+        let url = Url::parse("https://example.com/").unwrap();
+        let result = WebVHURL::parse_url(&url)?;
+        assert_eq!(result.domain, "example.com");
         Ok(())
     }
 }

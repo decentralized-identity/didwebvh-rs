@@ -22,10 +22,11 @@ site
 - [x] Witness webvh DID
 - [x] Migration of DID (portability)
 - [x] Validate witness information
-- [x] DID Query Parameters versionId and versionTime implemented
+- [x] DID Query Parameters versionId, versionTime, and versionNumber implemented
 - [x] WebVH DID specification version support (v1.0 and pre-v1.0)
 - [x] Export WebVH to a did:web document
 - [x] Generate did:scid:vh alsoKnownAs alias from did:webvh DIDs
+- [x] URL validation rejects IP addresses per spec (domain names required)
 - [x] WASM friendly for inclusion in other projects
 - [x] WebVH DID Create routines to make it easier to create DIDs programmatically
 
