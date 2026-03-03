@@ -297,6 +297,12 @@ impl Parameters {
             } else {
                 new_parameters.deactivated = previous.deactivated
             }
+
+            if self.scid.is_some() {
+                return Err(DIDWebVHError::ParametersError(
+                    "scid must not be provided on later Log Entries".to_string(),
+                ));
+            }
         } else {
             // First Log entry
             if let Some(scid) = &self.scid {
