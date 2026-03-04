@@ -2,7 +2,7 @@
 
 ## 3rd March 2026
 
-### Release 0.2.0 (continued)
+### Release 0.2.0
 
 - **FIX:** IP addresses are now rejected in DID URLs per the did:webvh spec
   - `parse_did_url()` rejects IPv4 addresses (e.g. `192.168.1.1`) including
@@ -27,12 +27,6 @@
 - **MAINTENANCE:** Updated dependencies
   - `affinidi-data-integrity` updated from 0.3 to 0.4
   - `criterion` updated from 0.5 to 0.8
-- **MAINTENANCE:** Code test coverage @ 87.98%
-
-## 2nd March 2026
-
-### Release 0.2.0 (continued)
-
 - **FEATURE:** Added benchmark harness for measuring DID performance
   - Criterion benchmarks (`cargo bench --bench did_benchmarks`) with HTML reports
   - Nightly benchmarks (`cargo +nightly bench --bench did_benchmarks_nightly`)
@@ -120,6 +114,7 @@
   - `rand` crate updated from 0.9 to 0.10 (dev-dependency)
 - **MAINTENANCE:** Added comprehensive witness and watcher parameter tests
   covering validation, diff, and serialization scenarios
+- **MAINTENANCE:** Code test coverage @ 87.98%
 
 ## 5th February 2026
 
