@@ -7,7 +7,7 @@
 use affinidi_secrets_resolver::secrets::Secret;
 use chrono::{Duration, Utc};
 use didwebvh_rs::{DIDWebVHState, parameters::Parameters};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// Generate an ed25519 Secret with a proper `did:key:...#...` id
@@ -48,9 +48,7 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
 
     let params1 = Parameters {
         update_keys: Some(Arc::new(vec![key1.get_public_keymultibase().unwrap()])),
-        next_key_hashes: Some(Arc::new(vec![
-            key2.get_public_keymultibase_hash().unwrap(),
-        ])),
+        next_key_hashes: Some(Arc::new(vec![key2.get_public_keymultibase_hash().unwrap()])),
         portable: Some(false),
         ..Default::default()
     };
@@ -73,9 +71,7 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
     let key3 = generate_signing_key();
     let params2 = Parameters {
         update_keys: Some(Arc::new(vec![key2.get_public_keymultibase().unwrap()])),
-        next_key_hashes: Some(Arc::new(vec![
-            key3.get_public_keymultibase_hash().unwrap(),
-        ])),
+        next_key_hashes: Some(Arc::new(vec![key3.get_public_keymultibase_hash().unwrap()])),
         ..Default::default()
     };
     state

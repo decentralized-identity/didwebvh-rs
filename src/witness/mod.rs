@@ -135,7 +135,9 @@ mod tests {
     fn test_validate_threshold_zero_error() {
         let w = Witnesses::Value {
             threshold: 0,
-            witnesses: vec![Witness { id: "w1".to_string() }],
+            witnesses: vec![Witness {
+                id: "w1".to_string(),
+            }],
         };
         assert!(w.validate().is_err());
     }
@@ -150,7 +152,9 @@ mod tests {
     fn test_validate_threshold_exceeds_witnesses_error() {
         let w = Witnesses::Value {
             threshold: 3,
-            witnesses: vec![Witness { id: "w1".to_string() }],
+            witnesses: vec![Witness {
+                id: "w1".to_string(),
+            }],
         };
         let err = w.validate().unwrap_err();
         assert!(err.to_string().contains("less than the threshold"));
@@ -166,7 +170,9 @@ mod tests {
     fn test_validate_ok() {
         let w = Witnesses::Value {
             threshold: 1,
-            witnesses: vec![Witness { id: "w1".to_string() }],
+            witnesses: vec![Witness {
+                id: "w1".to_string(),
+            }],
         };
         assert!(w.validate().is_ok());
     }
@@ -186,8 +192,12 @@ mod tests {
         let value = Witnesses::Value {
             threshold: 2,
             witnesses: vec![
-                Witness { id: "w1".to_string() },
-                Witness { id: "w2".to_string() },
+                Witness {
+                    id: "w1".to_string(),
+                },
+                Witness {
+                    id: "w2".to_string(),
+                },
             ],
         };
         assert_eq!(value.witnesses().unwrap().len(), 2);
@@ -202,7 +212,9 @@ mod tests {
     /// and during proof verification.
     #[test]
     fn test_witness_as_did() {
-        let w = Witness { id: "z6Mktest".to_string() };
+        let w = Witness {
+            id: "z6Mktest".to_string(),
+        };
         assert_eq!(w.as_did(), "did:key:z6Mktest");
     }
 
@@ -214,7 +226,9 @@ mod tests {
     /// proof back to the correct witness node.
     #[test]
     fn test_witness_as_did_key() {
-        let w = Witness { id: "z6Mktest".to_string() };
+        let w = Witness {
+            id: "z6Mktest".to_string(),
+        };
         assert_eq!(w.as_did_key(), "did:key:z6Mktest#z6Mktest");
     }
 
@@ -225,7 +239,9 @@ mod tests {
     /// contexts where the compact identifier form is preferred over the full DID URI.
     #[test]
     fn test_witness_display() {
-        let w = Witness { id: "z6Mktest".to_string() };
+        let w = Witness {
+            id: "z6Mktest".to_string(),
+        };
         assert_eq!(format!("{}", w), "z6Mktest");
     }
 
@@ -239,10 +255,21 @@ mod tests {
     #[test]
     fn test_is_empty() {
         assert!(Witnesses::Empty {}.is_empty());
-        assert!(Witnesses::Value { threshold: 0, witnesses: vec![] }.is_empty());
-        assert!(!Witnesses::Value {
-            threshold: 1,
-            witnesses: vec![Witness { id: "w1".to_string() }],
-        }.is_empty());
+        assert!(
+            Witnesses::Value {
+                threshold: 0,
+                witnesses: vec![]
+            }
+            .is_empty()
+        );
+        assert!(
+            !Witnesses::Value {
+                threshold: 1,
+                witnesses: vec![Witness {
+                    id: "w1".to_string()
+                }],
+            }
+            .is_empty()
+        );
     }
 }

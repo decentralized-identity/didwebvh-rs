@@ -108,8 +108,7 @@ pub async fn main() -> Result<()> {
     // Loop for count months (first entry represents the first month)
     for i in 2..(args.count + 1) {
         let version_time = base_time + ChronoDuration::seconds(i as i64);
-        next =
-            create_log_entry(&mut didwebvh, &mut secrets, &next, i, &args, version_time).await?;
+        next = create_log_entry(&mut didwebvh, &mut secrets, &next, i, &args, version_time).await?;
     }
 
     let end = SystemTime::now();

@@ -8,34 +8,44 @@
 
 - IP addresses rejected in DID URLs per spec (`parse_did_url()` and `parse_url()`)
 - Resolved DID validated against DID Document `id` (Read/Resolve step 6)
-- DID portability enforced: `id` changes require `portable: true` and previous DID in `alsoKnownAs`
+- DID portability enforced: `id` changes require `portable: true` and previous
+  DID in `alsoKnownAs`
 - `versionTime` ordering uses strict greater-than (equal timestamps rejected)
-- Query parameter mutual exclusivity enforced at parse time (`versionId`, `versionTime`, `versionNumber`)
-- Witness `{}` and watchers `[]` correctly treated as "not configured" instead of erroring
-- Empty arrays for `watchers`, `nextKeyHashes`, `updateKeys` no longer error in diff calculation
-- `Parameters1_0.deactivated` changed from `bool` to `Option<bool>` for lossless serialization round-trips
+- Query parameter mutual exclusivity enforced at parse time (`versionId`,
+  `versionTime`, `versionNumber`)
+- Witness `{}` and watchers `[]` correctly treated as "not configured" instead of
+  erroring
+- Empty arrays for `watchers`, `nextKeyHashes`, `updateKeys` no longer error in
+  diff calculation
+- `Parameters1_0.deactivated` changed from `bool` to `Option<bool>` for lossless
+  serialization round-trips
 
 #### Improvements
 
-- `resolve()` conditionally downloads `did-witness.json` only when witnesses are configured (`eager_witness_download` parameter)
+- `resolve()` conditionally downloads `did-witness.json` only when witnesses are
+  configured (`eager_witness_download` parameter)
 - `prelude` module added for convenient imports (`use didwebvh_rs::prelude::*`)
 - `NotFound` and `UnsupportedMethod` error variants now carry context strings
 - All `unwrap()` calls in production code replaced with proper error handling
-- Deduplicated log entry spec implementations via `impl_log_entry_common!` macro (~150 lines removed)
+- Deduplicated log entry spec implementations via `impl_log_entry_common!` macro
+  (~150 lines removed)
 - Deduplicated resolver helpers (`validate_log_entries()`, `resolve_witness_proofs()`)
 - Simplified `Parameters::validate()` (removed dead code, consolidated TTL validation)
 
 #### New
 
-- Benchmark harness: `cargo bench --bench did_benchmarks` (Criterion) and nightly benchmarks
+- Benchmark harness: `cargo bench --bench did_benchmarks` (Criterion) and nightly
+  benchmarks
 - `WebVHURL::to_did_base()` helper for DID comparison without query/fragment
 
 #### Maintenance
 
-- Dependencies updated: `affinidi-data-integrity` 0.3→0.4, `criterion` 0.5→0.8, `ssi` 0.14→0.15, `rand` 0.9→0.10
+- Dependencies updated: `affinidi-data-integrity` 0.3→0.4, `criterion` 0.5→0.8,
+  `ssi` 0.14→0.15, `rand` 0.9→0.10
 - Fixed minimum Rust version badge in README (1.88→1.90)
 - `generate_history` example uses deterministic timestamps; fixes `rand` 0.10 import
-- Comprehensive test coverage: 353 tests (340 unit + 12 integration + 1 doc-test) with shared test utilities
+- Comprehensive test coverage: 353 tests (340 unit + 12 integration + 1 doc-test)
+  with shared test utilities
 
 ## 5th February 2026
 

@@ -873,10 +873,12 @@ mod tests {
         let mut didwebvh = DIDWebVHState::default();
         let result = didwebvh.create_log_entry(None, &state, &parameters, &key);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("update_keys is set to []"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("update_keys is set to []")
+        );
     }
 
     /// Tests the full deactivation flow: create an initial entry, then deactivate with
@@ -1111,10 +1113,12 @@ mod tests {
         let state = create_multi_entry_state();
         let result = state.get_specific_log_entry(None, None, None);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("No query parameter"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No query parameter")
+        );
     }
 
     // ===== check_signing_key() additional tests =====
@@ -1135,10 +1139,12 @@ mod tests {
             &secret,
         );
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("update_keys are required"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("update_keys are required")
+        );
     }
 
     /// Tests that pre-rotation is rejected when the previous entry has pre_rotation_active
@@ -1152,9 +1158,7 @@ mod tests {
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
-            update_keys: Some(Arc::new(vec![
-                secret.get_public_keymultibase().unwrap(),
-            ])),
+            update_keys: Some(Arc::new(vec![secret.get_public_keymultibase().unwrap()])),
             ..Default::default()
         };
         let mut validated = parameters.validate(None).unwrap();
@@ -1176,15 +1180,14 @@ mod tests {
             validated_parameters: validated,
         };
 
-        let result = DIDWebVHState::check_signing_key(
-            Some(&previous),
-            &Parameters::default(),
-            &secret,
-        );
+        let result =
+            DIDWebVHState::check_signing_key(Some(&previous), &Parameters::default(), &secret);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("no next_key_hashes"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("no next_key_hashes")
+        );
     }
 }

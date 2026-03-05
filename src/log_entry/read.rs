@@ -218,30 +218,30 @@ impl LogEntry {
         let current_id = self.get_state().get("id").and_then(|v| v.as_str());
         let previous_id = previous.get_state().get("id").and_then(|v| v.as_str());
 
-        if let (Some(current), Some(previous_did)) = (current_id, previous_id) {
-            if current != previous_did {
-                // DID identifier changed — this is a move/rename
-                if parameters.portable != Some(true) {
-                    return Err(DIDWebVHError::ValidationError(
-                        "DID document id has changed but portable is not enabled".to_string(),
-                    ));
-                }
+        if let (Some(current), Some(previous_did)) = (current_id, previous_id)
+            && current != previous_did
+        {
+            // DID identifier changed — this is a move/rename
+            if parameters.portable != Some(true) {
+                return Err(DIDWebVHError::ValidationError(
+                    "DID document id has changed but portable is not enabled".to_string(),
+                ));
+            }
 
-                // Per spec: the previous DID string MUST appear in alsoKnownAs
-                let has_previous_in_also_known_as = self
-                    .get_state()
-                    .get("alsoKnownAs")
-                    .and_then(|v| v.as_array())
-                    .is_some_and(|arr| {
-                        arr.iter()
-                            .any(|v| v.as_str().is_some_and(|s| s == previous_did))
-                    });
+            // Per spec: the previous DID string MUST appear in alsoKnownAs
+            let has_previous_in_also_known_as = self
+                .get_state()
+                .get("alsoKnownAs")
+                .and_then(|v| v.as_array())
+                .is_some_and(|arr| {
+                    arr.iter()
+                        .any(|v| v.as_str().is_some_and(|s| s == previous_did))
+                });
 
-                if !has_previous_in_also_known_as {
-                    return Err(DIDWebVHError::ValidationError(format!(
-                        "DID has been moved but previous DID ({previous_did}) is not in alsoKnownAs",
-                    )));
-                }
+            if !has_previous_in_also_known_as {
+                return Err(DIDWebVHError::ValidationError(format!(
+                    "DID has been moved but previous DID ({previous_did}) is not in alsoKnownAs",
+                )));
             }
         }
 
@@ -314,12 +314,12 @@ impl LogEntry {
 mod tests {
     use std::sync::Arc;
 
-    use affinidi_data_integrity::{DataIntegrityProof, crypto_suites::CryptoSuite};
     use crate::DIDWebVHError;
     use crate::log_entry::LogEntry;
     use crate::log_entry::spec_1_0::LogEntry1_0;
     use crate::parameters::Parameters;
     use crate::parameters::spec_1_0::Parameters1_0;
+    use affinidi_data_integrity::{DataIntegrityProof, crypto_suites::CryptoSuite};
     use chrono::{Duration, Utc};
     use serde_json::json;
 
@@ -341,9 +341,7 @@ mod tests {
     /// Uses a fixed versionId of "1-abc123", a default DID document state with a
     /// valid id field, default parameters, and an empty proof list. Useful for tests
     /// that focus on versionTime ordering without needing valid cryptographic proofs.
-    fn make_log_entry_with_time(
-        time: chrono::DateTime<chrono::FixedOffset>,
-    ) -> LogEntry {
+    fn make_log_entry_with_time(time: chrono::DateTime<chrono::FixedOffset>) -> LogEntry {
         LogEntry::Spec1_0(LogEntry1_0 {
             version_id: "1-abc123".to_string(),
             version_time: time,
@@ -719,7 +717,12 @@ mod tests {
         // verify_version_id checks first entry must have version ID 1
         let result = entry.verify_version_id(None);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must have version ID 1"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must have version ID 1")
+        );
     }
 
     /// Tests that verify_version_id fails when the current entry's version number
@@ -749,7 +752,12 @@ mod tests {
         });
         let result = current.verify_version_id(Some(&previous));
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must be one greater"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must be one greater")
+        );
     }
 
     /// Tests that verify_version_time rejects a log entry whose timestamp is

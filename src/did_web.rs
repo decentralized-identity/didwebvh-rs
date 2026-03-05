@@ -102,8 +102,7 @@ fn to_web_did(old_state: &Value) -> Result<Value, DIDWebVHError> {
         .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't parse new state: {}", e)))?;
 
     // Set the DID id
-    ensure_object_mut(&mut new_state)?
-        .insert("id".to_string(), Value::String(web_did.clone()));
+    ensure_object_mut(&mut new_state)?.insert("id".to_string(), Value::String(web_did.clone()));
 
     // Reset the controller to be the webvh original ID
     ensure_object_mut(&mut new_state)?
@@ -166,8 +165,7 @@ fn update_also_known_as(
         new_aliases.push(Value::String(old_did.to_string()));
     }
 
-    ensure_object_mut(new_state)?
-        .insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
+    ensure_object_mut(new_state)?.insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
 
     Ok(())
 }

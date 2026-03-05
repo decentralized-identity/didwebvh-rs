@@ -140,9 +140,7 @@ pub fn parse_version_id_fields(version_id: &str) -> Result<(u32, String), DIDWeb
         )));
     };
     let id = id.parse::<u32>().map_err(|e| {
-        DIDWebVHError::ValidationError(format!(
-            "Failed to parse version ID ({id}) as u32: {e}",
-        ))
+        DIDWebVHError::ValidationError(format!("Failed to parse version ID ({id}) as u32: {e}",))
     })?;
     Ok((id, hash.to_string()))
 }
@@ -504,6 +502,89 @@ impl LogEntry {
     }
 }
 
+impl LogEntryMethods for LogEntry {
+    fn get_version_time_string(&self) -> String {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.get_version_time_string(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_version_time_string(),
+        }
+    }
+
+    fn get_version_id(&self) -> String {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.get_version_id(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_version_id(),
+        }
+    }
+
+    fn set_version_id(&mut self, version_id: &str) {
+        match self {
+            LogEntry::Spec1_0(log_entry) => {
+                log_entry.set_version_id(version_id);
+            }
+            LogEntry::Spec1_0Pre(log_entry) => {
+                log_entry.set_version_id(version_id);
+            }
+        }
+    }
+
+    fn get_parameters(&self) -> Parameters {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.get_parameters(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_parameters(),
+        }
+    }
+
+    fn add_proof(&mut self, proof: DataIntegrityProof) {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.add_proof(proof),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.add_proof(proof),
+        }
+    }
+
+    fn get_proofs(&self) -> &Vec<DataIntegrityProof> {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.get_proofs(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_proofs(),
+        }
+    }
+
+    fn clear_proofs(&mut self) {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.clear_proofs(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.clear_proofs(),
+        }
+    }
+
+    fn get_scid(&self) -> Option<String> {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.get_scid(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_scid(),
+        }
+    }
+
+    fn get_version_time(&self) -> DateTime<FixedOffset> {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.get_version_time(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_version_time(),
+        }
+    }
+
+    fn get_state(&self) -> &Value {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.get_state(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_state(),
+        }
+    }
+
+    fn get_did_document(&self) -> Result<Value, DIDWebVHError> {
+        match self {
+            LogEntry::Spec1_0(log_entry) => log_entry.get_did_document(),
+            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_did_document(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -843,88 +924,5 @@ mod tests {
             proof: vec![],
         });
         assert_eq!(entry_1_0.get_webvh_version(), Version::V1_0);
-    }
-}
-
-impl LogEntryMethods for LogEntry {
-    fn get_version_time_string(&self) -> String {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.get_version_time_string(),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_version_time_string(),
-        }
-    }
-
-    fn get_version_id(&self) -> String {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.get_version_id(),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_version_id(),
-        }
-    }
-
-    fn set_version_id(&mut self, version_id: &str) {
-        match self {
-            LogEntry::Spec1_0(log_entry) => {
-                log_entry.set_version_id(version_id);
-            }
-            LogEntry::Spec1_0Pre(log_entry) => {
-                log_entry.set_version_id(version_id);
-            }
-        }
-    }
-
-    fn get_parameters(&self) -> Parameters {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.get_parameters(),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_parameters(),
-        }
-    }
-
-    fn add_proof(&mut self, proof: DataIntegrityProof) {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.add_proof(proof),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.add_proof(proof),
-        }
-    }
-
-    fn get_proofs(&self) -> &Vec<DataIntegrityProof> {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.get_proofs(),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_proofs(),
-        }
-    }
-
-    fn clear_proofs(&mut self) {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.clear_proofs(),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.clear_proofs(),
-        }
-    }
-
-    fn get_scid(&self) -> Option<String> {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.get_scid(),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_scid(),
-        }
-    }
-
-    fn get_version_time(&self) -> DateTime<FixedOffset> {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.get_version_time(),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_version_time(),
-        }
-    }
-
-    fn get_state(&self) -> &Value {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.get_state(),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_state(),
-        }
-    }
-
-    fn get_did_document(&self) -> Result<Value, DIDWebVHError> {
-        match self {
-            LogEntry::Spec1_0(log_entry) => log_entry.get_did_document(),
-            LogEntry::Spec1_0Pre(log_entry) => log_entry.get_did_document(),
-        }
     }
 }

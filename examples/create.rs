@@ -53,4 +53,3 @@ fn main() {
         serde_json::to_string_pretty(&result.log_entry).unwrap()
     );
 }
-

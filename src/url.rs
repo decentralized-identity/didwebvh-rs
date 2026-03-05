@@ -67,9 +67,10 @@ impl WebVHURL {
         let url = if let Some(prefix) = url.strip_prefix("did:webvh:") {
             prefix
         } else if url.starts_with("did:") {
-            return Err(DIDWebVHError::UnsupportedMethod(
-                format!("Expected did:webvh, got: {}", url.split(':').take(3).collect::<Vec<_>>().join(":")),
-            ));
+            return Err(DIDWebVHError::UnsupportedMethod(format!(
+                "Expected did:webvh, got: {}",
+                url.split(':').take(3).collect::<Vec<_>>().join(":")
+            )));
         } else {
             url
         };
@@ -237,7 +238,10 @@ impl WebVHURL {
     /// The did:webvh spec requires domain names, not IP addresses.
     fn reject_ip_address(domain: &str) -> Result<(), DIDWebVHError> {
         // Strip brackets for IPv6 (e.g., "[::1]" -> "::1")
-        let bare = domain.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(domain);
+        let bare = domain
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .unwrap_or(domain);
         if bare.parse::<IpAddr>().is_ok() {
             return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
                 "Invalid URL: IP addresses are not allowed, use a domain name instead: {domain}",
@@ -281,10 +285,14 @@ impl WebVHURL {
                 }
             }
             // Only one of versionId, versionTime, or versionNumber may be specified
-            let count = [version_id.is_some(), version_time.is_some(), version_number.is_some()]
-                .iter()
-                .filter(|&&v| v)
-                .count();
+            let count = [
+                version_id.is_some(),
+                version_time.is_some(),
+                version_number.is_some(),
+            ]
+            .iter()
+            .filter(|&&v| v)
+            .count();
             if count > 1 {
                 return Err(DIDWebVHError::DIDError(
                     "Only one of versionId, versionTime, or versionNumber may be specified"

@@ -34,9 +34,7 @@ async fn get_specific_version_number() {
 #[tokio::test]
 async fn get_specific_version_id() {
     let mut webvh = DIDWebVHState::default();
-    let did = format!(
-        "{BASE_DID}?versionId=3-QmSYiwKZbc7zwABzVrwJjHrXAS71Tf7evX6KM9EGrGnY26"
-    );
+    let did = format!("{BASE_DID}?versionId=3-QmSYiwKZbc7zwABzVrwJjHrXAS71Tf7evX6KM9EGrGnY26");
     let (log_entry, _) = webvh
         .resolve_file(&did, LOG_FILE, Some(WITNESS_FILE))
         .await

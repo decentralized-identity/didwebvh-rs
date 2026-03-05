@@ -351,19 +351,13 @@ impl Parameters {
                     } else if !new_parameters.pre_rotation_active && pre_rotation_previous_value {
                         // Key pre-rotation has been turned off
                         // Update keys must be part of the previous nextKeyHashes
-                        Self::validate_pre_rotation_keys(
-                            &previous.next_key_hashes,
-                            update_keys,
-                        )?;
+                        Self::validate_pre_rotation_keys(&previous.next_key_hashes, update_keys)?;
                         new_parameters.update_keys = Some(update_keys.clone());
                         new_parameters.active_update_keys = update_keys.clone();
                     } else if new_parameters.pre_rotation_active {
                         // Key pre-rotation is active
                         // Update keys must be part of the previous nextKeyHashes
-                        Self::validate_pre_rotation_keys(
-                            &previous.next_key_hashes,
-                            update_keys,
-                        )?;
+                        Self::validate_pre_rotation_keys(&previous.next_key_hashes, update_keys)?;
                         new_parameters.active_update_keys = update_keys.clone();
                     } else {
                         // No Key pre-rotation is active
@@ -512,7 +506,7 @@ impl Parameters {
         // Determine TTL: use new value if specified, otherwise inherit from previous
         new_parameters.ttl = match &self.ttl {
             Some(ttl) => Some(*ttl),
-            None => previous.map_or(None, |p| p.ttl),
+            None => previous.and_then(|p| p.ttl),
         };
 
         debug!("Parameters successfully validated");
@@ -692,9 +686,7 @@ mod tests {
     fn first_entry_params() -> Parameters {
         Parameters {
             scid: Some(Arc::new(SCID_HOLDER.to_string())),
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         }
     }
@@ -716,9 +708,7 @@ mod tests {
     /// validated first entry.
     fn subsequent_entry_params() -> Parameters {
         Parameters {
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         }
     }
@@ -882,9 +872,10 @@ mod tests {
             ..Default::default()
         };
         let err = new.diff(&old).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("cannot be deactivated while pre-rotation"));
+        assert!(
+            err.to_string()
+                .contains("cannot be deactivated while pre-rotation")
+        );
     }
 
     /// Given old parameters with deactivated=false and new parameters with deactivated=true,
@@ -1010,9 +1001,7 @@ mod tests {
         let previous = validated_first_params();
         let current = Parameters {
             scid: Some(Arc::new("extra-scid".to_string())),
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         };
         let err = current.validate(Some(&previous)).unwrap_err();
@@ -1033,9 +1022,7 @@ mod tests {
 
         let current = Parameters {
             next_key_hashes: None, // absent
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         };
         let err = current.validate(Some(&previous)).unwrap_err();
@@ -1062,9 +1049,7 @@ mod tests {
 
         let current = Parameters {
             next_key_hashes: Some(Arc::new(vec![])), // empty turns off
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         };
         let result = current.validate(Some(&previous)).unwrap();
@@ -1081,9 +1066,7 @@ mod tests {
     fn validate_next_key_hashes_value_activates() {
         let params = Parameters {
             scid: Some(Arc::new(SCID_HOLDER.to_string())),
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             next_key_hashes: Some(Arc::new(vec!["somehash".to_string()])),
             ..Default::default()
         };
@@ -1135,9 +1118,7 @@ mod tests {
         let previous = validated_first_params();
         let current = Parameters {
             portable: Some(true),
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         };
         let err = current.validate(Some(&previous)).unwrap_err();
@@ -1154,9 +1135,7 @@ mod tests {
         let previous = validated_first_params();
         let current = Parameters {
             portable: Some(false),
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         };
         let result = current.validate(Some(&previous)).unwrap();
@@ -1177,9 +1156,10 @@ mod tests {
             ..Default::default()
         };
         let err = params.validate(None).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("cannot be deactivated on the first"));
+        assert!(
+            err.to_string()
+                .contains("cannot be deactivated on the first")
+        );
     }
 
     /// Given a subsequent entry that is deactivated but still has non-empty updateKeys,
@@ -1196,9 +1176,10 @@ mod tests {
             ..Default::default()
         };
         let err = current.validate(Some(&previous)).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("deactivated, yet updateKeys are not null"));
+        assert!(
+            err.to_string()
+                .contains("deactivated, yet updateKeys are not null")
+        );
     }
 
     /// Given a subsequent entry with deactivated=true and empty updateKeys,
@@ -1231,9 +1212,7 @@ mod tests {
 
         let current = Parameters {
             ttl: None,
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         };
         let result = current.validate(Some(&previous)).unwrap();
@@ -1255,8 +1234,7 @@ mod tests {
     #[test]
     fn pre_rotation_keys_valid() {
         let key = "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY";
-        let hash =
-            affinidi_secrets_resolver::secrets::Secret::base58_hash_string(key).unwrap();
+        let hash = affinidi_secrets_resolver::secrets::Secret::base58_hash_string(key).unwrap();
         let hashes = Some(Arc::new(vec![hash]));
         let keys = Arc::new(vec![key.to_string()]);
         assert!(Parameters::validate_pre_rotation_keys(&hashes, &keys).is_ok());
@@ -1284,13 +1262,12 @@ mod tests {
     #[test]
     fn pre_rotation_keys_not_in_hashes_error() {
         let hashes = Some(Arc::new(vec!["wrong_hash".to_string()]));
-        let keys = Arc::new(vec![
-            TEST_UPDATE_KEY.to_string(),
-        ]);
+        let keys = Arc::new(vec![TEST_UPDATE_KEY.to_string()]);
         let err = Parameters::validate_pre_rotation_keys(&hashes, &keys).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("was not specified in the previous nextKeyHashes"));
+        assert!(
+            err.to_string()
+                .contains("was not specified in the previous nextKeyHashes")
+        );
     }
 
     // ------------------------------------------------------------------------

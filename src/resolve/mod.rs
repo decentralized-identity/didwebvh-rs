@@ -159,10 +159,7 @@ impl DIDWebVHState {
     }
 
     /// Validate that parsed log entries are non-empty, returning a contextual error.
-    fn validate_log_entries(
-        log_entries: &[LogEntryState],
-        did: &str,
-    ) -> Result<(), DIDWebVHError> {
+    fn validate_log_entries(log_entries: &[LogEntryState], did: &str) -> Result<(), DIDWebVHError> {
         if log_entries.is_empty() {
             warn!("No LogEntries found for DID: {did}");
             return Err(DIDWebVHError::NotFound(format!(
@@ -233,7 +230,9 @@ impl DIDWebVHState {
 
                     let needs_witnesses = Self::needs_witness_proofs(&log_entries);
                     let witness_proofs = if eager_witness_download || needs_witnesses {
-                        let raw_result = DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone()).await;
+                        let raw_result =
+                            DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone())
+                                .await;
                         Self::resolve_witness_proofs(raw_result, needs_witnesses)?
                     } else {
                         WitnessProofCollection::default()
@@ -252,9 +251,7 @@ impl DIDWebVHState {
                         .timeout(network_timeout)
                         .build()
                         .map_err(|e| {
-                            DIDWebVHError::NetworkError(format!(
-                                "Failed to build HTTP client: {e}"
-                            ))
+                            DIDWebVHError::NetworkError(format!("Failed to build HTTP client: {e}"))
                         })?;
 
                     if eager_witness_download {
@@ -356,9 +353,7 @@ impl DIDWebVHState {
         // Ensure metadata is set for the DID
         if let Some(first) = self.log_entries.first() {
             self.scid = first.get_scid().ok_or_else(|| {
-                DIDWebVHError::ValidationError(
-                    "First log entry is missing SCID".to_string(),
-                )
+                DIDWebVHError::ValidationError("First log entry is missing SCID".to_string())
             })?;
             self.meta_first_ts = first.get_version_time_string();
         }

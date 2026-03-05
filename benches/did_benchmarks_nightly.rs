@@ -2,12 +2,12 @@
 
 extern crate test;
 
+use affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::{
     DIDWebVHState,
     create::{CreateDIDConfig, create_did},
     parameters::Parameters,
 };
-use affinidi_secrets_resolver::secrets::Secret;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use test::Bencher;
@@ -104,11 +104,14 @@ fn bench_resolve_single_entry(b: &mut Bencher) {
     b.iter(|| {
         let mut state = DIDWebVHState::default();
         rt.block_on(async {
-            let _ = state.resolve_file(
-                "did:webvh:QmP7NForSYfNsLYSibwCNLv46NeHR8e8JNW4BgMDhB5qia:localhost%3A8000",
-                "tests/test_vectors/first_log_entry_verify_full.jsonl",
-                None,
-            ).await.unwrap();
+            let _ = state
+                .resolve_file(
+                    "did:webvh:QmP7NForSYfNsLYSibwCNLv46NeHR8e8JNW4BgMDhB5qia:localhost%3A8000",
+                    "tests/test_vectors/first_log_entry_verify_full.jsonl",
+                    None,
+                )
+                .await
+                .unwrap();
         });
         test::black_box(&state);
     });
@@ -120,11 +123,14 @@ fn bench_resolve_large_with_witnesses(b: &mut Bencher) {
     b.iter(|| {
         let mut state = DIDWebVHState::default();
         rt.block_on(async {
-            let _ = state.resolve_file(
-                "did:webvh:QmSnw6YkSm2Tu8pASb6VdxuSU2PetvSoLumFfVh5VafiKT:test.affinidi.com",
-                "tests/test_vectors/did-generate_history.jsonl",
-                Some("tests/test_vectors/did-witness-generate_history.json"),
-            ).await.unwrap();
+            let _ = state
+                .resolve_file(
+                    "did:webvh:QmSnw6YkSm2Tu8pASb6VdxuSU2PetvSoLumFfVh5VafiKT:test.affinidi.com",
+                    "tests/test_vectors/did-generate_history.jsonl",
+                    Some("tests/test_vectors/did-witness-generate_history.json"),
+                )
+                .await
+                .unwrap();
         });
         test::black_box(&state);
     });
@@ -148,9 +154,7 @@ fn bench_validate_large_with_witnesses(b: &mut Bencher) {
         state
             .load_log_entries_from_file("tests/test_vectors/did-generate_history.jsonl")
             .unwrap();
-        state.load_witness_proofs_from_file(
-            "tests/test_vectors/did-witness-generate_history.json",
-        );
+        state.load_witness_proofs_from_file("tests/test_vectors/did-witness-generate_history.json");
         test::black_box(state.validate().unwrap());
     });
 }

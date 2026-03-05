@@ -203,9 +203,7 @@ mod tests {
     fn pre_rotation_active() {
         // On first LogEntry, if next_hashes is configured, then pre-rotation is active
         let first_params = Parameters {
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             next_key_hashes: Some(Arc::new(vec![
                 "zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155".to_string(),
             ])),
@@ -293,9 +291,7 @@ mod tests {
     fn first_entry_params() -> Parameters {
         Parameters {
             scid: Some(Arc::new(SCID_HOLDER.to_string())),
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         }
     }
@@ -303,9 +299,7 @@ mod tests {
     /// Helper to create a minimal valid subsequent-entry Parameters (no scid)
     fn subsequent_entry_params() -> Parameters {
         Parameters {
-            update_keys: Some(Arc::new(vec![
-                TEST_UPDATE_KEY.to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             ..Default::default()
         }
     }
@@ -350,7 +344,9 @@ mod tests {
             witness: Some(Arc::new(Witnesses::Empty {})),
             ..first_entry_params()
         };
-        let validated = params.validate(None).expect("witness: {} on first entry should succeed");
+        let validated = params
+            .validate(None)
+            .expect("witness: {} on first entry should succeed");
         assert!(validated.witness.is_none());
         assert!(validated.active_witness.is_none());
     }
@@ -408,9 +404,7 @@ mod tests {
             witness: None,
             ..subsequent_entry_params()
         };
-        let validated = current
-            .validate(Some(&previous))
-            .expect("Should succeed");
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
         assert!(validated.witness.is_none());
         assert!(validated.active_witness.is_none());
     }
@@ -426,9 +420,7 @@ mod tests {
             witness: None,
             ..subsequent_entry_params()
         };
-        let validated = current
-            .validate(Some(&previous))
-            .expect("Should succeed");
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
         // Inherits previous witness config
         assert!(validated.witness.is_some());
         assert!(validated.active_witness.is_some());
@@ -465,9 +457,7 @@ mod tests {
             witness: Some(sample_witnesses_2()),
             ..subsequent_entry_params()
         };
-        let validated = current
-            .validate(Some(&previous))
-            .expect("Should succeed");
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
         // New witness config set, active_witness uses previous entry's witnesses
         assert_eq!(validated.witness, Some(sample_witnesses_2()));
         assert_eq!(validated.active_witness, Some(sample_witnesses()));
@@ -503,17 +493,16 @@ mod tests {
     #[test]
     fn diff_witness_current_absent() {
         // Current None means "keep previous", so diff is None
-        let diff = Parameters::diff_witness(&Some(sample_witnesses()), &None)
-            .expect("Should succeed");
+        let diff =
+            Parameters::diff_witness(&Some(sample_witnesses()), &None).expect("Should succeed");
         assert!(diff.is_none());
     }
 
     #[test]
     fn diff_witness_previous_absent_current_empty() {
         // Absent -> Empty = emit Empty (deactivation from no prior state)
-        let diff =
-            Parameters::diff_witness(&None, &Some(Arc::new(Witnesses::Empty {})))
-                .expect("Should succeed");
+        let diff = Parameters::diff_witness(&None, &Some(Arc::new(Witnesses::Empty {})))
+            .expect("Should succeed");
         assert!(diff.is_some());
         assert!(diff.unwrap().is_empty());
     }
@@ -552,17 +541,16 @@ mod tests {
     #[test]
     fn diff_witness_different_value() {
         // Different values -> emit new value
-        let diff =
-            Parameters::diff_witness(&Some(sample_witnesses()), &Some(sample_witnesses_2()))
-                .expect("Should succeed");
+        let diff = Parameters::diff_witness(&Some(sample_witnesses()), &Some(sample_witnesses_2()))
+            .expect("Should succeed");
         assert_eq!(diff, Some(sample_witnesses_2()));
     }
 
     #[test]
     fn diff_witness_absent_to_value() {
         // None -> Value = emit new value
-        let diff = Parameters::diff_witness(&None, &Some(sample_witnesses()))
-            .expect("Should succeed");
+        let diff =
+            Parameters::diff_witness(&None, &Some(sample_witnesses())).expect("Should succeed");
         assert_eq!(diff, Some(sample_witnesses()));
     }
 
@@ -670,9 +658,7 @@ mod tests {
             watchers: None,
             ..subsequent_entry_params()
         };
-        let validated = current
-            .validate(Some(&previous))
-            .expect("Should succeed");
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
         assert!(validated.watchers.is_none());
     }
 
@@ -686,9 +672,7 @@ mod tests {
             watchers: None,
             ..subsequent_entry_params()
         };
-        let validated = current
-            .validate(Some(&previous))
-            .expect("Should succeed");
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
         assert_eq!(
             validated.watchers,
             Some(Arc::new(vec!["https://watcher.example.com".to_string()]))
@@ -721,9 +705,7 @@ mod tests {
             watchers: Some(Arc::new(vec!["https://new.example.com".to_string()])),
             ..subsequent_entry_params()
         };
-        let validated = current
-            .validate(Some(&previous))
-            .expect("Should succeed");
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
         assert_eq!(
             validated.watchers,
             Some(Arc::new(vec!["https://new.example.com".to_string()]))
@@ -740,9 +722,7 @@ mod tests {
             watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
             ..subsequent_entry_params()
         };
-        let validated = current
-            .validate(Some(&previous))
-            .expect("Should succeed");
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
         assert!(validated.watchers.is_some());
     }
 
@@ -773,12 +753,8 @@ mod tests {
 
     #[test]
     fn diff_watchers_absent_to_empty() {
-        let diff = Parameters::diff_tri_state(
-            &None,
-            &Some(Arc::new(Vec::new())),
-            "watchers",
-        )
-        .expect("Should succeed");
+        let diff = Parameters::diff_tri_state(&None, &Some(Arc::new(Vec::new())), "watchers")
+            .expect("Should succeed");
         assert!(diff.is_some_and(|a| a.is_empty()));
     }
 
@@ -831,11 +807,14 @@ mod tests {
 
     /// Helper: assert that a Parameters1_0 JSON round-trips losslessly
     fn assert_params_roundtrip(json: serde_json::Value) {
-        let params: Parameters1_0 = serde_json::from_value(json.clone())
-            .expect("Parameters1_0 deserialization failed");
-        let re_serialized = serde_json::to_value(&params)
-            .expect("Parameters1_0 re-serialization failed");
-        assert_eq!(json, re_serialized, "Parameters1_0 round-trip must be lossless");
+        let params: Parameters1_0 =
+            serde_json::from_value(json.clone()).expect("Parameters1_0 deserialization failed");
+        let re_serialized =
+            serde_json::to_value(&params).expect("Parameters1_0 re-serialization failed");
+        assert_eq!(
+            json, re_serialized,
+            "Parameters1_0 round-trip must be lossless"
+        );
     }
 
     /// Helper: assert a field is absent after round-trip when omitted from JSON

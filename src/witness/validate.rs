@@ -131,8 +131,8 @@ mod tests {
         log_entry::{LogEntry, spec_1_0::LogEntry1_0},
         log_entry_state::{LogEntryState, LogEntryValidationStatus},
         parameters::{Parameters, spec_1_0::Parameters1_0},
-        witness::{Witness, Witnesses},
         witness::proofs::WitnessProofCollection,
+        witness::{Witness, Witnesses},
     };
 
     /// Tests that validation succeeds when `active_witness` is `None`.
@@ -176,10 +176,7 @@ mod tests {
     /// (aside from `active_witness`), and an `Ok` validation status. This helper
     /// exists so individual tests can focus on witness validation logic without
     /// duplicating `LogEntryState` construction boilerplate.
-    fn make_witnessed_entry(
-        version_id: &str,
-        witnesses: Witnesses,
-    ) -> LogEntryState {
+    fn make_witnessed_entry(version_id: &str, witnesses: Witnesses) -> LogEntryState {
         LogEntryState {
             version_number: version_id
                 .split_once('-')
@@ -358,9 +355,7 @@ mod tests {
         let witness_id = format!("did:key:{pk}");
         let witnesses = Witnesses::Value {
             threshold: 1,
-            witnesses: vec![Witness {
-                id: witness_id,
-            }],
+            witnesses: vec![Witness { id: witness_id }],
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
 

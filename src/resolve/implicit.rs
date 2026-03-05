@@ -46,8 +46,7 @@ pub(crate) fn update_implicit_services(
             new_services.push(get_service_files(did_id, &url)?);
         }
 
-        ensure_object_mut(new_state)?
-            .insert("service".to_string(), Value::Array(new_services));
+        ensure_object_mut(new_state)?.insert("service".to_string(), Value::Array(new_services));
     } else {
         return Err(DIDWebVHError::DIDError(
             "services is not an array".to_string(),
@@ -110,7 +109,12 @@ mod tests {
         let existing = json!([{"id": "did:webvh:scid123:example.com#custom", "type": "Custom", "serviceEndpoint": "https://example.com"}]);
         let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
         let services_ref = state.get("service").cloned();
-        update_implicit_services(services_ref.as_ref(), &mut state, "did:webvh:scid123:example.com").unwrap();
+        update_implicit_services(
+            services_ref.as_ref(),
+            &mut state,
+            "did:webvh:scid123:example.com",
+        )
+        .unwrap();
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 3); // original + whois + files
     }
@@ -128,7 +132,12 @@ mod tests {
         ]);
         let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
         let services_ref = state.get("service").cloned();
-        update_implicit_services(services_ref.as_ref(), &mut state, "did:webvh:scid123:example.com").unwrap();
+        update_implicit_services(
+            services_ref.as_ref(),
+            &mut state,
+            "did:webvh:scid123:example.com",
+        )
+        .unwrap();
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 2); // no additions
     }
@@ -141,7 +150,8 @@ mod tests {
     fn test_services_not_array_error() {
         let services = json!("not-an-array");
         let mut state = json!({"id": "did:webvh:scid123:example.com"});
-        let result = update_implicit_services(Some(&services), &mut state, "did:webvh:scid123:example.com");
+        let result =
+            update_implicit_services(Some(&services), &mut state, "did:webvh:scid123:example.com");
         assert!(result.is_err());
     }
 
@@ -157,7 +167,12 @@ mod tests {
         ]);
         let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
         let services_ref = state.get("service").cloned();
-        update_implicit_services(services_ref.as_ref(), &mut state, "did:webvh:scid123:example.com").unwrap();
+        update_implicit_services(
+            services_ref.as_ref(),
+            &mut state,
+            "did:webvh:scid123:example.com",
+        )
+        .unwrap();
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 2);
         let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();
@@ -176,7 +191,12 @@ mod tests {
         ]);
         let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
         let services_ref = state.get("service").cloned();
-        update_implicit_services(services_ref.as_ref(), &mut state, "did:webvh:scid123:example.com").unwrap();
+        update_implicit_services(
+            services_ref.as_ref(),
+            &mut state,
+            "did:webvh:scid123:example.com",
+        )
+        .unwrap();
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 2);
         let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();

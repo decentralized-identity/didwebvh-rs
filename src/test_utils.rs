@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 /// A well-known ed25519 multibase public key used as a default in parameter tests.
 ///
 /// This avoids repeating the same 49-character string across dozens of test sites.
+#[cfg(test)]
 pub const TEST_UPDATE_KEY: &str = "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY";
 
 /// Generates a fresh Ed25519 signing key with a `did:key` URI.

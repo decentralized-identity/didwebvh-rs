@@ -1,10 +1,10 @@
+use affinidi_secrets_resolver::secrets::Secret;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use didwebvh_rs::{
     DIDWebVHState,
     create::{CreateDIDConfig, create_did},
     parameters::Parameters,
 };
-use affinidi_secrets_resolver::secrets::Secret;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -30,10 +30,10 @@ fn setup_basic_creation() -> CreateDIDConfig {
 
     let mut doc = did_document_template();
     // Replace the placeholder key with the actual public key
-    if let Some(vm) = doc["verificationMethod"].as_array_mut() {
-        if let Some(entry) = vm.first_mut() {
-            entry["publicKeyMultibase"] = Value::String(pub_mb.clone());
-        }
+    if let Some(vm) = doc["verificationMethod"].as_array_mut()
+        && let Some(entry) = vm.first_mut()
+    {
+        entry["publicKeyMultibase"] = Value::String(pub_mb.clone());
     }
 
     let parameters = Parameters {
@@ -56,10 +56,10 @@ fn setup_creation_with_aliases() -> CreateDIDConfig {
     let pub_mb = key.get_public_keymultibase().unwrap();
 
     let mut doc = did_document_template();
-    if let Some(vm) = doc["verificationMethod"].as_array_mut() {
-        if let Some(entry) = vm.first_mut() {
-            entry["publicKeyMultibase"] = Value::String(pub_mb.clone());
-        }
+    if let Some(vm) = doc["verificationMethod"].as_array_mut()
+        && let Some(entry) = vm.first_mut()
+    {
+        entry["publicKeyMultibase"] = Value::String(pub_mb.clone());
     }
 
     let parameters = Parameters {
@@ -164,9 +164,7 @@ fn bench_validation(c: &mut Criterion) {
             || {
                 let mut state = DIDWebVHState::default();
                 state
-                    .load_log_entries_from_file(
-                        "tests/test_vectors/did-generate_history.jsonl",
-                    )
+                    .load_log_entries_from_file("tests/test_vectors/did-generate_history.jsonl")
                     .unwrap();
                 state.load_witness_proofs_from_file(
                     "tests/test_vectors/did-witness-generate_history.json",
@@ -181,5 +179,10 @@ fn bench_validation(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_did_creation, bench_did_resolution, bench_validation);
+criterion_group!(
+    benches,
+    bench_did_creation,
+    bench_did_resolution,
+    bench_validation
+);
 criterion_main!(benches);

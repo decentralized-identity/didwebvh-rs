@@ -319,7 +319,9 @@ mod tests {
     use std::sync::Arc;
 
     use super::WitnessProof;
-    use crate::{DIDWebVHError, test_utils::make_test_proof, witness::proofs::WitnessProofCollection};
+    use crate::{
+        DIDWebVHError, test_utils::make_test_proof, witness::proofs::WitnessProofCollection,
+    };
 
     /// Creates a `WitnessProofCollection` pre-populated with two version groups:
     ///
@@ -477,11 +479,7 @@ mod tests {
 
         proofs.proofs.0.iter().enumerate().for_each(|(i, p)| {
             let version = if i == 0 { "1-abcd" } else { "2-abcd" };
-            assert_eq!(
-                p.proof.len(),
-                3,
-                "Expected 3 proofs for version {version}"
-            );
+            assert_eq!(p.proof.len(), 3, "Expected 3 proofs for version {version}");
         });
     }
 
@@ -741,10 +739,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         );
-        let file_path = temp_dir
-            .join(unique_name)
-            .to_string_lossy()
-            .to_string();
+        let file_path = temp_dir.join(unique_name).to_string_lossy().to_string();
 
         proofs
             .save_to_file(&file_path)
@@ -784,7 +779,11 @@ mod tests {
             .add_proof("1-abcd", &proof_a, false)
             .expect("Couldn't add proof");
 
-        assert_eq!(proofs.get_total_count(), 1, "Expected 1 proof after first add");
+        assert_eq!(
+            proofs.get_total_count(),
+            1,
+            "Expected 1 proof after first add"
+        );
 
         proofs
             .add_proof("1-abcd", &proof_b, false)
