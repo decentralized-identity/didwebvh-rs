@@ -8,7 +8,7 @@
 
 use crate::{
     DIDWebVHError, DIDWebVHState,
-    log_entry::{LogEntry, MetaData},
+    log_entry::{LogEntry, LogEntryMethods, MetaData},
     log_entry_state::{LogEntryState, LogEntryValidationStatus},
     parameters::Parameters,
     url::{URLType, WebVHURL},
@@ -118,15 +118,91 @@ impl DIDWebVHState {
         .await
     }
 
+    /// Parse raw log entry lines into a vec of `LogEntryState`
+    fn parse_log_entries(raw: &str) -> Result<Vec<LogEntryState>, DIDWebVHError> {
+        let mut log_entries = Vec::new();
+        let mut version = None;
+        for line in raw.lines() {
+            let log_entry = LogEntry::deserialize_string(line, version)?;
+            version = Some(log_entry.get_webvh_version());
+            log_entries.push(LogEntryState {
+                log_entry: log_entry.clone(),
+                version_number: log_entry.get_version_id_fields()?.0,
+                validation_status: LogEntryValidationStatus::NotValidated,
+                validated_parameters: Parameters::default(),
+            });
+        }
+        Ok(log_entries)
+    }
+
+    /// Check whether any log entry has a non-empty witness parameter
+    fn needs_witness_proofs(log_entries: &[LogEntryState]) -> bool {
+        log_entries.iter().any(|e| {
+            e.log_entry
+                .get_parameters()
+                .witness
+                .as_ref()
+                .is_some_and(|w| !w.is_empty())
+        })
+    }
+
+    /// Parse a raw witness proofs string into a `WitnessProofCollection`
+    fn parse_witness_proofs(raw: &str) -> Result<WitnessProofCollection, DIDWebVHError> {
+        Ok(WitnessProofCollection {
+            proofs: serde_json::from_str(raw).map_err(|e| {
+                DIDWebVHError::WitnessProofError(format!(
+                    "Couldn't deserialize Witness Proofs Data: {e}",
+                ))
+            })?,
+            ..Default::default()
+        })
+    }
+
+    /// Validate that parsed log entries are non-empty, returning a contextual error.
+    fn validate_log_entries(log_entries: &[LogEntryState], did: &str) -> Result<(), DIDWebVHError> {
+        if log_entries.is_empty() {
+            warn!("No LogEntries found for DID: {did}");
+            return Err(DIDWebVHError::NotFound(format!(
+                "No LogEntries found for DID: {did}",
+            )));
+        }
+        Ok(())
+    }
+
+    /// Resolve witness proofs from a download result, applying the
+    /// "witnesses configured but download failed" policy.
+    fn resolve_witness_proofs(
+        raw_result: Result<String, DIDWebVHError>,
+        needs_witnesses: bool,
+    ) -> Result<WitnessProofCollection, DIDWebVHError> {
+        match raw_result {
+            Ok(raw) => Self::parse_witness_proofs(&raw),
+            Err(e) => {
+                if needs_witnesses {
+                    Err(DIDWebVHError::WitnessProofError(format!(
+                        "Witnesses are configured but witness proofs could not be downloaded: {e}"
+                    )))
+                } else {
+                    Ok(WitnessProofCollection::default())
+                }
+            }
+        }
+    }
+
     /// Resolves a webvh DID fetched using HTTP(S)
     ///
     /// Inputs:
     /// did: DID to resolve
     /// timeout: how many seconds (Default: 10) before timing out on network operations
+    /// eager_witness_download: if `true`, download `did.jsonl` and `did-witness.json`
+    ///   concurrently (faster when witnesses are expected). If `false` (recommended default),
+    ///   download `did.jsonl` first, then only fetch `did-witness.json` when the log entries
+    ///   actually configure witnesses.
     pub async fn resolve(
         &mut self,
         did: &str,
         timeout: Option<Duration>,
+        eager_witness_download: bool,
     ) -> Result<(&LogEntry, MetaData), DIDWebVHError> {
         let _span = span!(Level::DEBUG, "resolve", DID = did);
         async move {
@@ -143,102 +219,98 @@ impl DIDWebVHState {
                 // If building for WASM then don't use tokio::spawn
                 // This means sequential retrieval of files
                 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-                let (r1, r2) = {
+                let (log_entries, witness_proofs) = {
                     trace!("timeout is not available in WASM builds! {timeout:#?}");
                     let client = reqwest::Client::new();
 
-                    let r1 = DIDWebVH::get_log_entries(parsed_did_url.clone(), client.clone());
-                    let r2 = DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone());
-                    (r1.await, r2.await)
+                    let raw_entries =
+                        DIDWebVH::get_log_entries(parsed_did_url.clone(), client.clone()).await?;
+                    let log_entries = Self::parse_log_entries(&raw_entries)?;
+                    Self::validate_log_entries(&log_entries, did)?;
+
+                    let needs_witnesses = Self::needs_witness_proofs(&log_entries);
+                    let witness_proofs = if eager_witness_download || needs_witnesses {
+                        let raw_result =
+                            DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone())
+                                .await;
+                        Self::resolve_witness_proofs(raw_result, needs_witnesses)?
+                    } else {
+                        WitnessProofCollection::default()
+                    };
+
+                    (log_entries, witness_proofs)
                 };
 
                 // Otherwise use tokio::spawn to do async downloads
                 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-                let (r1, r2) = {
+                let (log_entries, witness_proofs) = {
                     // Set network timeout values. Will default to 10 seconds for any reasons
-                    let network_timeout = if let Some(timeout) = timeout {
-                        timeout
-                    } else {
-                        Duration::from_secs(10)
-                    };
+                    let network_timeout = timeout.unwrap_or(Duration::from_secs(10));
 
-                    // Async download did.jsonl and did-witness.json
                     let client = reqwest::ClientBuilder::new()
                         .timeout(network_timeout)
                         .build()
-                        .unwrap();
-                    let r1 = tokio::spawn(DIDWebVH::get_log_entries(
-                        parsed_did_url.clone(),
-                        client.clone(),
-                    ));
+                        .map_err(|e| {
+                            DIDWebVHError::NetworkError(format!("Failed to build HTTP client: {e}"))
+                        })?;
 
-                    let r2 = tokio::spawn(DIDWebVH::get_witness_proofs(
-                        parsed_did_url.clone(),
-                        client.clone(),
-                    ));
+                    if eager_witness_download {
+                        // Eager path: download both files concurrently
+                        let r1 = tokio::spawn(DIDWebVH::get_log_entries(
+                            parsed_did_url.clone(),
+                            client.clone(),
+                        ));
+                        let r2 = tokio::spawn(DIDWebVH::get_witness_proofs(
+                            parsed_did_url.clone(),
+                            client.clone(),
+                        ));
 
-                    let r1 = match r1.await {
-                        Ok(log_entries) => log_entries,
-                        Err(e) => {
-                            return Err(DIDWebVHError::NetworkError(format!(
+                        let raw_entries = r1.await.map_err(|e| {
+                            DIDWebVHError::NetworkError(format!(
                                 "Error downloading LogEntries for DID: {e}"
-                            )));
-                        }
-                    };
-
-                    let r2 = match r2.await {
-                        Ok(witness_proofs) => witness_proofs,
-                        Err(_) => Ok("{}".to_string()),
-                    };
-                    (r1, r2)
-                };
-
-                // LogEntry
-                let log_entries = match r1 {
-                    Ok(entries) => {
-                        let mut log_entries = Vec::new();
-                        let mut version = None;
-                        for line in entries.lines() {
-                            let log_entry = LogEntry::deserialize_string(line, version)?;
-
-                            version = Some(log_entry.get_webvh_version());
-
-                            log_entries.push(LogEntryState {
-                                log_entry: log_entry.clone(),
-                                version_number: log_entry.get_version_id_fields()?.0,
-                                validation_status: LogEntryValidationStatus::NotValidated,
-                                validated_parameters: Parameters::default(),
-                            });
-                        }
-                        log_entries
-                    }
-                    Err(e) => {
-                        return Err(DIDWebVHError::NetworkError(format!(
-                            "Error downloading LogEntries for DID: {e}"
-                        )));
-                    }
-                };
-
-                if log_entries.is_empty() {
-                    warn!("No LogEntries found for DID: {did}");
-                    return Err(DIDWebVHError::NotFound);
-                }
-
-                // If there is any error with witness proofs then set witness proofs to an empty proof
-                // WitnessProofCollection
-                // If a webvh DID is NOT using witnesses then it will still successfully validate
-                let witness_proofs = match r2 {
-                    Ok(proofs_string) => WitnessProofCollection {
-                        proofs: serde_json::from_str(&proofs_string).map_err(|e| {
-                            DIDWebVHError::WitnessProofError(format!(
-                                "Couldn't deserialize Witness Proofs Data: {e}",
                             ))
-                        })?,
-                        ..Default::default()
-                    },
-                    Err(e) => {
-                        warn!("Error downloading witness proofs: {e}");
-                        WitnessProofCollection::default()
+                        })??;
+                        let witness_result = match r2.await {
+                            Ok(result) => result,
+                            Err(_) => Ok("{}".to_string()),
+                        };
+
+                        let log_entries = Self::parse_log_entries(&raw_entries)?;
+                        Self::validate_log_entries(&log_entries, did)?;
+
+                        let needs_witnesses = Self::needs_witness_proofs(&log_entries);
+                        let witness_proofs =
+                            Self::resolve_witness_proofs(witness_result, needs_witnesses)?;
+
+                        (log_entries, witness_proofs)
+                    } else {
+                        // Deferred path: download did.jsonl first, then conditionally fetch witnesses
+                        let raw_entries = tokio::spawn(DIDWebVH::get_log_entries(
+                            parsed_did_url.clone(),
+                            client.clone(),
+                        ))
+                        .await
+                        .map_err(|e| {
+                            DIDWebVHError::NetworkError(format!(
+                                "Error downloading LogEntries for DID: {e}"
+                            ))
+                        })??;
+
+                        let log_entries = Self::parse_log_entries(&raw_entries)?;
+                        Self::validate_log_entries(&log_entries, did)?;
+
+                        let witness_proofs = if Self::needs_witness_proofs(&log_entries) {
+                            let raw_result = DIDWebVH::get_witness_proofs(
+                                parsed_did_url.clone(),
+                                client.clone(),
+                            )
+                            .await;
+                            Self::resolve_witness_proofs(raw_result, true)?
+                        } else {
+                            WitnessProofCollection::default()
+                        };
+
+                        (log_entries, witness_proofs)
                     }
                 };
 
@@ -262,9 +334,27 @@ impl DIDWebVHState {
         let _span = span!(Level::DEBUG, "resolve_state").entered();
         self.validate()?;
 
+        // Per spec (Read/Resolve step 6): the DID being resolved MUST match the
+        // top-level `id` in at least one version of the DIDDoc.
+        let resolved_did = parsed_did_url.to_did_base();
+        let did_matches_any = self.log_entries.iter().any(|entry| {
+            entry
+                .get_state()
+                .get("id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|id| id == resolved_did)
+        });
+        if !did_matches_any {
+            return Err(DIDWebVHError::ValidationError(format!(
+                "DID being resolved ({resolved_did}) does not match the top-level 'id' in any DIDDoc version",
+            )));
+        }
+
         // Ensure metadata is set for the DID
         if let Some(first) = self.log_entries.first() {
-            self.scid = first.get_scid().unwrap();
+            self.scid = first.get_scid().ok_or_else(|| {
+                DIDWebVHError::ValidationError("First log entry is missing SCID".to_string())
+            })?;
             self.meta_first_ts = first.get_version_time_string();
         }
         if let Some(last) = self.log_entries.last() {
@@ -285,13 +375,17 @@ impl DIDWebVHState {
                     let metadata = self.generate_meta_data(entry);
                     Ok((&entry.log_entry, metadata))
                 }
-                Err(_) => Err(DIDWebVHError::NotFound),
+                Err(e) => Err(DIDWebVHError::NotFound(format!(
+                    "Query matched no log entry: {e}"
+                ))),
             }
         } else if let Some(last) = self.log_entries.last() {
             let metadata = self.generate_meta_data(last);
             Ok((&last.log_entry, metadata))
         } else {
-            Err(DIDWebVHError::NotFound)
+            Err(DIDWebVHError::NotFound(
+                "No LogEntries found after validation".to_string(),
+            ))
         }
     }
 }
@@ -307,6 +401,7 @@ mod tests {
         let result = webvh.resolve(
             "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs",
             None,
+            false,
         ).await;
 
         assert!(result.is_ok());
@@ -319,6 +414,7 @@ mod tests {
         let result = webvh.resolve(
             "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs?versionId=2-QmUCFFYYGBJhzZqyouAtvRJ7ULdd8FqSUvwb61FPTMH1Aj",
             None,
+            false,
         ).await;
 
         assert!(result.is_ok());
@@ -331,6 +427,21 @@ mod tests {
         let result = webvh.resolve(
             "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs?versionTime=2025-08-01T00:00:00Z",
             None,
+            false,
+        ).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn resolve_reference_eager_witness() {
+        let mut webvh = DIDWebVHState::default();
+
+        // Eager mode: downloads both files concurrently, no error when witnesses aren't configured
+        let result = webvh.resolve(
+            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs",
+            None,
+            true,
         ).await;
 
         assert!(result.is_ok());

@@ -5,7 +5,7 @@
 
 use crate::{Version, parameters::Parameters, witness::Witnesses};
 use serde::{Deserialize, Serialize};
-use std::{ops::Not, sync::Arc};
+use std::sync::Arc;
 
 /// [https://identity.foundation/didwebvh/v1.0/#didwebvh-did-method-parameters]
 /// Parameters that help with the resolution of a webvh DID
@@ -50,8 +50,8 @@ pub struct Parameters1_0 {
     pub watchers: Option<Arc<Vec<String>>>,
 
     /// Has this DID been revoked?
-    #[serde(skip_serializing_if = "<&bool>::not", default)]
-    pub deactivated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deactivated: Option<bool>,
 
     /// time to live in seconds for a resolved DID document
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,7 +69,7 @@ impl Default for Parameters1_0 {
             next_key_hashes: None,
             witness: None,
             watchers: None,
-            deactivated: false,
+            deactivated: None,
             ttl: Some(3600),
         }
     }
@@ -78,7 +78,7 @@ impl Default for Parameters1_0 {
 impl From<Parameters> for Parameters1_0 {
     fn from(value: Parameters) -> Self {
         Parameters1_0 {
-            deactivated: value.deactivated.unwrap_or_default(),
+            deactivated: value.deactivated,
             pre_rotation_active: value.pre_rotation_active,
             method: value.method.map(|_| Version::V1_0.to_string()),
             next_key_hashes: value.next_key_hashes.clone(),
@@ -95,7 +95,7 @@ impl From<Parameters> for Parameters1_0 {
 impl From<Parameters1_0> for Parameters {
     fn from(value: Parameters1_0) -> Parameters {
         Parameters {
-            deactivated: Some(value.deactivated),
+            deactivated: value.deactivated,
             pre_rotation_active: value.pre_rotation_active,
             method: value.method.map(|_| Version::V1_0),
             next_key_hashes: value.next_key_hashes.clone(),
@@ -117,6 +117,7 @@ mod tests {
 
     use crate::{
         SCID_HOLDER,
+        test_utils::TEST_UPDATE_KEY,
         witness::{Witness, Witnesses},
     };
 
@@ -141,7 +142,7 @@ mod tests {
             method: Some(crate::Version::V1_0),
             scid: Some(Arc::new("scid123".to_string())),
             update_keys: Some(Arc::new(vec![
-                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY".to_string(),
+                TEST_UPDATE_KEY.to_string(),
                 "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp".to_string(),
             ])),
             portable: Some(true),
@@ -202,9 +203,7 @@ mod tests {
     fn pre_rotation_active() {
         // On first LogEntry, if next_hashes is configured, then pre-rotation is active
         let first_params = Parameters {
-            update_keys: Some(Arc::new(vec![
-                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY".to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
             next_key_hashes: Some(Arc::new(vec![
                 "zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155".to_string(),
             ])),
@@ -245,14 +244,14 @@ mod tests {
 
     #[test]
     fn diff_tri_state_double_empty() {
-        assert!(
-            Parameters::diff_tri_state(
-                &Some(Arc::new(Vec::new())),
-                &Some(Arc::new(Vec::new())),
-                "test"
-            )
-            .is_err()
-        );
+        // Both empty -> no change (not an error)
+        let diff = Parameters::diff_tri_state(
+            &Some(Arc::new(Vec::new())),
+            &Some(Arc::new(Vec::new())),
+            "test",
+        )
+        .expect("Both empty should not error");
+        assert!(diff.is_none());
     }
 
     #[test]
@@ -286,6 +285,491 @@ mod tests {
         assert!(diff.is_some_and(|a| a.first().unwrap().as_str() == "new"));
     }
 
+    // ****** Witness parameter tests
+
+    /// Helper to create a minimal valid first-entry Parameters
+    fn first_entry_params() -> Parameters {
+        Parameters {
+            scid: Some(Arc::new(SCID_HOLDER.to_string())),
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            ..Default::default()
+        }
+    }
+
+    /// Helper to create a minimal valid subsequent-entry Parameters (no scid)
+    fn subsequent_entry_params() -> Parameters {
+        Parameters {
+            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            ..Default::default()
+        }
+    }
+
+    fn sample_witnesses() -> Arc<Witnesses> {
+        Arc::new(Witnesses::Value {
+            threshold: 1,
+            witnesses: vec![Witness {
+                id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+            }],
+        })
+    }
+
+    fn sample_witnesses_2() -> Arc<Witnesses> {
+        Arc::new(Witnesses::Value {
+            threshold: 2,
+            witnesses: vec![
+                Witness {
+                    id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+                },
+                Witness {
+                    id: "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp".to_string(),
+                },
+            ],
+        })
+    }
+
+    // -- First log entry validate() tests --
+
+    #[test]
+    fn validate_first_entry_witness_none() {
+        let params = first_entry_params();
+        let validated = params.validate(None).expect("Should succeed");
+        assert!(validated.witness.is_none());
+        assert!(validated.active_witness.is_none());
+    }
+
+    #[test]
+    fn validate_first_entry_witness_empty_object() {
+        // witness: {} is valid per spec — means no witnesses configured
+        let params = Parameters {
+            witness: Some(Arc::new(Witnesses::Empty {})),
+            ..first_entry_params()
+        };
+        let validated = params
+            .validate(None)
+            .expect("witness: {} on first entry should succeed");
+        assert!(validated.witness.is_none());
+        assert!(validated.active_witness.is_none());
+    }
+
+    #[test]
+    fn validate_first_entry_witness_with_values() {
+        let params = Parameters {
+            witness: Some(sample_witnesses()),
+            ..first_entry_params()
+        };
+        let validated = params.validate(None).expect("Should succeed");
+        assert!(validated.witness.is_some());
+        assert!(validated.active_witness.is_some());
+        assert!(!validated.witness.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn validate_first_entry_witness_invalid_threshold() {
+        let params = Parameters {
+            witness: Some(Arc::new(Witnesses::Value {
+                threshold: 0,
+                witnesses: vec![Witness {
+                    id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+                }],
+            })),
+            ..first_entry_params()
+        };
+        assert!(params.validate(None).is_err());
+    }
+
+    #[test]
+    fn validate_first_entry_witness_threshold_exceeds_count() {
+        let params = Parameters {
+            witness: Some(Arc::new(Witnesses::Value {
+                threshold: 3,
+                witnesses: vec![Witness {
+                    id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+                }],
+            })),
+            ..first_entry_params()
+        };
+        assert!(params.validate(None).is_err());
+    }
+
+    // -- Subsequent log entry validate() tests --
+
+    #[test]
+    fn validate_subsequent_witness_absent_inherits_none() {
+        let previous = Parameters {
+            witness: None,
+            active_witness: None,
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: None,
+            ..subsequent_entry_params()
+        };
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
+        assert!(validated.witness.is_none());
+        assert!(validated.active_witness.is_none());
+    }
+
+    #[test]
+    fn validate_subsequent_witness_absent_inherits_value() {
+        let previous = Parameters {
+            witness: Some(sample_witnesses()),
+            active_witness: Some(sample_witnesses()),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: None,
+            ..subsequent_entry_params()
+        };
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
+        // Inherits previous witness config
+        assert!(validated.witness.is_some());
+        assert!(validated.active_witness.is_some());
+    }
+
+    #[test]
+    fn validate_subsequent_witness_empty_deactivates() {
+        // Setting witness: {} on a subsequent entry deactivates witnessing
+        let previous = Parameters {
+            witness: Some(sample_witnesses()),
+            active_witness: Some(sample_witnesses()),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: Some(Arc::new(Witnesses::Empty {})),
+            ..subsequent_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Deactivating witnesses should succeed");
+        // witness config cleared, but active_witness still set for this entry's proof requirements
+        assert!(validated.witness.is_none());
+        assert!(validated.active_witness.is_some());
+    }
+
+    #[test]
+    fn validate_subsequent_witness_new_value() {
+        let previous = Parameters {
+            witness: Some(sample_witnesses()),
+            active_witness: Some(sample_witnesses()),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: Some(sample_witnesses_2()),
+            ..subsequent_entry_params()
+        };
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
+        // New witness config set, active_witness uses previous entry's witnesses
+        assert_eq!(validated.witness, Some(sample_witnesses_2()));
+        assert_eq!(validated.active_witness, Some(sample_witnesses()));
+    }
+
+    #[test]
+    fn validate_subsequent_witness_activate_from_none() {
+        let previous = Parameters {
+            witness: None,
+            active_witness: None,
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            witness: Some(sample_witnesses()),
+            ..subsequent_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Activating witnesses should succeed");
+        assert_eq!(validated.witness, Some(sample_witnesses()));
+        // active_witness is previous (None) — new witnesses take effect after publication
+        assert!(validated.active_witness.is_none());
+    }
+
+    // -- diff_witness() tests --
+
+    #[test]
+    fn diff_witness_both_absent() {
+        let diff = Parameters::diff_witness(&None, &None).expect("Should succeed");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_witness_current_absent() {
+        // Current None means "keep previous", so diff is None
+        let diff =
+            Parameters::diff_witness(&Some(sample_witnesses()), &None).expect("Should succeed");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_witness_previous_absent_current_empty() {
+        // Absent -> Empty = emit Empty (deactivation from no prior state)
+        let diff = Parameters::diff_witness(&None, &Some(Arc::new(Witnesses::Empty {})))
+            .expect("Should succeed");
+        assert!(diff.is_some());
+        assert!(diff.unwrap().is_empty());
+    }
+
+    #[test]
+    fn diff_witness_previous_value_current_empty() {
+        // Value -> Empty = emit Empty (deactivation)
+        let diff = Parameters::diff_witness(
+            &Some(sample_witnesses()),
+            &Some(Arc::new(Witnesses::Empty {})),
+        )
+        .expect("Should succeed");
+        assert!(diff.is_some());
+        assert!(diff.unwrap().is_empty());
+    }
+
+    #[test]
+    fn diff_witness_both_empty() {
+        // Both empty -> no change (not an error)
+        let diff = Parameters::diff_witness(
+            &Some(Arc::new(Witnesses::Empty {})),
+            &Some(Arc::new(Witnesses::Empty {})),
+        )
+        .expect("Both empty should not error");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_witness_same_value() {
+        // Same value -> no change
+        let diff = Parameters::diff_witness(&Some(sample_witnesses()), &Some(sample_witnesses()))
+            .expect("Should succeed");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_witness_different_value() {
+        // Different values -> emit new value
+        let diff = Parameters::diff_witness(&Some(sample_witnesses()), &Some(sample_witnesses_2()))
+            .expect("Should succeed");
+        assert_eq!(diff, Some(sample_witnesses_2()));
+    }
+
+    #[test]
+    fn diff_witness_absent_to_value() {
+        // None -> Value = emit new value
+        let diff =
+            Parameters::diff_witness(&None, &Some(sample_witnesses())).expect("Should succeed");
+        assert_eq!(diff, Some(sample_witnesses()));
+    }
+
+    #[test]
+    fn diff_witness_empty_to_value() {
+        // Empty -> Value = emit new value (activation)
+        let diff = Parameters::diff_witness(
+            &Some(Arc::new(Witnesses::Empty {})),
+            &Some(sample_witnesses()),
+        )
+        .expect("Should succeed");
+        assert_eq!(diff, Some(sample_witnesses()));
+    }
+
+    // -- Serialization tests --
+
+    #[test]
+    fn witness_empty_serializes_to_empty_object() {
+        let w = Witnesses::Empty {};
+        let json = serde_json::to_string(&w).unwrap();
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn witness_empty_deserializes_from_empty_object() {
+        let w: Witnesses = serde_json::from_str("{}").unwrap();
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn witness_value_roundtrips() {
+        let w = Witnesses::Value {
+            threshold: 2,
+            witnesses: vec![
+                Witness {
+                    id: "witness1".to_string(),
+                },
+                Witness {
+                    id: "witness2".to_string(),
+                },
+            ],
+        };
+        let json = serde_json::to_string(&w).unwrap();
+        let w2: Witnesses = serde_json::from_str(&json).unwrap();
+        assert_eq!(w, w2);
+    }
+
+    #[test]
+    fn parameters_with_witness_empty_serializes_without_witness() {
+        // After validation, witness: {} on first entry is normalized to None,
+        // so it should not appear in serialized output
+        let params = Parameters {
+            witness: Some(Arc::new(Witnesses::Empty {})),
+            ..first_entry_params()
+        };
+        let validated = params.validate(None).unwrap();
+        let json = serde_json::to_value(&validated).unwrap();
+        assert!(json.get("witness").is_none());
+    }
+
+    // ****** Watcher parameter tests
+
+    // -- First log entry validate() tests --
+
+    #[test]
+    fn validate_first_entry_watchers_none() {
+        let params = first_entry_params();
+        let validated = params.validate(None).expect("Should succeed");
+        assert!(validated.watchers.is_none());
+    }
+
+    #[test]
+    fn validate_first_entry_watchers_empty_array() {
+        // watchers: [] is valid per spec — means no watchers configured
+        let params = Parameters {
+            watchers: Some(Arc::new(Vec::new())),
+            ..first_entry_params()
+        };
+        let validated = params
+            .validate(None)
+            .expect("watchers: [] on first entry should succeed");
+        assert!(validated.watchers.is_none());
+    }
+
+    #[test]
+    fn validate_first_entry_watchers_with_values() {
+        let params = Parameters {
+            watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let validated = params.validate(None).expect("Should succeed");
+        assert!(validated.watchers.is_some());
+        assert_eq!(validated.watchers.as_ref().unwrap().len(), 1);
+    }
+
+    // -- Subsequent log entry validate() tests --
+
+    #[test]
+    fn validate_subsequent_watchers_absent_inherits_none() {
+        let previous = Parameters {
+            watchers: None,
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: None,
+            ..subsequent_entry_params()
+        };
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
+        assert!(validated.watchers.is_none());
+    }
+
+    #[test]
+    fn validate_subsequent_watchers_absent_inherits_value() {
+        let previous = Parameters {
+            watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: None,
+            ..subsequent_entry_params()
+        };
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
+        assert_eq!(
+            validated.watchers,
+            Some(Arc::new(vec!["https://watcher.example.com".to_string()]))
+        );
+    }
+
+    #[test]
+    fn validate_subsequent_watchers_empty_deactivates() {
+        let previous = Parameters {
+            watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: Some(Arc::new(Vec::new())),
+            ..subsequent_entry_params()
+        };
+        let validated = current
+            .validate(Some(&previous))
+            .expect("Deactivating watchers should succeed");
+        assert!(validated.watchers.is_none());
+    }
+
+    #[test]
+    fn validate_subsequent_watchers_new_value() {
+        let previous = Parameters {
+            watchers: Some(Arc::new(vec!["https://old.example.com".to_string()])),
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: Some(Arc::new(vec!["https://new.example.com".to_string()])),
+            ..subsequent_entry_params()
+        };
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
+        assert_eq!(
+            validated.watchers,
+            Some(Arc::new(vec!["https://new.example.com".to_string()]))
+        );
+    }
+
+    #[test]
+    fn validate_subsequent_watchers_activate_from_none() {
+        let previous = Parameters {
+            watchers: None,
+            ..first_entry_params()
+        };
+        let current = Parameters {
+            watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            ..subsequent_entry_params()
+        };
+        let validated = current.validate(Some(&previous)).expect("Should succeed");
+        assert!(validated.watchers.is_some());
+    }
+
+    // -- diff_tri_state watchers-specific tests --
+
+    #[test]
+    fn diff_watchers_both_empty() {
+        // Both empty -> no change
+        let diff = Parameters::diff_tri_state(
+            &Some(Arc::new(Vec::new())),
+            &Some(Arc::new(Vec::new())),
+            "watchers",
+        )
+        .expect("Both empty watchers should not error");
+        assert!(diff.is_none());
+    }
+
+    #[test]
+    fn diff_watchers_value_to_empty() {
+        let diff = Parameters::diff_tri_state(
+            &Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
+            &Some(Arc::new(Vec::new())),
+            "watchers",
+        )
+        .expect("Should succeed");
+        assert!(diff.is_some_and(|a| a.is_empty()));
+    }
+
+    #[test]
+    fn diff_watchers_absent_to_empty() {
+        let diff = Parameters::diff_tri_state(&None, &Some(Arc::new(Vec::new())), "watchers")
+            .expect("Should succeed");
+        assert!(diff.is_some_and(|a| a.is_empty()));
+    }
+
+    #[test]
+    fn parameters_with_watchers_empty_serializes_without_watchers() {
+        // After validation, watchers: [] on first entry is normalized to None
+        let params = Parameters {
+            watchers: Some(Arc::new(Vec::new())),
+            ..first_entry_params()
+        };
+        let validated = params.validate(None).unwrap();
+        let json = serde_json::to_value(&validated).unwrap();
+        assert!(json.get("watchers").is_none());
+    }
+
     #[test]
     fn diff_update_keys_pre_rotation_empty() {
         let previous = Parameters {
@@ -312,5 +796,336 @@ mod tests {
             ..Default::default()
         };
         assert!(previous.diff(&current).is_err());
+    }
+
+    // ****** Parameters1_0 round-trip serialization tests
+    //
+    // These verify that deserialize → serialize produces identical JSON,
+    // which is critical for signature and entry hash verification.
+
+    use super::Parameters1_0;
+
+    /// Helper: assert that a Parameters1_0 JSON round-trips losslessly
+    fn assert_params_roundtrip(json: serde_json::Value) {
+        let params: Parameters1_0 =
+            serde_json::from_value(json.clone()).expect("Parameters1_0 deserialization failed");
+        let re_serialized =
+            serde_json::to_value(&params).expect("Parameters1_0 re-serialization failed");
+        assert_eq!(
+            json, re_serialized,
+            "Parameters1_0 round-trip must be lossless"
+        );
+    }
+
+    /// Helper: assert a field is absent after round-trip when omitted from JSON
+    fn assert_field_absent_roundtrip(field: &str) {
+        let json = serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test-scid",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"]
+        });
+        let params: Parameters1_0 = serde_json::from_value(json).unwrap();
+        let re_serialized = serde_json::to_value(&params).unwrap();
+        assert!(
+            re_serialized.get(field).is_none(),
+            "{field} must be absent when not in source JSON"
+        );
+    }
+
+    // -- Full round-trip: all fields present with empty/default values --
+
+    #[test]
+    fn roundtrip_all_empty_values() {
+        // Simulates the didwebvh-ts first entry parameters
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"],
+            "portable": false,
+            "nextKeyHashes": [],
+            "watchers": [],
+            "witness": {},
+            "deactivated": false
+        }));
+    }
+
+    // -- Full round-trip: all fields present with actual values --
+
+    #[test]
+    fn roundtrip_all_actual_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"],
+            "portable": true,
+            "nextKeyHashes": ["zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155"],
+            "watchers": ["https://watcher.example.com"],
+            "witness": {
+                "threshold": 1,
+                "witnesses": [{"id": "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"}]
+            },
+            "deactivated": false,
+            "ttl": 7200
+        }));
+    }
+
+    // -- Full round-trip: minimal (only required fields) --
+
+    #[test]
+    fn roundtrip_minimal() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT"]
+        }));
+    }
+
+    // -- Per-field: method --
+
+    #[test]
+    fn roundtrip_method_absent() {
+        // method is optional on subsequent entries
+        let json = serde_json::json!({
+            "scid": "test",
+            "updateKeys": ["key1"]
+        });
+        let params: Parameters1_0 = serde_json::from_value(json.clone()).unwrap();
+        let re_serialized = serde_json::to_value(&params).unwrap();
+        assert!(re_serialized.get("method").is_none());
+        assert_eq!(json, re_serialized);
+    }
+
+    #[test]
+    fn roundtrip_method_present() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"]
+        }));
+    }
+
+    // -- Per-field: scid --
+
+    #[test]
+    fn roundtrip_scid_absent() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "updateKeys": ["key1"]
+        }));
+    }
+
+    #[test]
+    fn roundtrip_scid_present() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "QmRYeabNZ8KSFrLXxWAK1VB5vx4XmU4w389T5xhp5qwVGS",
+            "updateKeys": ["key1"]
+        }));
+    }
+
+    // -- Per-field: updateKeys --
+
+    #[test]
+    fn roundtrip_update_keys_absent() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test"
+        }));
+    }
+
+    #[test]
+    fn roundtrip_update_keys_empty() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": []
+        }));
+    }
+
+    #[test]
+    fn roundtrip_update_keys_with_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["z6Mkiq4dQWqVEbtpmFButES3mBQ87y61jihJ7Wsh1x3iA9yT", "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"]
+        }));
+    }
+
+    // -- Per-field: portable --
+
+    #[test]
+    fn roundtrip_portable_absent() {
+        assert_field_absent_roundtrip("portable");
+    }
+
+    #[test]
+    fn roundtrip_portable_false() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "portable": false
+        }));
+    }
+
+    #[test]
+    fn roundtrip_portable_true() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "portable": true
+        }));
+    }
+
+    // -- Per-field: nextKeyHashes --
+
+    #[test]
+    fn roundtrip_next_key_hashes_absent() {
+        assert_field_absent_roundtrip("nextKeyHashes");
+    }
+
+    #[test]
+    fn roundtrip_next_key_hashes_empty() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "nextKeyHashes": []
+        }));
+    }
+
+    #[test]
+    fn roundtrip_next_key_hashes_with_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "nextKeyHashes": ["zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155", "zQmctZhRGCKrE2R58K9rkfA1aUL74mecrrJRvicz42resii"]
+        }));
+    }
+
+    // -- Per-field: witness --
+
+    #[test]
+    fn roundtrip_witness_absent() {
+        assert_field_absent_roundtrip("witness");
+    }
+
+    #[test]
+    fn roundtrip_witness_empty_object() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "witness": {}
+        }));
+    }
+
+    #[test]
+    fn roundtrip_witness_with_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "witness": {
+                "threshold": 2,
+                "witnesses": [
+                    {"id": "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"},
+                    {"id": "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"}
+                ]
+            }
+        }));
+    }
+
+    // -- Per-field: watchers --
+
+    #[test]
+    fn roundtrip_watchers_absent() {
+        assert_field_absent_roundtrip("watchers");
+    }
+
+    #[test]
+    fn roundtrip_watchers_empty() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "watchers": []
+        }));
+    }
+
+    #[test]
+    fn roundtrip_watchers_with_values() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "watchers": ["https://watcher1.example.com", "https://watcher2.example.com"]
+        }));
+    }
+
+    // -- Per-field: deactivated --
+
+    #[test]
+    fn roundtrip_deactivated_absent() {
+        assert_field_absent_roundtrip("deactivated");
+    }
+
+    #[test]
+    fn roundtrip_deactivated_false() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "deactivated": false
+        }));
+    }
+
+    #[test]
+    fn roundtrip_deactivated_true() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": [],
+            "deactivated": true
+        }));
+    }
+
+    // -- Per-field: ttl --
+
+    #[test]
+    fn roundtrip_ttl_absent() {
+        assert_field_absent_roundtrip("ttl");
+    }
+
+    #[test]
+    fn roundtrip_ttl_zero() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "ttl": 0
+        }));
+    }
+
+    #[test]
+    fn roundtrip_ttl_default() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "ttl": 3600
+        }));
+    }
+
+    #[test]
+    fn roundtrip_ttl_custom() {
+        assert_params_roundtrip(serde_json::json!({
+            "method": "did:webvh:1.0",
+            "scid": "test",
+            "updateKeys": ["key1"],
+            "ttl": 86400
+        }));
     }
 }

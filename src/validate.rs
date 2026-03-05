@@ -71,7 +71,11 @@ impl DIDWebVHState {
         // Step 1: COMPLETED. LogEntries are verified and only contains good Entries
 
         // Step 2: Get the highest validated version number
-        let highest_version_number = self.log_entries.last().unwrap().get_version_number();
+        let highest_version_number = self
+            .log_entries
+            .last()
+            .expect("guarded by empty check above")
+            .get_version_number();
         debug!("Latest LogEntry ID = ({})", highest_version_number);
 
         // Step 3: Recalculate witness proofs based on the highest LogEntry version
@@ -88,7 +92,10 @@ impl DIDWebVHState {
 
         // Set to validated and timestamp
         self.validated = true;
-        let last_log_entry = self.log_entries.last().unwrap();
+        let last_log_entry = self
+            .log_entries
+            .last()
+            .expect("guarded by empty check above");
         self.scid = if let Some(scid) = &last_log_entry.validated_parameters.scid {
             scid.to_string()
         } else {
@@ -106,5 +113,196 @@ impl DIDWebVHState {
         self.expires = Utc::now().fixed_offset() + Duration::seconds(ttl as i64);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        DIDWebVHState,
+        log_entry_state::{LogEntryState, LogEntryValidationStatus},
+        parameters::Parameters,
+        test_utils::{did_doc_with_key, generate_signing_key},
+    };
+    use chrono::{Duration, Utc};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    /// Creates a valid, signed `DIDWebVHState` containing exactly one log entry.
+    ///
+    /// An optional `ttl` parameter allows TTL-specific tests to reuse this helper
+    /// instead of duplicating the setup. After creation, the validation status is
+    /// reset to `NotValidated` so that `validate()` can be exercised from scratch.
+    fn create_single_entry_state(ttl: Option<u32>) -> DIDWebVHState {
+        let base_time = (Utc::now() - Duration::seconds(10)).fixed_offset();
+        let key = generate_signing_key();
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            portable: Some(false),
+            ttl,
+            ..Default::default()
+        };
+        let doc = did_doc_with_key("did:webvh:{SCID}:localhost%3A8000", &key);
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(Some(base_time), &doc, &params, &key)
+            .expect("Failed to create first entry");
+        // Reset validation status to NotValidated so validate() can run
+        for entry in &mut state.log_entries {
+            entry.validation_status = LogEntryValidationStatus::NotValidated;
+        }
+        state
+    }
+
+    /// Tests that a single valid, signed log entry passes full validation.
+    ///
+    /// After validation the state should be marked as validated and the SCID
+    /// (Self-Certifying Identifier) should be populated. This is the baseline
+    /// happy-path test -- if a single well-formed entry cannot be validated,
+    /// no WebVH DID resolution can succeed.
+    #[test]
+    fn test_validate_single_valid_entry() {
+        let mut state = create_single_entry_state(None);
+        state.validate().expect("Validation should pass");
+        assert!(state.validated);
+        assert!(!state.scid.is_empty());
+    }
+
+    /// Tests that a deactivated DID stops log entry processing at the deactivation point.
+    ///
+    /// When a log entry sets `deactivated: true`, the validator must stop processing
+    /// any subsequent entries and mark the overall state as deactivated. Both the
+    /// initial entry and the deactivation entry should be retained (2 entries total).
+    /// This matters because a deactivated DID must not accept further updates, and
+    /// resolvers need to know the DID is no longer active.
+    #[test]
+    fn test_validate_deactivated_stops_processing() {
+        let base_time = (Utc::now() - Duration::seconds(100)).fixed_offset();
+        let key = generate_signing_key();
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            portable: Some(false),
+            ..Default::default()
+        };
+        let doc = did_doc_with_key("did:webvh:{SCID}:localhost%3A8000", &key);
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(Some(base_time), &doc, &params, &key)
+            .unwrap();
+
+        let actual_doc = state.log_entries.last().unwrap().get_state().clone();
+
+        // Create deactivation entry
+        let deact_params = Parameters {
+            update_keys: Some(Arc::new(vec![])),
+            deactivated: Some(true),
+            ..Default::default()
+        };
+        state
+            .create_log_entry(
+                Some(base_time + Duration::seconds(1)),
+                &actual_doc,
+                &deact_params,
+                &key,
+            )
+            .unwrap();
+
+        // Reset validation status
+        for entry in &mut state.log_entries {
+            entry.validation_status = LogEntryValidationStatus::NotValidated;
+        }
+
+        state.validate().unwrap();
+        assert!(state.deactivated);
+        // Should still have 2 entries (both valid, but deactivated stops further processing)
+        assert_eq!(state.log_entries.len(), 2);
+    }
+
+    /// Tests that an invalid first log entry produces an immediate error.
+    ///
+    /// If the very first entry in the log is malformed (e.g., missing a proof),
+    /// there is no previous valid entry to fall back to. The validator must return
+    /// a "No valid LogEntry found" error rather than silently succeeding with an
+    /// empty state. This guards the invariant that every WebVH DID must begin with
+    /// a cryptographically valid genesis entry.
+    #[test]
+    fn test_validate_invalid_first_entry_error() {
+        let mut state = DIDWebVHState::default();
+        // Push an invalid entry with no proof
+        state.log_entries.push(LogEntryState {
+            log_entry: crate::log_entry::LogEntry::Spec1_0(
+                crate::log_entry::spec_1_0::LogEntry1_0 {
+                    version_id: "1-abc".to_string(),
+                    version_time: Utc::now().fixed_offset(),
+                    parameters: crate::parameters::spec_1_0::Parameters1_0::default(),
+                    state: json!({}),
+                    proof: vec![],
+                },
+            ),
+            version_number: 1,
+            validated_parameters: Parameters::default(),
+            validation_status: LogEntryValidationStatus::NotValidated,
+        });
+
+        let err = state.validate().unwrap_err();
+        assert!(err.to_string().contains("No valid LogEntry found"));
+    }
+
+    /// Validates TTL behavior by creating a state with the given TTL, validating it,
+    /// and asserting the expiration is within the expected range.
+    fn assert_ttl_produces_expiry(ttl: Option<u32>, expected_seconds: i64) {
+        let mut state = create_single_entry_state(ttl);
+        state.validate().unwrap();
+        let now = Utc::now().fixed_offset();
+        let diff = state.expires - now;
+        assert!(
+            diff.num_seconds() > (expected_seconds - 100) && diff.num_seconds() <= expected_seconds,
+            "Expected expiry ~{expected_seconds}s, got {}s",
+            diff.num_seconds()
+        );
+    }
+
+    /// Tests that validation applies the default TTL of 3600 seconds (1 hour) when no
+    /// TTL is specified in the parameters.
+    ///
+    /// A sensible default TTL is important so that resolvers know how long they can
+    /// cache a resolved DID document before re-fetching.
+    #[test]
+    fn test_validate_ttl_default() {
+        assert_ttl_produces_expiry(None, 3600);
+    }
+
+    /// Tests that a TTL value of zero is treated as the default TTL of 3600 seconds.
+    ///
+    /// A zero TTL would cause immediate expiration, which is not useful. The validator
+    /// treats TTL=0 as "use default" to prevent accidental misconfiguration from making
+    /// a DID effectively unresolvable due to instant cache expiry.
+    #[test]
+    fn test_validate_ttl_zero_defaults_to_3600() {
+        assert_ttl_produces_expiry(Some(0), 3600);
+    }
+
+    /// Tests that a custom TTL value (7200 seconds / 2 hours) is honored by the validator.
+    ///
+    /// When the parameters specify a non-zero TTL, the validated state's expiration
+    /// should reflect that exact duration. This ensures DID publishers can control how
+    /// long resolvers cache their DID documents.
+    #[test]
+    fn test_validate_ttl_custom() {
+        assert_ttl_produces_expiry(Some(7200), 7200);
+    }
+
+    /// Tests that validating a state with no log entries at all returns an error.
+    ///
+    /// An empty log is not a valid WebVH DID -- there must be at least a genesis entry.
+    /// The validator must return a "No validated LogEntries" error to prevent resolvers
+    /// from accepting a DID that has no verifiable history.
+    #[test]
+    fn test_validate_no_log_entries_error() {
+        let mut state = DIDWebVHState::default();
+        let err = state.validate().unwrap_err();
+        assert!(err.to_string().contains("No validated LogEntries"));
     }
 }

@@ -35,7 +35,7 @@ impl DIDMethodResolver for DIDWebVH {
         );
         async move {
             let mut state = DIDWebVHState::default();
-            match state.resolve(method_specific_id, None).await {
+            match state.resolve(method_specific_id, None, false).await {
                 Ok((log_entry, _)) => {
                     let document: Document = serde_json::from_value(log_entry.get_state().clone())
                         .map_err(|e| {
@@ -51,7 +51,7 @@ impl DIDMethodResolver for DIDWebVH {
                         resolution::Metadata::from_content_type(Some(content_type.to_string())),
                     ))
                 }
-                Err(DIDWebVHError::NotFound) => Err(Error::NotFound),
+                Err(DIDWebVHError::NotFound(_)) => Err(Error::NotFound),
                 Err(e) => Err(Error::Internal(e.to_string())),
             }
         }

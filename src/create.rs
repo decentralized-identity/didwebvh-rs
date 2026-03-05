@@ -5,7 +5,7 @@
 */
 
 use crate::{
-    DIDWebVHError, DIDWebVHState,
+    DIDWebVHError, DIDWebVHState, ensure_object_mut,
     log_entry::{LogEntry, LogEntryMethods},
     log_entry_state::LogEntryState,
     parameters::Parameters,
@@ -131,20 +131,20 @@ impl CreateDIDConfigBuilder {
 
     /// Build the [`CreateDIDConfig`], returning an error if required fields are missing.
     pub fn build(self) -> Result<CreateDIDConfig, DIDWebVHError> {
-        let address = self.address.ok_or_else(|| {
-            DIDWebVHError::DIDError("address is required".to_string())
-        })?;
+        let address = self
+            .address
+            .ok_or_else(|| DIDWebVHError::DIDError("address is required".to_string()))?;
         if self.authorization_keys.is_empty() {
             return Err(DIDWebVHError::LogEntryError(
                 "At least one authorization key is required".to_string(),
             ));
         }
-        let did_document = self.did_document.ok_or_else(|| {
-            DIDWebVHError::DIDError("did_document is required".to_string())
-        })?;
-        let parameters = self.parameters.ok_or_else(|| {
-            DIDWebVHError::ParametersError("parameters is required".to_string())
-        })?;
+        let did_document = self
+            .did_document
+            .ok_or_else(|| DIDWebVHError::DIDError("did_document is required".to_string()))?;
+        let parameters = self
+            .parameters
+            .ok_or_else(|| DIDWebVHError::ParametersError("parameters is required".to_string()))?;
 
         Ok(CreateDIDConfig {
             address,
@@ -180,9 +180,9 @@ pub struct CreateDIDResult {
 /// `did:key:{multibase}#{multibase}` format expected by verification.
 fn ensure_did_key_id(secret: &mut Secret) -> Result<(), DIDWebVHError> {
     if !secret.id.starts_with("did:key:") {
-        let pub_mb = secret.get_public_keymultibase().map_err(|e| {
-            DIDWebVHError::LogEntryError(format!("Invalid key: {e}"))
-        })?;
+        let pub_mb = secret
+            .get_public_keymultibase()
+            .map_err(|e| DIDWebVHError::LogEntryError(format!("Invalid key: {e}")))?;
         secret.id = format!("did:key:{pub_mb}#{pub_mb}");
     }
     Ok(())
@@ -245,11 +245,12 @@ pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWeb
     log_entry_state.log_entry.verify_log_entry(None, None)?;
 
     // Get the resolved DID (with SCID)
-    let resolved_did = if let Some(Value::String(id)) = log_entry_state.log_entry.get_state().get("id") {
-        id.clone()
-    } else {
-        webvh_did
-    };
+    let resolved_did =
+        if let Some(Value::String(id)) = log_entry_state.log_entry.get_state().get("id") {
+            id.clone()
+        } else {
+            webvh_did
+        };
 
     // Clone the log entry since we borrow from didwebvh
     let log_entry = log_entry_state.log_entry.clone();
@@ -312,41 +313,16 @@ pub fn add_web_also_known_as(did_document: &mut Value, did: &str) -> Result<(), 
 
     let Some(also_known_as) = also_known_as else {
         // There is no alsoKnownAs, add the did:web
-        did_document.as_object_mut().unwrap().insert(
+        ensure_object_mut(did_document)?.insert(
             "alsoKnownAs".to_string(),
             Value::Array(vec![Value::String(did_web_id.to_string())]),
         );
         return Ok(());
     };
 
-    let mut new_aliases = vec![];
-    let mut skip_flag = false;
+    let new_aliases = build_alias_list(also_known_as, &did_web_id)?;
 
-    if let Some(aliases) = also_known_as.as_array() {
-        for alias in aliases {
-            if let Some(alias_str) = alias.as_str() {
-                if alias_str == did_web_id {
-                    // did:web already exists, don't duplicate
-                    skip_flag = true;
-                }
-                new_aliases.push(alias.clone());
-            }
-        }
-    } else {
-        return Err(DIDWebVHError::DIDError(
-            "alsoKnownAs is not an array".to_string(),
-        ));
-    }
-
-    if !skip_flag {
-        // web DID isn't an alias, add it
-        new_aliases.push(Value::String(did_web_id.to_string()));
-    }
-
-    did_document
-        .as_object_mut()
-        .unwrap()
-        .insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
+    ensure_object_mut(did_document)?.insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
 
     Ok(())
 }
@@ -362,22 +338,30 @@ pub fn add_scid_also_known_as(did_document: &mut Value, did: &str) -> Result<(),
 
     let Some(also_known_as) = also_known_as else {
         // There is no alsoKnownAs, add the did:scid
-        did_document.as_object_mut().unwrap().insert(
+        ensure_object_mut(did_document)?.insert(
             "alsoKnownAs".to_string(),
             Value::Array(vec![Value::String(did_scid_id.to_string())]),
         );
         return Ok(());
     };
 
+    let new_aliases = build_alias_list(also_known_as, &did_scid_id)?;
+
+    ensure_object_mut(did_document)?.insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
+
+    Ok(())
+}
+
+/// Shared helper: collects existing aliases, appending `new_alias` if not already present.
+fn build_alias_list(also_known_as: &Value, new_alias: &str) -> Result<Vec<Value>, DIDWebVHError> {
     let mut new_aliases = vec![];
-    let mut skip_flag = false;
+    let mut already_exists = false;
 
     if let Some(aliases) = also_known_as.as_array() {
         for alias in aliases {
             if let Some(alias_str) = alias.as_str() {
-                if alias_str == did_scid_id {
-                    // did:scid already exists, don't duplicate
-                    skip_flag = true;
+                if alias_str == new_alias {
+                    already_exists = true;
                 }
                 new_aliases.push(alias.clone());
             }
@@ -388,17 +372,11 @@ pub fn add_scid_also_known_as(did_document: &mut Value, did: &str) -> Result<(),
         ));
     }
 
-    if !skip_flag {
-        // scid DID isn't an alias, add it
-        new_aliases.push(Value::String(did_scid_id.to_string()));
+    if !already_exists {
+        new_aliases.push(Value::String(new_alias.to_string()));
     }
 
-    did_document
-        .as_object_mut()
-        .unwrap()
-        .insert("alsoKnownAs".to_string(), Value::Array(new_aliases));
-
-    Ok(())
+    Ok(new_aliases)
 }
 
 /// Sign witness proofs for a log entry using provided witness secrets (non-interactive).
@@ -470,10 +448,7 @@ pub fn sign_witness_proofs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        DIDWebVHState,
-        witness::Witness,
-    };
+    use crate::{DIDWebVHState, witness::Witness};
     use affinidi_secrets_resolver::secrets::Secret;
     use serde_json::json;
     use std::sync::Arc;
@@ -735,9 +710,11 @@ mod tests {
         let result = create_did(config).unwrap();
         let state = result.log_entry.get_state();
         let also_known_as = state.get("alsoKnownAs").unwrap().as_array().unwrap();
-        assert!(also_known_as.iter().any(|v| {
-            v.as_str().map_or(false, |s| s.starts_with("did:web:"))
-        }));
+        assert!(
+            also_known_as
+                .iter()
+                .any(|v| { v.as_str().is_some_and(|s| s.starts_with("did:web:")) })
+        );
     }
 
     #[test]
@@ -756,9 +733,11 @@ mod tests {
         let result = create_did(config).unwrap();
         let state = result.log_entry.get_state();
         let also_known_as = state.get("alsoKnownAs").unwrap().as_array().unwrap();
-        assert!(also_known_as.iter().any(|v| {
-            v.as_str().map_or(false, |s| s.starts_with("did:scid:vh:"))
-        }));
+        assert!(
+            also_known_as
+                .iter()
+                .any(|v| { v.as_str().is_some_and(|s| s.starts_with("did:scid:vh:")) })
+        );
     }
 
     #[test]
@@ -778,12 +757,12 @@ mod tests {
         let result = create_did(config).unwrap();
         let state = result.log_entry.get_state();
         let also_known_as = state.get("alsoKnownAs").unwrap().as_array().unwrap();
-        let has_web = also_known_as.iter().any(|v| {
-            v.as_str().map_or(false, |s| s.starts_with("did:web:"))
-        });
-        let has_scid = also_known_as.iter().any(|v| {
-            v.as_str().map_or(false, |s| s.starts_with("did:scid:vh:"))
-        });
+        let has_web = also_known_as
+            .iter()
+            .any(|v| v.as_str().is_some_and(|s| s.starts_with("did:web:")));
+        let has_scid = also_known_as
+            .iter()
+            .any(|v| v.as_str().is_some_and(|s| s.starts_with("did:scid:vh:")));
         assert!(has_web);
         assert!(has_scid);
     }
@@ -817,10 +796,7 @@ mod tests {
             update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![
-                    Witness { id: w1_id.clone() },
-                    Witness { id: w2_id.clone() },
-                ],
+                witnesses: vec![Witness { id: w1_id.clone() }, Witness { id: w2_id.clone() }],
             })),
             ..Default::default()
         };
@@ -931,8 +907,16 @@ mod tests {
 
         let aliases = doc.get("alsoKnownAs").unwrap().as_array().unwrap();
         assert_eq!(aliases.len(), 2);
-        assert!(aliases.iter().any(|v| v.as_str() == Some("did:example:other")));
-        assert!(aliases.iter().any(|v| v.as_str() == Some("did:web:example.com")));
+        assert!(
+            aliases
+                .iter()
+                .any(|v| v.as_str() == Some("did:example:other"))
+        );
+        assert!(
+            aliases
+                .iter()
+                .any(|v| v.as_str() == Some("did:web:example.com"))
+        );
     }
 
     #[test]
@@ -981,10 +965,16 @@ mod tests {
 
         let aliases = doc.get("alsoKnownAs").unwrap().as_array().unwrap();
         assert_eq!(aliases.len(), 2);
-        assert!(aliases.iter().any(|v| v.as_str() == Some("did:example:other")));
-        assert!(aliases.iter().any(|v| {
-            v.as_str().map_or(false, |s| s.starts_with("did:scid:vh:1:"))
-        }));
+        assert!(
+            aliases
+                .iter()
+                .any(|v| v.as_str() == Some("did:example:other"))
+        );
+        assert!(
+            aliases
+                .iter()
+                .any(|v| { v.as_str().is_some_and(|s| s.starts_with("did:scid:vh:1:")) })
+        );
     }
 
     #[test]
@@ -1038,10 +1028,7 @@ mod tests {
             update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![
-                    Witness { id: w1_id.clone() },
-                    Witness { id: w2_id.clone() },
-                ],
+                witnesses: vec![Witness { id: w1_id.clone() }, Witness { id: w2_id.clone() }],
             })),
             ..Default::default()
         };
@@ -1319,9 +1306,13 @@ mod tests {
             .unwrap();
 
         let result = create_did(config).unwrap();
-        let state_id = result.log_entry.get_state()
-            .get("id").unwrap()
-            .as_str().unwrap();
+        let state_id = result
+            .log_entry
+            .get_state()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap();
         assert_eq!(result.did, state_id);
     }
 
@@ -1365,7 +1356,11 @@ mod tests {
         assert_eq!(aliases.len(), 3);
         assert!(aliases.iter().any(|v| v.as_str() == Some("did:example:a")));
         assert!(aliases.iter().any(|v| v.as_str() == Some("did:example:b")));
-        assert!(aliases.iter().any(|v| v.as_str() == Some("did:web:example.com")));
+        assert!(
+            aliases
+                .iter()
+                .any(|v| v.as_str() == Some("did:web:example.com"))
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1441,9 +1436,9 @@ mod tests {
 
         // Verify the proof can be validated by the log entry
         let witness_proof = proofs.get_proofs(&version_id).unwrap();
-        let validation = log_entry_state.log_entry.validate_witness_proof(
-            witness_proof.proof.first().unwrap(),
-        );
+        let validation = log_entry_state
+            .log_entry
+            .validate_witness_proof(witness_proof.proof.first().unwrap());
         assert!(validation.is_ok());
     }
 
@@ -1470,7 +1465,8 @@ mod tests {
 
         let witnesses = log_entry_state.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
-        let signed = sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).unwrap();
+        let signed =
+            sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).unwrap();
         assert!(signed);
     }
 
@@ -1481,7 +1477,8 @@ mod tests {
         let log_entry = state.log_entries.last().unwrap();
 
         let mut proofs = WitnessProofCollection::default();
-        let signed = sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default()).unwrap();
+        let signed =
+            sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default()).unwrap();
         assert!(!signed);
     }
 

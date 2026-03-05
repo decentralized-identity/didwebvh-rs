@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/didwebvh-rs.svg)](https://crates.io/crates/didwebvh-rs)
 [![Documentation](https://docs.rs/didwebvh-rs/badge.svg)](https://docs.rs/didwebvh-rs)
-[![Rust](https://img.shields.io/badge/rust-1.88.0%2B-blue.svg?maxAge=3600)](https://github.com/decentralized-identity/didwebvh-rs)
+[![Rust](https://img.shields.io/badge/rust-1.90.0%2B-blue.svg?maxAge=3600)](https://github.com/decentralized-identity/didwebvh-rs)
 
 A complete implementation of the [did:webvh](https://identity.foundation/didwebvh/v1.0/)
 method in Rust. Supports version 1.0 spec.
@@ -22,10 +22,11 @@ site
 - [x] Witness webvh DID
 - [x] Migration of DID (portability)
 - [x] Validate witness information
-- [x] DID Query Parameters versionId and versionTime implemented
+- [x] DID Query Parameters versionId, versionTime, and versionNumber implemented
 - [x] WebVH DID specification version support (v1.0 and pre-v1.0)
 - [x] Export WebVH to a did:web document
 - [x] Generate did:scid:vh alsoKnownAs alias from did:webvh DIDs
+- [x] URL validation rejects IP addresses per spec (domain names required)
 - [x] WASM friendly for inclusion in other projects
 - [x] WebVH DID Create routines to make it easier to create DIDs programmatically
 
@@ -35,19 +36,23 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.1.17"
+didwebvh-rs = "0.2.0"
 ```
 
 Then:
 
 ```rust
-use didwebvh_rs::DIDWebVHState;
+use didwebvh_rs::prelude::*;
 
 let mut webvh = DIDWebVHState::default();
 
 // Load LogEntries from a file
 webvh.load_log_entries_from_file("did.jsonl")?;
 ```
+
+The `prelude` module re-exports the most commonly needed types:
+`DIDWebVHError`, `DIDWebVHState`, `LogEntryMethods`, `Parameters`,
+`CreateDIDConfig`, `create_did`, `Witnesses`, and `WitnessProofCollection`.
 
 ## Feature Flags
 
@@ -103,13 +108,47 @@ cargo run --release --example generate_history -- --help
 For example, to generate 200 LogEntries with 10 witnesses each, you can run:
 
 ```Bash
-cargo run --release --example generate_histroy -- -c 200 -w 10
+cargo run --release --example generate_history -- -c 200 -w 10
 ```
 
 This tool will save the output to
 
 - did.jsonl (LogEntries)
 - did-witness.json (Witness Proofs)
+
+### Criterion Benchmarks (stable Rust)
+
+Run the full benchmark suite using [Criterion](https://crates.io/crates/criterion):
+
+```Bash
+cargo bench --bench did_benchmarks
+```
+
+Run a specific benchmark group or individual benchmark:
+
+```Bash
+cargo bench --bench did_benchmarks -- "did_creation"
+cargo bench --bench did_benchmarks -- "did_creation/basic"
+```
+
+HTML reports are generated in `target/criterion/`.
+
+### Nightly Benchmarks
+
+If you have the Rust nightly toolchain installed, you can also run the built-in
+`#[bench]` benchmarks:
+
+```Bash
+cargo +nightly bench --bench did_benchmarks_nightly
+```
+
+### Benchmark Groups
+
+| Group | Benchmarks | Description |
+|-------|-----------|-------------|
+| `did_creation` | `basic`, `with_aliases` | DID creation with minimal config and with alsoKnownAs aliases |
+| `did_resolution` | `single_entry`, `large_with_witnesses_120_entries` | File-based DID resolution with 1 and 120+ log entries |
+| `validation` | `single_entry`, `large_with_witnesses_120_entries` | Log entry and witness proof validation |
 
 ## Creating a DID Programmatically
 
@@ -118,10 +157,7 @@ interactive prompts. Use `CreateDIDConfig::builder()` to construct the
 configuration:
 
 ```rust
-use didwebvh_rs::{
-    create::{CreateDIDConfig, create_did},
-    parameters::Parameters,
-};
+use didwebvh_rs::prelude::*;
 use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use serde_json::json;
 use std::sync::Arc;
