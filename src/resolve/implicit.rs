@@ -77,3 +77,109 @@ fn get_service_files(id: &str, url: &WebVHURL) -> Result<Value, DIDWebVHError> {
         "serviceEndpoint": url.get_http_files_url()?
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Tests that when a DID Document has no services defined, both implicit
+    /// services (#whois and #files) are automatically added.
+    /// Expected: The resulting document should contain exactly 2 services.
+    /// This matters because the WebVH spec requires these implicit services
+    /// for DID discoverability (whois) and file access (files).
+    #[test]
+    fn test_no_services_adds_both() {
+        let mut state = json!({"id": "did:webvh:scid123:example.com"});
+        update_implicit_services(None, &mut state, "did:webvh:scid123:example.com").unwrap();
+        let services = state["service"].as_array().unwrap();
+        assert_eq!(services.len(), 2);
+        // Check one ends with #whois and one with #files
+        let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();
+        assert!(ids.iter().any(|id| id.ends_with("#whois")));
+        assert!(ids.iter().any(|id| id.ends_with("#files")));
+    }
+
+    /// Tests that when a DID Document has existing custom services but is missing
+    /// both implicit services, #whois and #files are appended alongside the custom service.
+    /// Expected: The resulting document should contain 3 services (1 custom + 2 implicit).
+    /// This matters because implicit services must coexist with user-defined services
+    /// without overwriting them during DID resolution.
+    #[test]
+    fn test_existing_services_adds_missing() {
+        let existing = json!([{"id": "did:webvh:scid123:example.com#custom", "type": "Custom", "serviceEndpoint": "https://example.com"}]);
+        let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
+        let services_ref = state.get("service").cloned();
+        update_implicit_services(services_ref.as_ref(), &mut state, "did:webvh:scid123:example.com").unwrap();
+        let services = state["service"].as_array().unwrap();
+        assert_eq!(services.len(), 3); // original + whois + files
+    }
+
+    /// Tests that when a DID Document already has both #whois and #files services,
+    /// no duplicate services are added.
+    /// Expected: The service array remains at exactly 2 entries.
+    /// This matters because duplicate implicit services would produce an invalid
+    /// DID Document and could confuse resolvers or verifiers.
+    #[test]
+    fn test_both_services_exist_no_change() {
+        let existing = json!([
+            {"id": "did:webvh:scid123:example.com#whois", "type": "LinkedVerifiablePresentation", "serviceEndpoint": "https://example.com/whois.vp"},
+            {"id": "did:webvh:scid123:example.com#files", "type": "relativeRef", "serviceEndpoint": "https://example.com/"}
+        ]);
+        let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
+        let services_ref = state.get("service").cloned();
+        update_implicit_services(services_ref.as_ref(), &mut state, "did:webvh:scid123:example.com").unwrap();
+        let services = state["service"].as_array().unwrap();
+        assert_eq!(services.len(), 2); // no additions
+    }
+
+    /// Tests that passing a non-array value as the services field produces an error.
+    /// Expected: The function returns an Err result.
+    /// This matters because the DID Document spec requires services to be an array,
+    /// and graceful error handling prevents panics during resolution of malformed documents.
+    #[test]
+    fn test_services_not_array_error() {
+        let services = json!("not-an-array");
+        let mut state = json!({"id": "did:webvh:scid123:example.com"});
+        let result = update_implicit_services(Some(&services), &mut state, "did:webvh:scid123:example.com");
+        assert!(result.is_err());
+    }
+
+    /// Tests that when a DID Document has only the #whois service, the missing
+    /// #files service is added while preserving the existing #whois service.
+    /// Expected: The resulting document has 2 services, including one ending with #files.
+    /// This matters because partial implicit service coverage must be detected and
+    /// completed to ensure full spec compliance during resolution.
+    #[test]
+    fn test_only_whois_adds_files() {
+        let existing = json!([
+            {"id": "did:webvh:scid123:example.com#whois", "type": "LinkedVerifiablePresentation", "serviceEndpoint": "https://example.com/whois.vp"}
+        ]);
+        let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
+        let services_ref = state.get("service").cloned();
+        update_implicit_services(services_ref.as_ref(), &mut state, "did:webvh:scid123:example.com").unwrap();
+        let services = state["service"].as_array().unwrap();
+        assert_eq!(services.len(), 2);
+        let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();
+        assert!(ids.iter().any(|id| id.ends_with("#files")));
+    }
+
+    /// Tests that when a DID Document has only the #files service, the missing
+    /// #whois service is added while preserving the existing #files service.
+    /// Expected: The resulting document has 2 services, including one ending with #whois.
+    /// This matters because the #whois service is required for linked verifiable
+    /// presentation discovery, and its absence must be corrected during resolution.
+    #[test]
+    fn test_only_files_adds_whois() {
+        let existing = json!([
+            {"id": "did:webvh:scid123:example.com#files", "type": "relativeRef", "serviceEndpoint": "https://example.com/"}
+        ]);
+        let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
+        let services_ref = state.get("service").cloned();
+        update_implicit_services(services_ref.as_ref(), &mut state, "did:webvh:scid123:example.com").unwrap();
+        let services = state["service"].as_array().unwrap();
+        assert_eq!(services.len(), 2);
+        let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();
+        assert!(ids.iter().any(|id| id.ends_with("#whois")));
+    }
+}

@@ -323,7 +323,10 @@ mod tests {
     use chrono::{Duration, Utc};
     use serde_json::json;
 
-    /// Helper to create a minimal LogEntry with a given DID document state
+    /// Helper to create a minimal Spec1_0 LogEntry with a given DID document state.
+    /// Uses a fixed versionId of "1-abc123", the current timestamp, default parameters,
+    /// and an empty proof list. Useful for tests that focus on state-level behavior
+    /// (e.g. portability checks) without needing valid cryptographic proofs.
     fn make_log_entry(state: serde_json::Value) -> LogEntry {
         LogEntry::Spec1_0(LogEntry1_0 {
             version_id: "1-abc123".to_string(),
@@ -334,7 +337,10 @@ mod tests {
         })
     }
 
-    /// Helper to create a minimal LogEntry with a specific timestamp
+    /// Helper to create a minimal Spec1_0 LogEntry with a specific timestamp.
+    /// Uses a fixed versionId of "1-abc123", a default DID document state with a
+    /// valid id field, default parameters, and an empty proof list. Useful for tests
+    /// that focus on versionTime ordering without needing valid cryptographic proofs.
     fn make_log_entry_with_time(
         time: chrono::DateTime<chrono::FixedOffset>,
     ) -> LogEntry {
@@ -347,10 +353,12 @@ mod tests {
         })
     }
 
-    /// Tests that all non-assertionMethod proof purposes are rejected.
-    /// Expected: Each bad purpose returns a ValidationError mentioning "assertionMethod".
-    /// This matters because the WebVH spec mandates assertionMethod as the only
-    /// valid proof purpose for log entry signatures.
+    /// Tests that verify_log_entry rejects proofs with any proofPurpose other
+    /// than "assertionMethod", including "authentication", "keyAgreement",
+    /// "capabilityInvocation", and an empty string.
+    /// Expected: Each invalid purpose returns a ValidationError mentioning "assertionMethod".
+    /// This matters because the WebVH spec mandates that log entry proofs use
+    /// "assertionMethod"; accepting other purposes would weaken the trust model.
     #[test]
     fn test_invalid_proof_purpose_rejected() {
         for bad_purpose in ["authentication", "keyAgreement", "capabilityInvocation", ""] {
@@ -378,6 +386,11 @@ mod tests {
         }
     }
 
+    /// Tests that verify_portability passes when the DID document id has not
+    /// changed between entries and portable is false.
+    /// Expected: Returns Ok because no move occurred.
+    /// This matters because most DID updates do not change the identifier;
+    /// portability checks should not interfere with normal non-move updates.
     #[test]
     fn test_portability_same_id_not_portable() {
         // Same DID id between entries, portable=false → should pass
@@ -391,6 +404,11 @@ mod tests {
         assert!(current.verify_portability(&previous, &params).is_ok());
     }
 
+    /// Tests that verify_portability fails when the DID document id has changed
+    /// but the portable parameter is false.
+    /// Expected: Returns an error indicating "portable is not enabled".
+    /// This matters because the spec requires portable=true for DID moves;
+    /// allowing identifier changes without the flag would break DID resolution.
     #[test]
     fn test_portability_different_id_not_portable() {
         // DID id changed, portable=false → must fail
@@ -411,6 +429,11 @@ mod tests {
         );
     }
 
+    /// Tests that verify_portability fails when the DID document id has changed
+    /// and the portable parameter is None (defaults to false).
+    /// Expected: Returns an error indicating "portable is not enabled".
+    /// This matters because an unset portable flag must default to non-portable
+    /// behavior, preventing accidental DID moves.
     #[test]
     fn test_portability_different_id_portable_none() {
         // DID id changed, portable=None (defaults to false) → must fail
@@ -431,6 +454,11 @@ mod tests {
         );
     }
 
+    /// Tests that verify_portability fails when the DID id has changed,
+    /// portable is true, but the alsoKnownAs array is missing from the state.
+    /// Expected: Returns an error indicating the previous DID is "not in alsoKnownAs".
+    /// This matters because the spec requires the previous DID to appear in
+    /// alsoKnownAs after a move, establishing a verifiable chain of identity.
     #[test]
     fn test_portability_different_id_portable_missing_also_known_as() {
         // DID id changed, portable=true, but no alsoKnownAs → must fail
@@ -451,6 +479,12 @@ mod tests {
         );
     }
 
+    /// Tests that verify_portability fails when the DID id has changed,
+    /// portable is true, and alsoKnownAs exists but does not contain the
+    /// previous DID identifier.
+    /// Expected: Returns an error indicating the previous DID is "not in alsoKnownAs".
+    /// This matters because an alsoKnownAs array that references a different DID
+    /// does not satisfy the spec's requirement to link back to the original identity.
     #[test]
     fn test_portability_different_id_portable_wrong_also_known_as() {
         // DID id changed, portable=true, alsoKnownAs exists but doesn't contain previous DID
@@ -474,6 +508,11 @@ mod tests {
         );
     }
 
+    /// Tests that verify_portability succeeds when the DID id has changed,
+    /// portable is true, and alsoKnownAs correctly contains the previous DID.
+    /// Expected: Returns Ok, allowing the DID move.
+    /// This matters because this is the happy path for portable DIDs; the spec
+    /// allows identifier changes only when all three conditions are met.
     #[test]
     fn test_portability_different_id_portable_with_also_known_as() {
         // DID id changed, portable=true, alsoKnownAs contains previous DID → should pass
@@ -490,6 +529,11 @@ mod tests {
         assert!(current.verify_portability(&previous, &params).is_ok());
     }
 
+    /// Tests that verify_portability succeeds when the DID id has not changed,
+    /// even if portable is set to true.
+    /// Expected: Returns Ok because no move actually occurred.
+    /// This matters because enabling portability should not break normal updates
+    /// where the identifier stays the same; only actual moves trigger the checks.
     #[test]
     fn test_portability_same_id_portable_enabled() {
         // Same DID id, portable=true → should pass (no move happened)
@@ -503,6 +547,11 @@ mod tests {
         assert!(current.verify_portability(&previous, &params).is_ok());
     }
 
+    /// Tests that verify_portability passes when neither the previous nor the
+    /// current log entry states contain an "id" field.
+    /// Expected: Returns Ok because no comparison is possible.
+    /// This matters because edge cases with missing id fields should not cause
+    /// false-positive portability failures during validation.
     #[test]
     fn test_portability_missing_id_fields() {
         // Missing id fields in state → should pass (no comparison possible)
@@ -516,6 +565,11 @@ mod tests {
         assert!(current.verify_portability(&previous, &params).is_ok());
     }
 
+    /// Tests that verify_version_time passes when the current entry's timestamp
+    /// is strictly after the previous entry's timestamp.
+    /// Expected: Returns Ok.
+    /// This matters because the spec requires monotonically increasing timestamps
+    /// across log entries to maintain a consistent and tamper-evident version history.
     #[test]
     fn test_version_time_strictly_after_previous() {
         // Current versionTime is after previous → should pass
@@ -526,6 +580,11 @@ mod tests {
         assert!(current.verify_version_time(Some(&previous)).is_ok());
     }
 
+    /// Tests that verify_version_time fails when the current and previous entries
+    /// have identical timestamps.
+    /// Expected: Returns an error about versionTime needing to be greater.
+    /// This matters because the spec requires strictly increasing timestamps;
+    /// equal times would make version ordering ambiguous.
     #[test]
     fn test_version_time_equal_to_previous() {
         // Current versionTime equals previous → must fail (spec requires strictly greater)
@@ -543,6 +602,11 @@ mod tests {
         );
     }
 
+    /// Tests that verify_version_time fails when the current entry's timestamp
+    /// is earlier than the previous entry's timestamp.
+    /// Expected: Returns an error about versionTime needing to be greater.
+    /// This matters because a backwards timestamp would indicate log tampering
+    /// or an out-of-order entry, violating the append-only log invariant.
     #[test]
     fn test_version_time_before_previous() {
         // Current versionTime is before previous → must fail
@@ -560,6 +624,11 @@ mod tests {
         );
     }
 
+    /// Tests that verify_version_time passes for the first log entry (no previous
+    /// entry to compare against).
+    /// Expected: Returns Ok.
+    /// This matters because the first entry in a DID log has no predecessor, so
+    /// the time-ordering check must be skipped for the genesis entry.
     #[test]
     fn test_version_time_no_previous() {
         // First entry (no previous) → should pass
@@ -569,6 +638,11 @@ mod tests {
         assert!(current.verify_version_time(None).is_ok());
     }
 
+    /// Tests that check_signing_key_authorized returns false when the authorized
+    /// keys list is empty, even if the proof key format is valid.
+    /// Expected: Returns false.
+    /// This matters because an empty authorized key set means no key is trusted;
+    /// allowing any key through would be a critical security vulnerability.
     #[test]
     fn test_authorized_keys_fail() {
         let authorized_keys: Vec<String> = Vec::new();
@@ -578,6 +652,11 @@ mod tests {
         ));
     }
 
+    /// Tests that check_signing_key_authorized returns false when the proof key
+    /// is missing the fragment separator (#), making key extraction impossible.
+    /// Expected: Returns false.
+    /// This matters because the multikey identifier is extracted from the fragment
+    /// after '#'; without it, the key cannot be matched against authorized keys.
     #[test]
     fn test_authorized_keys_missing_key_id_fail() {
         let authorized_keys: Vec<String> = Vec::new();
@@ -587,6 +666,11 @@ mod tests {
         ));
     }
 
+    /// Tests that check_signing_key_authorized returns true when the proof key's
+    /// fragment matches one of the authorized multikey identifiers.
+    /// Expected: Returns true.
+    /// This matters because only keys listed in updateKeys are allowed to sign
+    /// log entries; this is the core authorization check for DID updates.
     #[test]
     fn test_authorized_keys_ok() {
         let authorized_keys: Vec<String> =
@@ -596,5 +680,89 @@ mod tests {
             &Arc::new(authorized_keys),
             "did:key:z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15#z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15"
         ));
+    }
+
+    /// Tests that verify_log_entry fails when the log entry has no proof at all.
+    /// Expected: Returns an error mentioning "Missing proof".
+    /// This matters because every log entry must be signed with a data integrity
+    /// proof; unsigned entries cannot be trusted and must be rejected.
+    #[test]
+    fn test_verify_log_entry_missing_proof() {
+        let entry = make_log_entry(json!({"id": "did:webvh:scid:example.com"}));
+        let result = entry.verify_log_entry(None, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Missing proof"));
+    }
+
+    /// Tests that verify_version_id fails when the first log entry (no previous)
+    /// has a version number other than 1.
+    /// Expected: Returns an error about the first entry needing version ID 1.
+    /// This matters because the DID log must start at version 1; any other
+    /// starting version indicates a missing or truncated log history.
+    #[test]
+    fn test_verify_version_id_first_entry_not_one() {
+        let mut entry = LogEntry::Spec1_0(LogEntry1_0 {
+            version_id: "5-abc123".to_string(),
+            version_time: Utc::now().fixed_offset(),
+            parameters: Parameters1_0::default(),
+            state: json!({"id": "did:webvh:scid:example.com"}),
+            proof: vec![DataIntegrityProof {
+                type_: "DataIntegrityProof".to_string(),
+                cryptosuite: CryptoSuite::EddsaJcs2022,
+                created: None,
+                verification_method: "did:key:z6Mk#z6Mk".to_string(),
+                proof_purpose: "assertionMethod".to_string(),
+                proof_value: Some("zDummy".to_string()),
+                context: None,
+            }],
+        });
+        // verify_version_id checks first entry must have version ID 1
+        let result = entry.verify_version_id(None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must have version ID 1"));
+    }
+
+    /// Tests that verify_version_id fails when the current entry's version number
+    /// is not exactly one greater than the previous entry's version number (e.g.
+    /// jumping from 1 to 5 instead of 1 to 2).
+    /// Expected: Returns an error about the version needing to be "one greater".
+    /// This matters because the spec requires sequential version numbering to
+    /// ensure no log entries have been skipped or inserted out of order.
+    #[test]
+    fn test_verify_version_id_not_incremented() {
+        let previous = LogEntry::Spec1_0(LogEntry1_0 {
+            version_id: "1-abc123".to_string(),
+            version_time: (Utc::now() - Duration::seconds(10)).fixed_offset(),
+            parameters: Parameters1_0 {
+                scid: Some(Arc::new("scidtest".to_string())),
+                ..Parameters1_0::default()
+            },
+            state: json!({"id": "did:webvh:scidtest:example.com"}),
+            proof: vec![],
+        });
+        let mut current = LogEntry::Spec1_0(LogEntry1_0 {
+            version_id: "5-xyz789".to_string(), // should be 2, not 5
+            version_time: Utc::now().fixed_offset(),
+            parameters: Parameters1_0::default(),
+            state: json!({"id": "did:webvh:scidtest:example.com"}),
+            proof: vec![],
+        });
+        let result = current.verify_version_id(Some(&previous));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must be one greater"));
+    }
+
+    /// Tests that verify_version_time rejects a log entry whose timestamp is
+    /// in the future (1 hour ahead of the current time).
+    /// Expected: Returns an error indicating the time is "in the future".
+    /// This matters because future-dated entries could be used to pre-commit
+    /// changes or manipulate version ordering; the spec prohibits them.
+    #[test]
+    fn test_verify_version_time_future_error() {
+        let future_time = (Utc::now() + Duration::hours(1)).fixed_offset();
+        let entry = make_log_entry_with_time(future_time);
+        let result = entry.verify_version_time(None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("in the future"));
     }
 }

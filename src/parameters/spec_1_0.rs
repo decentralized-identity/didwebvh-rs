@@ -117,6 +117,7 @@ mod tests {
 
     use crate::{
         SCID_HOLDER,
+        test_utils::TEST_UPDATE_KEY,
         witness::{Witness, Witnesses},
     };
 
@@ -141,7 +142,7 @@ mod tests {
             method: Some(crate::Version::V1_0),
             scid: Some(Arc::new("scid123".to_string())),
             update_keys: Some(Arc::new(vec![
-                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY".to_string(),
+                TEST_UPDATE_KEY.to_string(),
                 "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp".to_string(),
             ])),
             portable: Some(true),
@@ -203,7 +204,7 @@ mod tests {
         // On first LogEntry, if next_hashes is configured, then pre-rotation is active
         let first_params = Parameters {
             update_keys: Some(Arc::new(vec![
-                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY".to_string(),
+                TEST_UPDATE_KEY.to_string(),
             ])),
             next_key_hashes: Some(Arc::new(vec![
                 "zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155".to_string(),
@@ -293,7 +294,17 @@ mod tests {
         Parameters {
             scid: Some(Arc::new(SCID_HOLDER.to_string())),
             update_keys: Some(Arc::new(vec![
-                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY".to_string(),
+                TEST_UPDATE_KEY.to_string(),
+            ])),
+            ..Default::default()
+        }
+    }
+
+    /// Helper to create a minimal valid subsequent-entry Parameters (no scid)
+    fn subsequent_entry_params() -> Parameters {
+        Parameters {
+            update_keys: Some(Arc::new(vec![
+                TEST_UPDATE_KEY.to_string(),
             ])),
             ..Default::default()
         }
@@ -395,7 +406,7 @@ mod tests {
         };
         let current = Parameters {
             witness: None,
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))
@@ -413,7 +424,7 @@ mod tests {
         };
         let current = Parameters {
             witness: None,
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))
@@ -433,7 +444,7 @@ mod tests {
         };
         let current = Parameters {
             witness: Some(Arc::new(Witnesses::Empty {})),
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))
@@ -452,7 +463,7 @@ mod tests {
         };
         let current = Parameters {
             witness: Some(sample_witnesses_2()),
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))
@@ -471,7 +482,7 @@ mod tests {
         };
         let current = Parameters {
             witness: Some(sample_witnesses()),
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))
@@ -657,7 +668,7 @@ mod tests {
         };
         let current = Parameters {
             watchers: None,
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))
@@ -673,7 +684,7 @@ mod tests {
         };
         let current = Parameters {
             watchers: None,
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))
@@ -692,7 +703,7 @@ mod tests {
         };
         let current = Parameters {
             watchers: Some(Arc::new(Vec::new())),
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))
@@ -708,7 +719,7 @@ mod tests {
         };
         let current = Parameters {
             watchers: Some(Arc::new(vec!["https://new.example.com".to_string()])),
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))
@@ -727,7 +738,7 @@ mod tests {
         };
         let current = Parameters {
             watchers: Some(Arc::new(vec!["https://watcher.example.com".to_string()])),
-            ..first_entry_params()
+            ..subsequent_entry_params()
         };
         let validated = current
             .validate(Some(&previous))

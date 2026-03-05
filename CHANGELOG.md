@@ -1,120 +1,41 @@
 # didwebvh-rs Changelog history
 
-## 3rd March 2026
+## 5th March 2026
 
 ### Release 0.2.0
 
-- **FIX:** IP addresses are now rejected in DID URLs per the did:webvh spec
-  - `parse_did_url()` rejects IPv4 addresses (e.g. `192.168.1.1`) including
-    with ports (e.g. `192.168.1.1%3A8080`)
-  - `parse_url()` rejects both IPv4 and IPv6 addresses (e.g. `https://[::1]/`)
-    with a specific error message instead of the generic "Must contain domain"
-  - `localhost` and fully qualified domain names continue to work as expected
-- **FIX:** Query parameter mutual exclusivity now enforced at parse time
-  - Only one of `versionId`, `versionTime`, or `versionNumber` may be specified;
-    combining them now returns an error during URL parsing
-  - `get_specific_log_entry()` simplified to rely on parse-time validation,
-    with clearer per-parameter error messages
-- **MAINTENANCE:** Improved `generate_history` integration tests
-  - Extracted shared constants for base DID, log file, and witness file paths
-  - Added test cases for `versionId`, `versionTime`, and latest resolution
-- **FIX:** Resolved DID is now validated against DID Document `id` per spec
-  - During resolution, the DID being resolved MUST match the top-level `id`
-    in at least one version of the DIDDoc (Read/Resolve step 6 of the
-    did:webvh v1.0 specification)
-  - Added `WebVHURL::to_did_base()` helper that returns the base DID string
-    without query parameters or fragment for comparison
-- **MAINTENANCE:** Updated dependencies
-  - `affinidi-data-integrity` updated from 0.3 to 0.4
-  - `criterion` updated from 0.5 to 0.8
-- **FEATURE:** Added benchmark harness for measuring DID performance
-  - Criterion benchmarks (`cargo bench --bench did_benchmarks`) with HTML reports
-  - Nightly benchmarks (`cargo +nightly bench --bench did_benchmarks_nightly`)
-  - Covers DID creation, resolution, and validation across single-entry and
-    large (120+ entries with witnesses) scenarios
-- **IMPROVEMENT:** Added `prelude` module for convenient imports
-  - `use didwebvh_rs::prelude::*` re-exports the most commonly needed types:
-    `DIDWebVHError`, `DIDWebVHState`, `LogEntryMethods`, `Parameters`,
-    `CreateDIDConfig`, `create_did`, `Witnesses`, and `WitnessProofCollection`
-  - Examples updated to use the prelude
-- **IMPROVEMENT:** `NotFound` and `UnsupportedMethod` error variants now carry
-  context strings describing what was not found or which method was unsupported,
-  making debugging significantly easier
-- **FIX:** Replaced all `unwrap()` calls in production code with proper error
-  handling
-  - `reqwest::ClientBuilder::build()` in resolver now returns `NetworkError`
-    instead of panicking
-  - `get_scid()` in `resolve_state` now returns `ValidationError` instead of
-    panicking
-  - All `as_object_mut().unwrap()` calls replaced with a shared
-    `ensure_object_mut()` helper that returns `DIDError`
-  - Two guarded-by-prior-check `.last().unwrap()` calls in `validate.rs`
-    switched to `.expect()` with explanatory messages
-- **IMPROVEMENT:** Deduplicated `add_web_also_known_as` and
-  `add_scid_also_known_as` via shared `build_alias_list()` helper
-- **IMPROVEMENT:** Deduplicated log entry spec implementations using
-  `impl_log_entry_common!` macro
-  - 16 identical method implementations between `LogEntry1_0` and
-    `LogEntry1_0Pre` now share a single macro definition
-  - `format_version_time()` and `parse_version_id_fields()` extracted as
-    shared functions
-  - Eliminates ~150 lines of duplicated code and prevents spec version drift
-- **IMPROVEMENT:** Extracted `validate_log_entries()` and
-  `resolve_witness_proofs()` helpers in the resolver, reducing duplication
-  across WASM, eager, and deferred download paths
-- **IMPROVEMENT:** Simplified `Parameters::validate()` method
-  - Removed dead code (unreachable `update_keys.is_empty()` check)
-  - Consolidated TTL validation from 22 lines to a 4-line match expression
-- **MAINTENANCE:** Fixed minimum Rust version badge in README (1.88 → 1.90)
-- **FIX:** DID portability is now enforced during log entry verification
-  - When the DID document `id` changes between consecutive log entries,
-    the `portable` parameter must be `true`; otherwise verification fails
-    with a portability error
-  - When a portable DID is moved, the previous DID string must appear in
-    the `alsoKnownAs` array per the did:webvh v1.0 specification
-- **FIX:** `versionTime` ordering now uses strict greater-than comparison
-  - The spec requires each `versionTime` to be strictly greater than the
-    previous entry's time; equal timestamps are now correctly rejected
-- **FIX:** `generate_history` example now uses deterministic timestamps
-  - Uses a fixed start date with 1-second increments per entry to
-    guarantee strictly increasing `versionTime` values
-  - Also fixes `rand` crate import (`Rng` → `RngExt`) for compatibility
-    with rand 0.10
-- **IMPROVEMENT:** `resolve()` now conditionally downloads `did-witness.json`
-  - New `eager_witness_download` parameter controls download strategy
-  - `false` (default): downloads `did.jsonl` first, only fetches witness proofs
-    when log entries actually configure witnesses — avoids unnecessary network
-    requests and suppresses the warning for DIDs without witnesses
-  - `true`: downloads both files concurrently (previous behavior, useful when
-    witnesses are expected)
-  - When witnesses are configured but the witness proof file cannot be
-    downloaded, an error is returned instead of silently using empty proofs
-- **FIX:** Witness parameter `{}` (empty object) now correctly handled per the
-  did:webvh v1.0 specification
-  - First log entry with `"witness":{}` no longer rejected during validation;
-    it is treated as "no witnesses configured"
-  - Subsequent log entries repeating `"witness":{}` no longer error in diff
-    calculation; treated as no change
-  - Fixes interoperability with other did:webvh implementations (e.g. didwebvh-ts)
-- **FIX:** Watchers parameter `[]` (empty array) now correctly handled per the
-  did:webvh v1.0 specification
-  - First log entry with `"watchers":[]` no longer rejected during validation;
-    it is treated as "no watchers configured"
-  - Repeated empty arrays `[]` for array parameters (`watchers`,
-    `nextKeyHashes`, `updateKeys`) no longer error in diff calculation;
-    treated as no change
-- **FIX:** `Parameters1_0` serialization round-trip now lossless for all fields
-  - `deactivated` field changed from `bool` to `Option<bool>` so that
-    `"deactivated":false` is preserved during re-serialization instead of
-    being silently dropped
-  - Fixes signature and entry hash verification failures when resolving
-    DIDs from other implementations that explicitly include all parameters
-- **MAINTENANCE:** Updated downstream dependencies
-  - `ssi` crate updated from 0.14 to 0.15
-  - `rand` crate updated from 0.9 to 0.10 (dev-dependency)
-- **MAINTENANCE:** Added comprehensive witness and watcher parameter tests
-  covering validation, diff, and serialization scenarios
-- **MAINTENANCE:** Code test coverage @ 87.98%
+#### Spec Compliance Fixes
+
+- IP addresses rejected in DID URLs per spec (`parse_did_url()` and `parse_url()`)
+- Resolved DID validated against DID Document `id` (Read/Resolve step 6)
+- DID portability enforced: `id` changes require `portable: true` and previous DID in `alsoKnownAs`
+- `versionTime` ordering uses strict greater-than (equal timestamps rejected)
+- Query parameter mutual exclusivity enforced at parse time (`versionId`, `versionTime`, `versionNumber`)
+- Witness `{}` and watchers `[]` correctly treated as "not configured" instead of erroring
+- Empty arrays for `watchers`, `nextKeyHashes`, `updateKeys` no longer error in diff calculation
+- `Parameters1_0.deactivated` changed from `bool` to `Option<bool>` for lossless serialization round-trips
+
+#### Improvements
+
+- `resolve()` conditionally downloads `did-witness.json` only when witnesses are configured (`eager_witness_download` parameter)
+- `prelude` module added for convenient imports (`use didwebvh_rs::prelude::*`)
+- `NotFound` and `UnsupportedMethod` error variants now carry context strings
+- All `unwrap()` calls in production code replaced with proper error handling
+- Deduplicated log entry spec implementations via `impl_log_entry_common!` macro (~150 lines removed)
+- Deduplicated resolver helpers (`validate_log_entries()`, `resolve_witness_proofs()`)
+- Simplified `Parameters::validate()` (removed dead code, consolidated TTL validation)
+
+#### New
+
+- Benchmark harness: `cargo bench --bench did_benchmarks` (Criterion) and nightly benchmarks
+- `WebVHURL::to_did_base()` helper for DID comparison without query/fragment
+
+#### Maintenance
+
+- Dependencies updated: `affinidi-data-integrity` 0.3→0.4, `criterion` 0.5→0.8, `ssi` 0.14→0.15, `rand` 0.9→0.10
+- Fixed minimum Rust version badge in README (1.88→1.90)
+- `generate_history` example uses deterministic timestamps; fixes `rand` 0.10 import
+- Comprehensive test coverage: 353 tests (340 unit + 12 integration + 1 doc-test) with shared test utilities
 
 ## 5th February 2026
 

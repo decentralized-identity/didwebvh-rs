@@ -29,6 +29,9 @@ pub mod url;
 pub mod validate;
 pub mod witness;
 
+#[cfg(test)]
+pub(crate) mod test_utils;
+
 // Re-export Affinidi Secrets Resolver so others can create Secrets
 pub use affinidi_secrets_resolver;
 
@@ -496,6 +499,10 @@ mod tests {
     use serde_json::Value;
     use std::sync::Arc;
 
+    /// Creates a minimal but valid DID Document for testing purposes.
+    /// The document uses {SCID} placeholders in all identifiers, which get replaced
+    /// with the actual SCID during log entry creation. Includes a verification method,
+    /// assertion/authentication references, and a DIDComm messaging service.
     fn did_doc() -> Value {
         let raw_did = r#"{
     "@context": [
@@ -536,16 +543,29 @@ mod tests {
         serde_json::from_str(raw_did).expect("Couldn't parse raw DID Doc")
     }
 
+    /// Tests that the string "did:webvh:1.0" correctly parses into Version::V1_0.
+    /// Expected: TryFrom succeeds and returns the V1_0 variant.
+    /// This matters because version parsing is the first step in determining which
+    /// spec rules apply when resolving or validating a WebVH DID log.
     #[test]
     fn version_try_from() {
         assert_eq!(Version::try_from("did:webvh:1.0").unwrap(), Version::V1_0);
     }
 
+    /// Tests that Version::V1_0 converts to the numeric value 1.0.
+    /// Expected: as_f32() returns 1.0.
+    /// This matters because numeric version comparisons are used to enforce that
+    /// log entries never downgrade the spec version across the DID history.
     #[test]
     fn version_as_f32() {
         assert_eq!(Version::V1_0.as_f32(), 1_f32);
     }
 
+    /// Tests that a first log entry can be successfully created with valid parameters
+    /// and a matching signing key.
+    /// Expected: create_log_entry succeeds (returns Ok).
+    /// This matters because creating the initial log entry is the foundational step
+    /// in establishing a new WebVH DID, including SCID generation and proof signing.
     #[test]
     fn webvh_create_log_entry() {
         let key = Secret::generate_ed25519(None, None);
@@ -566,6 +586,10 @@ mod tests {
         );
     }
 
+    /// Tests that creating a first log entry without update_keys fails.
+    /// Expected: create_log_entry returns an Err.
+    /// This matters because update_keys are mandatory for the initial log entry to
+    /// establish who is authorized to manage the DID going forward.
     #[test]
     fn webvh_create_log_entry_no_update_keys() {
         let key = Secret::generate_ed25519(None, None);
@@ -583,6 +607,11 @@ mod tests {
         assert!(log_entry.is_err());
     }
 
+    /// Tests that a signing key is accepted for the first log entry when it matches
+    /// one of the provided update_keys and pre-rotation is not enabled.
+    /// Expected: check_signing_key returns Ok.
+    /// This matters because the first log entry must verify the signing key against
+    /// update_keys to establish the initial trust anchor for the DID.
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_no_previous() {
         let secret = Secret::generate_ed25519(None, None);
@@ -603,6 +632,11 @@ mod tests {
         assert!(result.is_ok())
     }
 
+    /// Tests that a signing key is rejected for the first log entry when it does not
+    /// match any of the provided update_keys.
+    /// Expected: check_signing_key returns Err.
+    /// This matters because accepting an unauthorized signing key would allow an
+    /// attacker to create a DID they cannot legitimately control.
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_no_previous_error() {
         let secret = Secret::generate_ed25519(None, None);
@@ -619,6 +653,11 @@ mod tests {
         assert!(result.is_err())
     }
 
+    /// Tests that a signing key is accepted for a subsequent log entry when it matches
+    /// the update_keys from the previous validated log entry (without pre-rotation).
+    /// Expected: check_signing_key returns Ok.
+    /// This matters because subsequent entries must be authorized by the keys established
+    /// in the previous entry to maintain the chain of trust in the DID history.
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_with_previous() {
         let secret = Secret::generate_ed25519(None, None);
@@ -657,6 +696,11 @@ mod tests {
         assert!(result.is_ok())
     }
 
+    /// Tests that a signing key is rejected for a subsequent log entry when it does not
+    /// match the update_keys from the previous validated entry (without pre-rotation).
+    /// Expected: check_signing_key returns Err.
+    /// This matters because allowing an unrecognized key to sign updates would break
+    /// the verifiable history chain and enable unauthorized DID modifications.
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_with_previous_error() {
         let secret = Secret::generate_ed25519(None, None);
@@ -691,6 +735,11 @@ mod tests {
         assert!(result.is_err())
     }
 
+    /// Tests that a signing key is accepted for the first log entry when pre-rotation
+    /// is configured with matching next_key_hashes.
+    /// Expected: check_signing_key returns Ok.
+    /// This matters because pre-rotation allows DID controllers to commit to future
+    /// keys in advance, providing quantum-resistant key rotation security from the start.
     #[test]
     fn webvh_check_signing_key_pre_rotate_no_previous() {
         let secret = Secret::generate_ed25519(None, None);
@@ -716,6 +765,11 @@ mod tests {
         assert!(result.is_ok())
     }
 
+    /// Tests that a rotated signing key is accepted when its hash was pre-committed
+    /// in the previous log entry's next_key_hashes (pre-rotation with a previous entry).
+    /// Expected: check_signing_key returns Ok using the new (next) key.
+    /// This matters because pre-rotation key verification across entries ensures
+    /// that only keys committed to in advance can assume control, preventing key compromise attacks.
     #[test]
     fn webvh_check_signing_key_pre_rotate_previous() {
         let secret = Secret::generate_ed25519(None, None);
@@ -767,5 +821,370 @@ mod tests {
         );
 
         assert!(result.is_ok())
+    }
+
+    // ===== Version tests =====
+
+    /// Tests that an unrecognized version string is rejected by TryFrom.
+    /// Expected: TryFrom returns Err with a message containing "Invalid WebVH Version".
+    /// This matters because accepting unknown versions could lead to incorrect
+    /// parameter parsing or validation logic during DID resolution.
+    #[test]
+    fn version_try_from_invalid() {
+        let result = Version::try_from("did:webvh:99.0");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid WebVH Version"));
+    }
+
+    /// Tests that Version::V1_0 displays as "did:webvh:1.0".
+    /// Expected: The Display trait produces the canonical version string.
+    /// This matters because the version string is embedded in log entries and must
+    /// conform to the spec format for interoperability with other WebVH implementations.
+    #[test]
+    fn version_display() {
+        assert_eq!(Version::V1_0.to_string(), "did:webvh:1.0");
+    }
+
+    /// Tests that Version::V1_0Pre displays identically to V1_0 as "did:webvh:1.0".
+    /// Expected: The Display output matches V1_0 exactly.
+    /// This matters because pre-1.0 entries are treated as 1.0-compatible on the wire,
+    /// ensuring backward compatibility with documents created before spec ratification.
+    #[test]
+    fn version_v1_0_pre_display() {
+        // V1_0Pre displays same as V1_0
+        assert_eq!(Version::V1_0Pre.to_string(), "did:webvh:1.0");
+    }
+
+    // ===== create_log_entry() additional tests =====
+
+    /// Tests that creating a deactivated log entry fails when update_keys is non-empty.
+    /// Expected: create_log_entry returns Err with a message about update_keys needing to be empty.
+    /// This matters because the spec requires that deactivated DIDs have empty update_keys
+    /// to ensure no further updates can be made after deactivation.
+    #[test]
+    fn webvh_create_log_entry_deactivated_with_keys_error() {
+        let key = Secret::generate_ed25519(None, None);
+        let state = did_doc();
+        let parameters = Parameters {
+            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            deactivated: Some(true),
+            ..Default::default()
+        };
+        let mut didwebvh = DIDWebVHState::default();
+        let result = didwebvh.create_log_entry(None, &state, &parameters, &key);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("update_keys is set to []"));
+    }
+
+    /// Tests the full deactivation flow: create an initial entry, then deactivate with
+    /// empty update_keys. This is a two-step process requiring a valid first entry.
+    /// Expected: The deactivation log entry is created successfully.
+    /// This matters because DID deactivation must be a valid, signed operation that
+    /// permanently removes the ability to update the DID while preserving its history.
+    #[test]
+    fn webvh_create_log_entry_deactivated_ok() {
+        let key = Secret::generate_ed25519(None, None);
+        let mut key_with_id = key.clone();
+        let pk = key.get_public_keymultibase().unwrap();
+        key_with_id.id = format!("did:key:{pk}#{pk}");
+
+        let state = did_doc();
+        let params1 = Parameters {
+            update_keys: Some(Arc::new(vec![pk.clone()])),
+            ..Default::default()
+        };
+        let mut didwebvh = DIDWebVHState::default();
+        let base_time = (Utc::now() - chrono::Duration::seconds(10)).fixed_offset();
+        didwebvh
+            .create_log_entry(Some(base_time), &state, &params1, &key_with_id)
+            .unwrap();
+
+        let actual_doc = didwebvh.log_entries.last().unwrap().get_state().clone();
+
+        // Now deactivate
+        let params2 = Parameters {
+            update_keys: Some(Arc::new(vec![])),
+            deactivated: Some(true),
+            ..Default::default()
+        };
+        let result = didwebvh.create_log_entry(
+            Some(base_time + chrono::Duration::seconds(1)),
+            &actual_doc,
+            &params2,
+            &key_with_id,
+        );
+        assert!(result.is_ok());
+    }
+
+    /// Tests that a second log entry can be appended after the initial entry,
+    /// verifying the version number increments and the state grows correctly.
+    /// Expected: Two log entries exist in the state after both creations succeed.
+    /// This matters because the ability to append entries is the core mechanism for
+    /// DID Document updates while maintaining a verifiable history chain.
+    #[test]
+    fn webvh_create_log_entry_second_entry() {
+        let key = Secret::generate_ed25519(None, None);
+        let mut key_with_id = key.clone();
+        let pk = key.get_public_keymultibase().unwrap();
+        key_with_id.id = format!("did:key:{pk}#{pk}");
+
+        let state = did_doc();
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![pk.clone()])),
+            ..Default::default()
+        };
+        let mut didwebvh = DIDWebVHState::default();
+        let base_time = (Utc::now() - chrono::Duration::seconds(10)).fixed_offset();
+        didwebvh
+            .create_log_entry(Some(base_time), &state, &params, &key_with_id)
+            .unwrap();
+
+        let actual_doc = didwebvh.log_entries.last().unwrap().get_state().clone();
+
+        // Second entry — just update with same keys
+        let params2 = Parameters {
+            update_keys: Some(Arc::new(vec![pk])),
+            ..Default::default()
+        };
+        let result = didwebvh.create_log_entry(
+            Some(base_time + chrono::Duration::seconds(1)),
+            &actual_doc,
+            &params2,
+            &key_with_id,
+        );
+        assert!(result.is_ok());
+        assert_eq!(didwebvh.log_entries.len(), 2);
+    }
+
+    /// Tests that a custom version_time is correctly recorded in the log entry
+    /// rather than defaulting to the current time.
+    /// Expected: The stored versionTime matches the custom timestamp provided.
+    /// This matters because precise version timestamps are critical for time-based
+    /// DID resolution queries and for establishing an accurate audit trail.
+    #[test]
+    fn webvh_create_log_entry_custom_version_time() {
+        let key = Secret::generate_ed25519(None, None);
+        let pk = key.get_public_keymultibase().unwrap();
+        let mut key_with_id = key.clone();
+        key_with_id.id = format!("did:key:{pk}#{pk}");
+
+        let state = did_doc();
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![pk])),
+            ..Default::default()
+        };
+        let custom_time = (Utc::now() - chrono::Duration::seconds(100)).fixed_offset();
+        let mut didwebvh = DIDWebVHState::default();
+        let result = didwebvh.create_log_entry(Some(custom_time), &state, &params, &key_with_id);
+        assert!(result.is_ok());
+        use crate::log_entry::LogEntryMethods;
+        // Compare with seconds precision (versionTime is serialized with seconds only)
+        let actual = didwebvh.log_entries[0].log_entry.get_version_time_string();
+        let expected = custom_time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        assert_eq!(actual, expected);
+    }
+
+    // ===== get_specific_log_entry() tests =====
+
+    /// Creates a DIDWebVHState with two log entries for use in query tests.
+    /// The entries are separated by 10 seconds, allowing time-based queries to
+    /// distinguish between them. Uses a single signing key for both entries.
+    /// Returns the fully populated state with two validated log entries.
+    fn create_multi_entry_state() -> DIDWebVHState {
+        let key = Secret::generate_ed25519(None, None);
+        let pk = key.get_public_keymultibase().unwrap();
+        let mut key_with_id = key.clone();
+        key_with_id.id = format!("did:key:{pk}#{pk}");
+
+        let state = did_doc();
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![pk.clone()])),
+            ..Default::default()
+        };
+        let base_time = (Utc::now() - chrono::Duration::seconds(100)).fixed_offset();
+        let mut didwebvh = DIDWebVHState::default();
+        didwebvh
+            .create_log_entry(Some(base_time), &state, &params, &key_with_id)
+            .unwrap();
+
+        let actual_doc = didwebvh.log_entries.last().unwrap().get_state().clone();
+
+        let params2 = Parameters {
+            update_keys: Some(Arc::new(vec![pk])),
+            ..Default::default()
+        };
+        didwebvh
+            .create_log_entry(
+                Some(base_time + chrono::Duration::seconds(10)),
+                &actual_doc,
+                &params2,
+                &key_with_id,
+            )
+            .unwrap();
+        didwebvh
+    }
+
+    /// Tests that a log entry can be retrieved by its exact versionId string.
+    /// Expected: The lookup succeeds and returns the matching entry.
+    /// This matters because versionId-based queries allow resolvers to fetch a
+    /// specific, cryptographically-identified snapshot of the DID Document.
+    #[test]
+    fn test_get_specific_by_version_id() {
+        let state = create_multi_entry_state();
+        use crate::log_entry::LogEntryMethods;
+        let vid = state.log_entries[0].log_entry.get_version_id();
+        let result = state.get_specific_log_entry(Some(&vid), None, None);
+        assert!(result.is_ok());
+    }
+
+    /// Tests that querying with a non-existent versionId returns a NotFound error.
+    /// Expected: The lookup fails with an error message containing "No matching".
+    /// This matters because resolvers must clearly distinguish between valid and
+    /// invalid version references to avoid returning stale or incorrect DID Documents.
+    #[test]
+    fn test_get_specific_by_version_id_not_found() {
+        let state = create_multi_entry_state();
+        let result = state.get_specific_log_entry(Some("999-nonexistent"), None, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No matching"));
+    }
+
+    /// Tests that a log entry can be retrieved by its numeric version number.
+    /// Expected: The lookup succeeds and the returned entry has version_number 1.
+    /// This matters because version number queries provide a simple, sequential way
+    /// to navigate the DID history without needing to know the full versionId hash.
+    #[test]
+    fn test_get_specific_by_version_number() {
+        let state = create_multi_entry_state();
+        let result = state.get_specific_log_entry(None, None, Some(1));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().version_number, 1);
+    }
+
+    /// Tests that querying with a non-existent version number returns an error.
+    /// Expected: The lookup fails for version number 999.
+    /// This matters because out-of-range version queries must fail gracefully rather
+    /// than panicking or returning incorrect data during DID resolution.
+    #[test]
+    fn test_get_specific_by_version_number_not_found() {
+        let state = create_multi_entry_state();
+        let result = state.get_specific_log_entry(None, None, Some(999));
+        assert!(result.is_err());
+    }
+
+    /// Tests that a log entry can be retrieved by versionTime, returning the latest
+    /// entry whose timestamp is at or before the queried time.
+    /// Expected: The lookup succeeds when using the second entry's exact timestamp.
+    /// This matters because time-based resolution allows clients to query the DID
+    /// Document state as it existed at a specific point in time.
+    #[test]
+    fn test_get_specific_by_version_time() {
+        let state = create_multi_entry_state();
+        use crate::log_entry::LogEntryMethods;
+        let time = state.log_entries[1].log_entry.get_version_time();
+        let result = state.get_specific_log_entry(None, Some(time), None);
+        assert!(result.is_ok());
+    }
+
+    /// Tests that querying with a versionTime before all entries returns a NotFound error.
+    /// Expected: The lookup fails when using a timestamp one year in the past.
+    /// This matters because resolvers must not return data for timestamps that predate
+    /// the DID's creation, as no valid document state existed at that time.
+    #[test]
+    fn test_get_specific_by_version_time_not_found() {
+        let state = create_multi_entry_state();
+        // Use a very old time before any entries
+        let old_time = (Utc::now() - chrono::Duration::days(365)).fixed_offset();
+        let result = state.get_specific_log_entry(None, Some(old_time), None);
+        assert!(result.is_err());
+    }
+
+    /// Tests that calling get_specific_log_entry with no query parameters returns an error.
+    /// Expected: The lookup fails with a message containing "No query parameter".
+    /// This matters because the API must reject ambiguous queries to prevent
+    /// accidentally returning the wrong log entry during resolution.
+    #[test]
+    fn test_get_specific_no_params_error() {
+        let state = create_multi_entry_state();
+        let result = state.get_specific_log_entry(None, None, None);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No query parameter"));
+    }
+
+    // ===== check_signing_key() additional tests =====
+
+    /// Tests that creating a first log entry with no update_keys at all (None) is rejected.
+    /// Expected: check_signing_key returns Err with "update_keys are required".
+    /// This matters because the first entry must establish authorized update keys;
+    /// without them, no future updates could be validated in the DID history.
+    #[test]
+    fn webvh_check_signing_key_first_entry_no_keys_error() {
+        let secret = Secret::generate_ed25519(None, None);
+        let result = DIDWebVHState::check_signing_key(
+            None,
+            &Parameters {
+                update_keys: None,
+                ..Default::default()
+            },
+            &secret,
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("update_keys are required"));
+    }
+
+    /// Tests that pre-rotation is rejected when the previous entry has pre_rotation_active
+    /// set to true but next_key_hashes is None (an inconsistent state).
+    /// Expected: check_signing_key returns Err with "no next_key_hashes".
+    /// This matters because pre-rotation without committed key hashes is a broken state
+    /// that would make it impossible to verify the legitimacy of rotated keys.
+    #[test]
+    fn webvh_check_signing_key_pre_rotation_no_hashes_error() {
+        let secret = Secret::generate_ed25519(None, None);
+
+        let parameters = Parameters {
+            scid: Some(Arc::new("1-abcdef1234567890".to_string())),
+            update_keys: Some(Arc::new(vec![
+                secret.get_public_keymultibase().unwrap(),
+            ])),
+            ..Default::default()
+        };
+        let mut validated = parameters.validate(None).unwrap();
+        // Force pre_rotation_active but remove next_key_hashes
+        validated.pre_rotation_active = true;
+        validated.next_key_hashes = None;
+
+        let previous = LogEntryState {
+            log_entry: LogEntry::create(
+                "1-abcdef1234567890".to_string(),
+                Utc::now().fixed_offset(),
+                parameters.clone(),
+                did_doc(),
+                Version::V1_0,
+            )
+            .unwrap(),
+            version_number: 1,
+            validation_status: crate::log_entry_state::LogEntryValidationStatus::Ok,
+            validated_parameters: validated,
+        };
+
+        let result = DIDWebVHState::check_signing_key(
+            Some(&previous),
+            &Parameters::default(),
+            &secret,
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no next_key_hashes"));
     }
 }
