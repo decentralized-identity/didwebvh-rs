@@ -1,5 +1,32 @@
 # didwebvh-rs Changelog history
 
+## 13th March 2026
+
+### Release 0.3.0
+
+#### New
+
+- **Pluggable signing via `Signer` trait** — all signing operations now go through
+  the `Signer` trait from `affinidi-data-integrity`. This means secret key material
+  no longer needs to be held in-process; you can delegate signing to an HSM, cloud
+  KMS (e.g. AWS KMS, Azure Key Vault, HashiCorp Vault), or any external signing
+  service by implementing the `Signer` trait.
+  - `CreateDIDConfig<A, W>` is now generic over authorization and witness signer
+    types, with defaults of `Secret` for full backward compatibility
+  - `create_did()`, `sign_witness_proofs()`, and `DIDWebVHState::create_log_entry()`
+    accept any `Signer` implementation
+  - `Signer` trait and `KeyType` re-exported from the crate root and `prelude`
+  - `CreateDIDConfig::builder_generic()` added for custom signer types;
+    `CreateDIDConfig::builder()` continues to work with `Secret` as before
+
+#### Maintenance
+
+- Dependencies updated: `affinidi-data-integrity` 0.4→0.5,
+  `affinidi-secrets-resolver` 0.5.0→0.5.2
+- Internal `ensure_did_key_id()` (which mutated `Secret` IDs) replaced with
+  `validate_did_key_vm()` (validation only, no mutation) — signers are now
+  required to provide a correctly formatted `did:key:` verification method
+
 ## 5th March 2026
 
 ### Release 0.2.0

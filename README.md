@@ -29,6 +29,8 @@ site
 - [x] URL validation rejects IP addresses per spec (domain names required)
 - [x] WASM friendly for inclusion in other projects
 - [x] WebVH DID Create routines to make it easier to create DIDs programmatically
+- [x] Pluggable signing via the `Signer` trait — use HSMs, KMS, or any external
+  signing service without exposing secret key material to the library
 
 ## Usage
 
@@ -52,7 +54,8 @@ webvh.load_log_entries_from_file("did.jsonl")?;
 
 The `prelude` module re-exports the most commonly needed types:
 `DIDWebVHError`, `DIDWebVHState`, `LogEntryMethods`, `Parameters`,
-`CreateDIDConfig`, `create_did`, `Witnesses`, and `WitnessProofCollection`.
+`CreateDIDConfig`, `create_did`, `Witnesses`, `WitnessProofCollection`,
+`Signer`, and `KeyType`.
 
 ## Feature Flags
 
@@ -206,12 +209,63 @@ let result = create_did(config).unwrap();
 // result.witness_proofs — witness proofs (empty if no witnesses configured)
 ```
 
-### Witness Support
+### Bring Your Own Signer (HSM / KMS)
 
-If your DID uses witnesses, provide the witness secrets via the builder:
+The library does not require you to hold secret key material in memory. All
+signing operations go through the `Signer` trait, so you can delegate to an
+HSM, cloud KMS, or any other external signing service. The built-in `Secret`
+type implements `Signer` for local Ed25519 keys, but you can replace it with
+your own implementation:
 
 ```rust
-// For each witness, add its DID and secret
+use async_trait::async_trait;
+use didwebvh_rs::prelude::*;
+
+struct MyKmsSigner { /* your KMS client, key ID, etc. */ }
+
+#[async_trait]
+impl Signer for MyKmsSigner {
+    fn key_type(&self) -> KeyType {
+        KeyType::Ed25519
+    }
+
+    fn verification_method(&self) -> &str {
+        // Must be "did:key:{multibase}#{multibase}" format
+        "did:key:z6Mk...#z6Mk..."
+    }
+
+    async fn sign(&self, data: &[u8]) -> Result<Vec<u8>, affinidi_data_integrity::DataIntegrityError> {
+        // Call your KMS / HSM here — no private key bytes needed locally
+        todo!()
+    }
+}
+```
+
+Then use your custom signer with `CreateDIDConfig::builder_generic()`:
+
+```rust
+let kms_signer = MyKmsSigner { /* ... */ };
+
+let config = CreateDIDConfig::builder_generic()
+    .address("https://example.com/")
+    .authorization_key(kms_signer)
+    .did_document(did_document)
+    .parameters(parameters)
+    .build()
+    .unwrap();
+
+let result = create_did(config).await.unwrap();
+```
+
+The same applies to witness signing — `sign_witness_proofs()` accepts any
+`HashMap<String, W>` where `W: Signer`.
+
+### Witness Support
+
+If your DID uses witnesses, provide the witness signers via the builder:
+
+```rust
+// For each witness, add its DID and signer
 let config = CreateDIDConfig::builder()
     .address("https://example.com/")
     .authorization_key(signing_key)

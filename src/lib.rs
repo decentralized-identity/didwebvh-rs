@@ -35,6 +35,10 @@ pub(crate) mod test_utils;
 // Re-export Affinidi Secrets Resolver so others can create Secrets
 pub use affinidi_secrets_resolver;
 
+// Re-export Signer trait and KeyType so consumers can implement custom signing backends
+pub use affinidi_data_integrity::signer::Signer;
+pub use affinidi_secrets_resolver::secrets::KeyType;
+
 /// WebVH Specification supports multiple LogEntry versions in the same DID
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
@@ -176,15 +180,14 @@ impl DIDWebVHState {
     /// version_time is optional, if not provided, current time will be used
     /// document is the DID Document as a JSON Value
     /// parameters are the Parameters for the Log Entry (Full set of parameters)
-    /// signing_key is the Secret used to sign the Log Entry
+    /// signing_key is the Signer used to sign the Log Entry
     ///   NOTE: A diff comparison to previous parameters is automatically done
-    /// signing_key is the Secret used to sign the Log Entry
     pub async fn create_log_entry(
         &mut self,
         version_time: Option<DateTime<FixedOffset>>,
         document: &Value,
         parameters: &Parameters,
-        signing_key: &Secret,
+        signing_key: &dyn Signer,
     ) -> Result<&LogEntryState, DIDWebVHError> {
         let now = Utc::now();
         let last_log_entry = self.log_entries.last();
@@ -421,27 +424,43 @@ impl DIDWebVHState {
         }
     }
 
+    /// Extract the multibase key fragment from a verification method URI.
+    /// E.g. `"did:key:z6Mk...#z6Mk..."` → `"z6Mk..."` (the part after `#`).
+    fn extract_multibase_from_vm(vm: &str) -> Result<&str, DIDWebVHError> {
+        vm.split_once('#')
+            .map(|(_, fragment)| fragment)
+            .ok_or_else(|| {
+                DIDWebVHError::LogEntryError(format!(
+                    "verification_method '{vm}' must contain '#' with multibase key"
+                ))
+            })
+    }
+
     /// Ensures that the signing key is valid depending on the current state of the DID
     /// Checks state of the UpdateKeys in Parameters
     fn check_signing_key(
         previous_log_entry: Option<&LogEntryState>,
         parameters: &Parameters,
-        signing_key: &Secret,
+        signing_key: &dyn Signer,
     ) -> Result<(), DIDWebVHError> {
         debug!(
             "previous_log_entry exists?: {}",
             previous_log_entry.is_some()
         );
+
+        let vm = signing_key.verification_method();
+        let multibase = Self::extract_multibase_from_vm(vm)?;
+
         if let Some(previous) = previous_log_entry {
             if previous.validated_parameters.pre_rotation_active {
                 //Check if signing key exists in the previous verified LogEntry NextKeyHashes
                 if let Some(hashes) = &previous.validated_parameters.next_key_hashes {
-                    if !hashes.contains(&signing_key.get_public_keymultibase_hash().map_err(
-                        |e| DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}")),
-                    )?) {
+                    let key_hash = Secret::base58_hash_string(multibase).map_err(|e| {
+                        DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}"))
+                    })?;
+                    if !hashes.contains(&key_hash) {
                         return Err(DIDWebVHError::ParametersError(format!(
-                            "Signing key ID {} does not match any next key hashes {:#?}",
-                            signing_key.get_public_keymultibase().unwrap(),
+                            "Signing key ID {multibase} does not match any next key hashes {:#?}",
                             previous.get_active_update_keys()
                         )));
                     }
@@ -453,14 +472,12 @@ impl DIDWebVHState {
                 }
             } else {
                 //Check if signing key exists in the previous verified LogEntry UpdateKeys
-                if !previous.get_active_update_keys().contains(
-                    &signing_key.get_public_keymultibase().map_err(|e| {
-                        DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}"))
-                    })?,
-                ) {
+                if !previous
+                    .get_active_update_keys()
+                    .contains(&multibase.to_string())
+                {
                     return Err(DIDWebVHError::ParametersError(format!(
-                        "Signing key ID {} does not match any updateKey {:#?}",
-                        signing_key.get_public_keymultibase().unwrap(),
+                        "Signing key ID {multibase} does not match any updateKey {:#?}",
                         previous.get_active_update_keys()
                     )));
                 }
@@ -468,12 +485,9 @@ impl DIDWebVHState {
         } else {
             // This is the first LogEntry, thus update_keys must exist
             if let Some(keys) = &parameters.update_keys {
-                if !keys.contains(&signing_key.get_public_keymultibase().map_err(|e| {
-                    DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}"))
-                })?) {
+                if !keys.contains(&multibase.to_string()) {
                     return Err(DIDWebVHError::ParametersError(format!(
-                        "Signing key ID {} does not match any updateKey {keys:#?}",
-                        signing_key.get_public_keymultibase().unwrap(),
+                        "Signing key ID {multibase} does not match any updateKey {keys:#?}",
                     )));
                 }
             } else {
@@ -495,7 +509,6 @@ mod tests {
         log_entry_state::{LogEntryState, LogEntryValidationStatus},
         parameters::Parameters,
     };
-    use affinidi_secrets_resolver::secrets::Secret;
     use chrono::Utc;
     use serde_json::Value;
     use std::sync::Arc;
@@ -569,7 +582,7 @@ mod tests {
     /// in establishing a new WebVH DID, including SCID generation and proof signing.
     #[tokio::test]
     async fn webvh_create_log_entry() {
-        let key = Secret::generate_ed25519(None, None);
+        let key = crate::test_utils::generate_signing_key();
 
         let state = did_doc();
 
@@ -594,7 +607,7 @@ mod tests {
     /// establish who is authorized to manage the DID going forward.
     #[tokio::test]
     async fn webvh_create_log_entry_no_update_keys() {
-        let key = Secret::generate_ed25519(None, None);
+        let key = crate::test_utils::generate_signing_key();
 
         let state = did_doc();
 
@@ -616,7 +629,7 @@ mod tests {
     /// update_keys to establish the initial trust anchor for the DID.
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_no_previous() {
-        let secret = Secret::generate_ed25519(None, None);
+        let secret = crate::test_utils::generate_signing_key();
 
         let result = DIDWebVHState::check_signing_key(
             None,
@@ -641,7 +654,7 @@ mod tests {
     /// attacker to create a DID they cannot legitimately control.
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_no_previous_error() {
-        let secret = Secret::generate_ed25519(None, None);
+        let secret = crate::test_utils::generate_signing_key();
 
         let result = DIDWebVHState::check_signing_key(
             None,
@@ -662,7 +675,7 @@ mod tests {
     /// in the previous entry to maintain the chain of trust in the DID history.
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_with_previous() {
-        let secret = Secret::generate_ed25519(None, None);
+        let secret = crate::test_utils::generate_signing_key();
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
@@ -705,7 +718,7 @@ mod tests {
     /// the verifiable history chain and enable unauthorized DID modifications.
     #[test]
     fn webvh_check_signing_key_no_pre_rotate_with_previous_error() {
-        let secret = Secret::generate_ed25519(None, None);
+        let secret = crate::test_utils::generate_signing_key();
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
@@ -744,7 +757,7 @@ mod tests {
     /// keys in advance, providing quantum-resistant key rotation security from the start.
     #[test]
     fn webvh_check_signing_key_pre_rotate_no_previous() {
-        let secret = Secret::generate_ed25519(None, None);
+        let secret = crate::test_utils::generate_signing_key();
 
         let result = DIDWebVHState::check_signing_key(
             None,
@@ -774,9 +787,9 @@ mod tests {
     /// that only keys committed to in advance can assume control, preventing key compromise attacks.
     #[test]
     fn webvh_check_signing_key_pre_rotate_previous() {
-        let secret = Secret::generate_ed25519(None, None);
+        let secret = crate::test_utils::generate_signing_key();
 
-        let next = Secret::generate_ed25519(None, None);
+        let next = crate::test_utils::generate_signing_key();
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
@@ -865,7 +878,7 @@ mod tests {
     /// to ensure no further updates can be made after deactivation.
     #[tokio::test]
     async fn webvh_create_log_entry_deactivated_with_keys_error() {
-        let key = Secret::generate_ed25519(None, None);
+        let key = crate::test_utils::generate_signing_key();
         let state = did_doc();
         let parameters = Parameters {
             update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
@@ -890,7 +903,7 @@ mod tests {
     /// permanently removes the ability to update the DID while preserving its history.
     #[tokio::test]
     async fn webvh_create_log_entry_deactivated_ok() {
-        let key = Secret::generate_ed25519(None, None);
+        let key = crate::test_utils::generate_signing_key();
         let mut key_with_id = key.clone();
         let pk = key.get_public_keymultibase().unwrap();
         key_with_id.id = format!("did:key:{pk}#{pk}");
@@ -932,7 +945,7 @@ mod tests {
     /// DID Document updates while maintaining a verifiable history chain.
     #[tokio::test]
     async fn webvh_create_log_entry_second_entry() {
-        let key = Secret::generate_ed25519(None, None);
+        let key = crate::test_utils::generate_signing_key();
         let mut key_with_id = key.clone();
         let pk = key.get_public_keymultibase().unwrap();
         key_with_id.id = format!("did:key:{pk}#{pk}");
@@ -974,7 +987,7 @@ mod tests {
     /// DID resolution queries and for establishing an accurate audit trail.
     #[tokio::test]
     async fn webvh_create_log_entry_custom_version_time() {
-        let key = Secret::generate_ed25519(None, None);
+        let key = crate::test_utils::generate_signing_key();
         let pk = key.get_public_keymultibase().unwrap();
         let mut key_with_id = key.clone();
         key_with_id.id = format!("did:key:{pk}#{pk}");
@@ -1002,7 +1015,7 @@ mod tests {
     /// distinguish between them. Uses a single signing key for both entries.
     /// Returns the fully populated state with two validated log entries.
     async fn create_multi_entry_state() -> DIDWebVHState {
-        let key = Secret::generate_ed25519(None, None);
+        let key = crate::test_utils::generate_signing_key();
         let pk = key.get_public_keymultibase().unwrap();
         let mut key_with_id = key.clone();
         key_with_id.id = format!("did:key:{pk}#{pk}");
@@ -1137,7 +1150,7 @@ mod tests {
     /// without them, no future updates could be validated in the DID history.
     #[test]
     fn webvh_check_signing_key_first_entry_no_keys_error() {
-        let secret = Secret::generate_ed25519(None, None);
+        let secret = crate::test_utils::generate_signing_key();
         let result = DIDWebVHState::check_signing_key(
             None,
             &Parameters {
@@ -1162,7 +1175,7 @@ mod tests {
     /// that would make it impossible to verify the legitimacy of rotated keys.
     #[test]
     fn webvh_check_signing_key_pre_rotation_no_hashes_error() {
-        let secret = Secret::generate_ed25519(None, None);
+        let secret = crate::test_utils::generate_signing_key();
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),

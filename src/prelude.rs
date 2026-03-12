@@ -11,3 +11,5 @@ pub use crate::log_entry::LogEntryMethods;
 pub use crate::parameters::Parameters;
 pub use crate::witness::Witnesses;
 pub use crate::witness::proofs::WitnessProofCollection;
+pub use crate::KeyType;
+pub use crate::Signer;
