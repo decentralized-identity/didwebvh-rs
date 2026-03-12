@@ -760,6 +760,67 @@ mod tests {
         );
     }
 
+    // ===== File I/O error tests =====
+
+    /// Tests that load_from_file returns an error when the file does not exist.
+    /// Expected: Returns a LogEntryError mentioning "Failed to open".
+    #[test]
+    fn test_load_from_file_missing_file() {
+        let result = LogEntry::load_from_file("/nonexistent/path/did.jsonl");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to open log file")
+        );
+    }
+
+    /// Tests that load_from_file returns an error when the file contains invalid JSON.
+    /// Expected: Returns an error during deserialization.
+    #[test]
+    fn test_load_from_file_corrupted_content() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir
+            .join(format!(
+                "test_corrupted_{}.jsonl",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .to_string_lossy()
+            .to_string();
+
+        std::fs::write(&file_path, "this is not valid json\n").unwrap();
+        let result = LogEntry::load_from_file(&file_path);
+        assert!(result.is_err());
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    /// Tests that load_from_file returns an empty vec for an empty file.
+    /// Expected: Returns Ok with an empty Vec since there are no lines to parse.
+    #[test]
+    fn test_load_from_file_empty_file() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir
+            .join(format!(
+                "test_empty_{}.jsonl",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .to_string_lossy()
+            .to_string();
+
+        std::fs::write(&file_path, "").unwrap();
+        let result = LogEntry::load_from_file(&file_path);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+        let _ = std::fs::remove_file(&file_path);
+    }
+
     /// Tests that verify_version_time rejects a log entry whose timestamp is
     /// in the future (1 hour ahead of the current time).
     /// Expected: Returns an error indicating the time is "in the future".

@@ -17,8 +17,15 @@ use crate::{
 };
 
 impl DIDWebVHState {
-    /// Validate WebVH Data
-    /// Validation will stop at the last known good version
+    /// Validates all LogEntries and their witness proofs.
+    ///
+    /// Walks the log entry chain in order, verifying each entry's signature and
+    /// parameter transitions. If a later entry fails, validation falls back to the
+    /// last known good entry. After log entry validation, witness proofs are verified
+    /// against the configured threshold for each entry.
+    ///
+    /// Sets `self.validated = true` and computes `self.expires` on success.
+    /// Returns an error only if the *first* entry is invalid (no fallback possible).
     pub fn validate(&mut self) -> Result<(), DIDWebVHError> {
         // Validate each LogEntry
         let mut previous_entry: Option<&LogEntryState> = None;

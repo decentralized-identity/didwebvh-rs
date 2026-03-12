@@ -35,7 +35,13 @@ pub(crate) mod test_utils;
 // Re-export Affinidi Secrets Resolver so others can create Secrets
 pub use affinidi_secrets_resolver;
 
-// Re-export Signer trait and KeyType so consumers can implement custom signing backends
+// Re-export Signer trait and KeyType so consumers can implement custom signing backends.
+//
+// # Security note for Signer implementors
+//
+// If your `Signer` implementation holds key material in memory (rather than
+// delegating to an HSM/KMS), consider zeroizing sensitive buffers on drop
+// (e.g. via the `zeroize` crate) to limit exposure of secrets in memory.
 pub use affinidi_data_integrity::signer::Signer;
 pub use affinidi_secrets_resolver::secrets::KeyType;
 
@@ -105,8 +111,19 @@ pub enum DIDWebVHError {
     InvalidMethodIdentifier(String),
     #[error("LogEntryError: {0}")]
     LogEntryError(String),
-    #[error("NetworkError: {0}")]
-    NetworkError(String),
+    /// A network request failed.
+    ///
+    /// Consumers can inspect `status_code` to distinguish HTTP-level errors (e.g. 404, 500)
+    /// from transport-level failures (where `status_code` is `None`).
+    #[error("NetworkError: {message} (url: {url})")]
+    NetworkError {
+        /// The URL that was being fetched.
+        url: String,
+        /// HTTP status code, if the server responded.
+        status_code: Option<u16>,
+        /// Human-readable error description.
+        message: String,
+    },
     #[error("DID Query NotFound: {0}")]
     NotFound(String),
     #[error("NotImplemented: {0}")]
@@ -176,12 +193,17 @@ impl DIDWebVHState {
         }
     }
 
-    /// Creates a new LogEntry
-    /// version_time is optional, if not provided, current time will be used
-    /// document is the DID Document as a JSON Value
-    /// parameters are the Parameters for the Log Entry (Full set of parameters)
-    /// signing_key is the Signer used to sign the Log Entry
-    ///   NOTE: A diff comparison to previous parameters is automatically done
+    /// Creates a new LogEntry appended to this DID's history.
+    ///
+    /// Validates that `signing_key` is authorized (via update keys or pre-rotation
+    /// hashes), computes the parameter diff against the previous entry, signs the
+    /// entry using the provided [`Signer`], and returns the resulting [`LogEntryState`].
+    ///
+    /// # Arguments
+    /// * `version_time` — Timestamp for the entry; defaults to now if `None`.
+    /// * `document` — The DID Document as a JSON Value.
+    /// * `parameters` — Full parameter set; a diff against the previous entry is computed automatically.
+    /// * `signing_key` — Any [`Signer`] implementation (e.g. `Secret`, HSM, KMS).
     pub async fn create_log_entry(
         &mut self,
         version_time: Option<DateTime<FixedOffset>>,
@@ -436,8 +458,16 @@ impl DIDWebVHState {
             })
     }
 
-    /// Ensures that the signing key is valid depending on the current state of the DID
-    /// Checks state of the UpdateKeys in Parameters
+    /// Validates that `signing_key` is authorized to sign a log entry.
+    ///
+    /// The authorization check depends on the DID state:
+    ///
+    /// - **First entry** (no previous): the key's multibase must appear in `parameters.update_keys`.
+    /// - **Subsequent entry without pre-rotation**: the key must match `update_keys` from the
+    ///   previous validated entry.
+    /// - **Subsequent entry with pre-rotation**: the key's multibase *hash* must match one of
+    ///   the `next_key_hashes` committed in the previous entry. This supports quantum-resistant
+    ///   key rotation by requiring keys to be committed (as hashes) before they are revealed.
     fn check_signing_key(
         previous_log_entry: Option<&LogEntryState>,
         parameters: &Parameters,
@@ -1140,6 +1170,26 @@ mod tests {
                 .to_string()
                 .contains("No query parameter")
         );
+    }
+
+    // ===== File I/O tests =====
+
+    /// Tests that load_log_entries_from_file returns an error for a missing file.
+    #[test]
+    fn test_load_log_entries_from_file_missing() {
+        let mut state = DIDWebVHState::default();
+        let result = state.load_log_entries_from_file("/nonexistent/did.jsonl");
+        assert!(result.is_err());
+    }
+
+    /// Tests that load_witness_proofs_from_file silently ignores a missing file.
+    /// The method is designed to be fault-tolerant since witness proofs are optional.
+    #[test]
+    fn test_load_witness_proofs_from_file_missing() {
+        let mut state = DIDWebVHState::default();
+        state.load_witness_proofs_from_file("/nonexistent/witness.json");
+        // Should not panic, and witness_proofs should remain default
+        assert_eq!(state.witness_proofs.get_total_count(), 0);
     }
 
     // ===== check_signing_key() additional tests =====

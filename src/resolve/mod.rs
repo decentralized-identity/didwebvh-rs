@@ -33,22 +33,31 @@ pub struct DIDWebVH;
 impl DIDWebVH {
     // Handles the fetching of the file from a given URL
     async fn download_file(client: Client, url: Url) -> Result<String, DIDWebVHError> {
+        let url_str = url.to_string();
         let response = client
             .get(url.clone())
             .send()
             .await
-            .map_err(|e| DIDWebVHError::NetworkError(format!("url ({url}): {e}")))?;
+            .map_err(|e| DIDWebVHError::NetworkError {
+                url: url_str.clone(),
+                status_code: None,
+                message: format!("Request failed: {e}"),
+            })?;
 
         if response.status() == StatusCode::OK {
-            response.text().await.map_err(|e| {
-                DIDWebVHError::NetworkError(format!("url ({url}): Failed to read response: {e}"))
+            response.text().await.map_err(|e| DIDWebVHError::NetworkError {
+                url: url_str,
+                status_code: Some(200),
+                message: format!("Failed to read response body: {e}"),
             })
         } else {
-            warn!("url ({url}): HTTP Status code = {}", response.status());
-            Err(DIDWebVHError::NetworkError(format!(
-                "url ({url}): HTTP Status code = {}",
-                response.status()
-            )))
+            let status = response.status().as_u16();
+            warn!("url ({url_str}): HTTP Status code = {status}");
+            Err(DIDWebVHError::NetworkError {
+                url: url_str,
+                status_code: Some(status),
+                message: format!("HTTP {status}"),
+            })
         }
     }
 
@@ -189,12 +198,17 @@ impl DIDWebVHState {
         }
     }
 
-    /// Resolves a webvh DID fetched using HTTP(S)
+    /// Resolves a `did:webvh` DID by fetching its log entries and witness proofs over HTTP(S).
     ///
-    /// Inputs:
-    /// did: DID to resolve
-    /// timeout: how many seconds (Default: 10) before timing out on network operations
-    /// eager_witness_download: if `true`, download `did.jsonl` and `did-witness.json`
+    /// Downloads `did.jsonl`, parses and validates all log entries, verifies witness
+    /// proofs against configured thresholds, and returns the resolved [`LogEntry`] with
+    /// [`MetaData`]. Results are cached until `self.expires`; subsequent calls reuse
+    /// the cached state unless expired.
+    ///
+    /// # Arguments
+    /// * `did` — The DID to resolve (may include query parameters like `?versionId=...`).
+    /// * `timeout` — Network timeout (default: 10 seconds).
+    /// * `eager_witness_download` — If `true`, download `did.jsonl` and `did-witness.json`
     ///   concurrently (faster when witnesses are expected). If `false` (recommended default),
     ///   download `did.jsonl` first, then only fetch `did-witness.json` when the log entries
     ///   actually configure witnesses.
@@ -209,9 +223,8 @@ impl DIDWebVHState {
             let parsed_did_url = WebVHURL::parse_did_url(did)?;
 
             if parsed_did_url.type_ == URLType::WhoIs {
-                // TODO: whois is not implemented yet
                 return Err(DIDWebVHError::NotImplemented(
-                    "/whois isn't implemented yet".to_string(),
+                    "Resolving /whois URLs is not yet supported. Use the DID's #whois service endpoint directly.".to_string(),
                 ));
             }
 
@@ -250,8 +263,10 @@ impl DIDWebVHState {
                     let client = reqwest::ClientBuilder::new()
                         .timeout(network_timeout)
                         .build()
-                        .map_err(|e| {
-                            DIDWebVHError::NetworkError(format!("Failed to build HTTP client: {e}"))
+                        .map_err(|e| DIDWebVHError::NetworkError {
+                            url: String::new(),
+                            status_code: None,
+                            message: format!("Failed to build HTTP client: {e}"),
                         })?;
 
                     if eager_witness_download {
@@ -266,9 +281,11 @@ impl DIDWebVHState {
                         ));
 
                         let raw_entries = r1.await.map_err(|e| {
-                            DIDWebVHError::NetworkError(format!(
-                                "Error downloading LogEntries for DID: {e}"
-                            ))
+                            DIDWebVHError::NetworkError {
+                                url: did.to_string(),
+                                status_code: None,
+                                message: format!("Error downloading LogEntries for DID: {e}"),
+                            }
                         })??;
                         let witness_result = match r2.await {
                             Ok(result) => result,
@@ -290,10 +307,10 @@ impl DIDWebVHState {
                             client.clone(),
                         ))
                         .await
-                        .map_err(|e| {
-                            DIDWebVHError::NetworkError(format!(
-                                "Error downloading LogEntries for DID: {e}"
-                            ))
+                        .map_err(|e| DIDWebVHError::NetworkError {
+                            url: did.to_string(),
+                            status_code: None,
+                            message: format!("Error downloading LogEntries for DID: {e}"),
                         })??;
 
                         let log_entries = Self::parse_log_entries(&raw_entries)?;
@@ -392,7 +409,7 @@ impl DIDWebVHState {
 
 #[cfg(test)]
 mod tests {
-    use crate::DIDWebVHState;
+    use crate::{DIDWebVHError, DIDWebVHState};
 
     #[tokio::test]
     async fn resolve_reference() {
@@ -445,5 +462,188 @@ mod tests {
         ).await;
 
         assert!(result.is_ok());
+    }
+
+    // ===== Network failure tests =====
+    //
+    // These tests use wiremock to simulate HTTP failures without hitting real servers.
+    // DIDs pointing to `localhost` use `http://` (not HTTPS), allowing local mock servers.
+
+    /// Helper: build a DID URL pointing at the given wiremock server.
+    /// Format: `did:webvh:<scid>:localhost%3A<port>`
+    fn mock_did(server: &wiremock::MockServer, scid: &str) -> String {
+        let port = server.address().port();
+        format!("did:webvh:{scid}:localhost%3A{port}")
+    }
+
+    /// Tests that resolving against a server that returns HTTP 404 produces a
+    /// NetworkError with status_code = Some(404).
+    #[tokio::test]
+    async fn resolve_http_404() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
+
+        let server = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let did = mock_did(&server, "testscid404");
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve(&did, None, false).await;
+
+        match result {
+            Err(DIDWebVHError::NetworkError {
+                status_code: Some(404),
+                ..
+            }) => {} // expected
+            other => panic!("Expected NetworkError with status 404, got: {other:?}"),
+        }
+    }
+
+    /// Tests that resolving against a server that returns HTTP 500 produces a
+    /// NetworkError with status_code = Some(500).
+    #[tokio::test]
+    async fn resolve_http_500() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
+
+        let server = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let did = mock_did(&server, "testscid500");
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve(&did, None, false).await;
+
+        match result {
+            Err(DIDWebVHError::NetworkError {
+                status_code: Some(500),
+                ..
+            }) => {}
+            other => panic!("Expected NetworkError with status 500, got: {other:?}"),
+        }
+    }
+
+    /// Tests that resolving against a server that returns 200 with invalid JSON
+    /// (not valid JSONL log entries) produces a deserialization error.
+    #[tokio::test]
+    async fn resolve_malformed_response() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
+
+        let server = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_string("this is not jsonl"))
+            .mount(&server)
+            .await;
+
+        let did = mock_did(&server, "testscidbad");
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve(&did, None, false).await;
+
+        assert!(result.is_err(), "Expected error for malformed response body");
+    }
+
+    /// Tests that resolving against a server that returns 200 with an empty body
+    /// produces a NotFound error (no log entries).
+    #[tokio::test]
+    async fn resolve_empty_response() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
+
+        let server = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_string(""))
+            .mount(&server)
+            .await;
+
+        let did = mock_did(&server, "testscidempty");
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve(&did, None, false).await;
+
+        match result {
+            Err(DIDWebVHError::NotFound(msg)) => {
+                assert!(msg.contains("No LogEntries"), "Expected 'No LogEntries' message, got: {msg}");
+            }
+            other => panic!("Expected NotFound error, got: {other:?}"),
+        }
+    }
+
+    /// Tests that a network timeout is surfaced as a NetworkError with no status_code.
+    #[tokio::test]
+    async fn resolve_timeout() {
+        use std::time::Duration;
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
+
+        let server = MockServer::start().await;
+        // Respond after 5 seconds — longer than our 1-second timeout
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(5)))
+            .mount(&server)
+            .await;
+
+        let did = mock_did(&server, "testscidtimeout");
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh
+            .resolve(&did, Some(Duration::from_secs(1)), false)
+            .await;
+
+        match result {
+            Err(DIDWebVHError::NetworkError {
+                status_code: None, ..
+            }) => {} // transport-level timeout, no HTTP status
+            other => panic!("Expected NetworkError with no status_code (timeout), got: {other:?}"),
+        }
+    }
+
+    /// Tests that connection refused (no server listening) produces a NetworkError
+    /// with no status_code.
+    #[tokio::test]
+    async fn resolve_connection_refused() {
+        // Use a port where nothing is listening
+        let did = "did:webvh:testscidrefused:localhost%3A1";
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh
+            .resolve(did, Some(std::time::Duration::from_secs(2)), false)
+            .await;
+
+        match result {
+            Err(DIDWebVHError::NetworkError {
+                status_code: None, ..
+            }) => {}
+            other => panic!(
+                "Expected NetworkError with no status_code (connection refused), got: {other:?}"
+            ),
+        }
+    }
+
+    /// Tests that the structured NetworkError fields are correctly populated
+    /// (url contains the expected host, status_code and message are set).
+    #[tokio::test]
+    async fn resolve_network_error_fields() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
+
+        let server = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+
+        let did = mock_did(&server, "testscidfields");
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve(&did, None, false).await;
+
+        match result {
+            Err(DIDWebVHError::NetworkError {
+                ref url,
+                status_code,
+                ref message,
+            }) => {
+                assert!(url.contains("localhost"), "url should contain localhost: {url}");
+                assert_eq!(status_code, Some(503));
+                assert!(message.contains("503"), "message should contain status: {message}");
+            }
+            other => panic!("Expected structured NetworkError, got: {other:?}"),
+        }
     }
 }

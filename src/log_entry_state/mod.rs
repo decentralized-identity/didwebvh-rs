@@ -119,3 +119,88 @@ impl LogEntryState {
         self.validated_parameters.active_update_keys.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::log_entry::spec_1_0::LogEntry1_0;
+    use crate::parameters::spec_1_0::Parameters1_0;
+    use chrono::Utc;
+    use serde_json::json;
+
+    fn make_entry(version_id: &str, version_number: u32) -> LogEntryState {
+        LogEntryState {
+            version_number,
+            log_entry: LogEntry::Spec1_0(LogEntry1_0 {
+                proof: vec![],
+                parameters: Parameters1_0::default(),
+                version_id: version_id.to_string(),
+                version_time: Utc::now().fixed_offset(),
+                state: json!({"id": "did:webvh:scid123:example.com"}),
+            }),
+            validated_parameters: Parameters::default(),
+            validation_status: LogEntryValidationStatus::NotValidated,
+        }
+    }
+
+    #[test]
+    fn get_version_id_returns_log_entry_version() {
+        let entry = make_entry("3-abc123", 3);
+        assert_eq!(entry.get_version_id(), "3-abc123");
+    }
+
+    #[test]
+    fn get_version_number_returns_stored_number() {
+        let entry = make_entry("5-xyz", 5);
+        assert_eq!(entry.get_version_number(), 5);
+    }
+
+    #[test]
+    fn get_state_returns_did_document() {
+        let entry = make_entry("1-test", 1);
+        let state = entry.get_state();
+        assert_eq!(state["id"].as_str().unwrap(), "did:webvh:scid123:example.com");
+    }
+
+    #[test]
+    fn get_active_witnesses_returns_none_by_default() {
+        let entry = make_entry("1-test", 1);
+        assert!(entry.get_active_witnesses().is_none());
+    }
+
+    #[test]
+    fn get_active_witnesses_returns_configured_witnesses() {
+        let mut entry = make_entry("1-test", 1);
+        let witnesses = Witnesses::Value {
+            threshold: 1,
+            witnesses: vec![],
+        };
+        entry.validated_parameters.active_witness = Some(Arc::new(witnesses));
+        assert!(entry.get_active_witnesses().is_some());
+    }
+
+    #[test]
+    fn get_scid_returns_none_by_default() {
+        let entry = make_entry("1-test", 1);
+        assert!(entry.get_scid().is_none());
+    }
+
+    #[test]
+    fn get_scid_returns_configured_scid() {
+        let mut entry = make_entry("1-test", 1);
+        entry.validated_parameters.scid = Some(Arc::new("scid123".to_string()));
+        assert_eq!(entry.get_scid().unwrap(), "scid123");
+    }
+
+    #[test]
+    fn get_webvh_version_defaults_to_v1_0() {
+        let entry = make_entry("1-test", 1);
+        assert_eq!(entry.get_webvh_version(), Version::V1_0);
+    }
+
+    #[test]
+    fn validation_status_defaults_to_not_validated() {
+        let entry = make_entry("1-test", 1);
+        assert_eq!(entry.validation_status, LogEntryValidationStatus::NotValidated);
+    }
+}

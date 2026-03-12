@@ -6,7 +6,6 @@ use crate::{
     DIDWebVHError, DIDWebVHState, ensure_object_mut, log_entry_state::LogEntryState,
     resolve::implicit::update_implicit_services,
 };
-use regex::Regex;
 use serde_json::Value;
 
 impl DIDWebVHState {
@@ -40,14 +39,13 @@ impl DIDWebVHState {
     /// Takes a did:webvh ID and converts it to a did:scid:vh ID
     pub fn convert_webvh_id_to_scid_id(id: &str) -> String {
         // input: did:webvh:<SCID>:<path>
-        let mut new_did = String::new();
-        new_did.push_str("did:scid:vh:1:");
-        let re = Regex::new(r"^did:webvh:([^:]*):(.*)$").unwrap();
-        if let Some(captures) = re.captures(id) {
-            new_did.push_str(captures.get(1).unwrap().as_str()); // scid
-            new_did.push_str("?src=");
-            if let Some(path) = captures.get(2) {
-                new_did.push_str(&path.as_str().replace(":", "/"));
+        // Extract SCID and path after "did:webvh:"
+        let mut new_did = String::from("did:scid:vh:1:");
+        if let Some(rest) = id.strip_prefix("did:webvh:") {
+            if let Some((scid, path)) = rest.split_once(':') {
+                new_did.push_str(scid);
+                new_did.push_str("?src=");
+                new_did.push_str(&path.replace(':', "/"));
             }
         }
         new_did
@@ -68,6 +66,27 @@ impl LogEntryState {
 
         to_web_did(state)
     }
+}
+
+/// Replaces all occurrences of `did:webvh:<SCID>` with `did:web` in a string.
+/// The SCID is the segment between `did:webvh:` and the next `:` (or end of the
+/// `did:webvh:...` token).
+fn replace_webvh_prefix(input: &str) -> String {
+    const PREFIX: &str = "did:webvh:";
+    let mut result = String::with_capacity(input.len());
+    let mut remaining = input;
+    while let Some(start) = remaining.find(PREFIX) {
+        result.push_str(&remaining[..start]);
+        result.push_str("did:web");
+        let after_prefix = &remaining[start + PREFIX.len()..];
+        // Skip the SCID (everything up to the next ':' or non-DID character)
+        let scid_end = after_prefix
+            .find(|c: char| c == ':' || c == '"' || c.is_whitespace())
+            .unwrap_or(after_prefix.len());
+        remaining = &after_prefix[scid_end..];
+    }
+    result.push_str(remaining);
+    result
 }
 
 fn to_web_did(old_state: &Value) -> Result<Value, DIDWebVHError> {
@@ -93,10 +112,9 @@ fn to_web_did(old_state: &Value) -> Result<Value, DIDWebVHError> {
     let did_doc = serde_json::to_string(&old_state)
         .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't serialize state: {}", e)))?;
 
-    // Replace the existing did:webvh:<SCID> with did:web
-    let re = Regex::new(r"(did:webvh:[^:]+)")
-        .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't create regex: {}", e)))?;
-    let new_did_doc = re.replace_all(&did_doc, "did:web");
+    // Replace the existing did:webvh:<SCID> prefix with did:web throughout the document.
+    // The SCID is always the segment between "did:webvh:" and the next ":"
+    let new_did_doc = replace_webvh_prefix(&did_doc);
 
     let mut new_state: Value = serde_json::from_str(&new_did_doc)
         .map_err(|e| DIDWebVHError::DIDError(format!("Couldn't parse new state: {}", e)))?;
@@ -327,6 +345,33 @@ mod tests {
             id: "did:web:affinidi.com#whois".to_string(),
             service_endpoint: "https://affinidi.com/whois.vp".to_string()
         }));
+    }
+
+    #[test]
+    fn test_convert_webvh_to_scid() {
+        let scid = DIDWebVHState::convert_webvh_id_to_scid_id("did:webvh:acme1234:affinidi.com:path");
+        assert_eq!(scid, "did:scid:vh:1:acme1234?src=affinidi.com/path");
+    }
+
+    #[test]
+    fn test_convert_webvh_to_scid_no_path() {
+        let scid = DIDWebVHState::convert_webvh_id_to_scid_id("did:webvh:acme1234:affinidi.com");
+        assert_eq!(scid, "did:scid:vh:1:acme1234?src=affinidi.com");
+    }
+
+    #[test]
+    fn test_replace_webvh_prefix_multiple() {
+        use super::replace_webvh_prefix;
+        let input = r#""did:webvh:scid1:a.com" and "did:webvh:scid2:b.com""#;
+        let output = replace_webvh_prefix(input);
+        assert_eq!(output, r#""did:web:a.com" and "did:web:b.com""#);
+    }
+
+    #[test]
+    fn test_replace_webvh_prefix_no_match() {
+        use super::replace_webvh_prefix;
+        let input = "did:web:example.com";
+        assert_eq!(replace_webvh_prefix(input), input);
     }
 
     #[test]

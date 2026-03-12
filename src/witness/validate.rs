@@ -1,5 +1,22 @@
 /*!
 *   Validating LogEntries using Witness Proofs
+*
+*   # Witness proof version semantics
+*
+*   A witness proof attests that a witness observed a particular version of the DID log.
+*   During validation, proofs are matched against log entries with the following rules:
+*
+*   - **Future proofs** (proof version > highest published version) are **skipped** entirely,
+*     preventing premature acceptance of proofs for unpublished entries.
+*   - **Older proofs** (proof version > current entry version, but within published range)
+*     **still count** toward the threshold. This supports efficient batched witnessing
+*     where a single proof covers a range of entries.
+*   - **Current proofs** (proof version == current entry version) are **cryptographically
+*     verified** against the log entry data before counting.
+*
+*   This design means a resolver cannot be tricked by proofs referencing unpublished
+*   future entries, while still allowing witnesses to attest in batches rather than
+*   per-entry.
 */
 
 use crate::{

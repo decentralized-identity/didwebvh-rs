@@ -758,6 +758,88 @@ mod tests {
         let _ = std::fs::remove_file(&file_path);
     }
 
+    // ===== File I/O error tests =====
+
+    /// Tests that read_from_file returns an error when the file does not exist.
+    /// Expected: Returns a WitnessProofError mentioning "Couldn't open".
+    #[test]
+    fn test_read_from_file_missing_file() {
+        let result = WitnessProofCollection::read_from_file("/nonexistent/path/witness.json");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Couldn't open Witness Proofs file")
+        );
+    }
+
+    /// Tests that read_from_file returns an error when the file contains invalid JSON.
+    /// Expected: Returns a WitnessProofError mentioning "Couldn't deserialize".
+    #[test]
+    fn test_read_from_file_corrupted_content() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir
+            .join(format!(
+                "test_witness_corrupt_{}.json",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .to_string_lossy()
+            .to_string();
+
+        std::fs::write(&file_path, "not valid json at all").unwrap();
+        let result = WitnessProofCollection::read_from_file(&file_path);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Couldn't deserialize Witness Proofs Data")
+        );
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    /// Tests that read_from_file succeeds with an empty JSON array.
+    /// Expected: Returns an empty WitnessProofCollection.
+    #[test]
+    fn test_read_from_file_empty_array() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir
+            .join(format!(
+                "test_witness_empty_{}.json",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .to_string_lossy()
+            .to_string();
+
+        std::fs::write(&file_path, "[]").unwrap();
+        let result = WitnessProofCollection::read_from_file(&file_path);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().get_total_count(), 0);
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    /// Tests that save_to_file returns an error when the path is invalid.
+    /// Expected: Returns a WitnessProofError mentioning "Couldn't write".
+    #[test]
+    fn test_save_to_file_invalid_path() {
+        let proofs = WitnessProofCollection::default();
+        let result = proofs.save_to_file("/nonexistent/directory/witness.json");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Couldn't write to Witness Proofs file")
+        );
+    }
+
     /// Tests that `get_total_count` accurately tracks the total number of proofs
     /// across all versions as proofs are added and old ones are cleaned up.
     ///

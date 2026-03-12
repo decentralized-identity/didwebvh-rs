@@ -467,34 +467,7 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
 
-    /// Helper: generate a signing key (with did:key ID) and matching parameters with update_keys set.
-    fn key_and_params() -> (Secret, Parameters) {
-        let key = crate::test_utils::generate_signing_key();
-        let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
-            ..Default::default()
-        };
-        (key, params)
-    }
-
-    /// Helper: build a minimal DID document for the given DID string.
-    /// Uses the provided key's public key in the verification method so that
-    /// log entry signature validation succeeds.
-    fn did_doc_with_key(did: &str, key: &Secret) -> Value {
-        let pk = key.get_public_keymultibase().unwrap();
-        json!({
-            "id": did,
-            "@context": ["https://www.w3.org/ns/did/v1"],
-            "verificationMethod": [{
-                "id": format!("{did}#key-0"),
-                "type": "Multikey",
-                "publicKeyMultibase": pk,
-                "controller": did
-            }],
-            "authentication": [format!("{did}#key-0")],
-            "assertionMethod": [format!("{did}#key-0")],
-        })
-    }
+    use crate::test_utils::{did_doc_with_key, key_and_params};
 
     /// Helper: create a first log entry and its LogEntryState (for witness tests).
     async fn create_log_entry_state(key: &Secret, params: &Parameters) -> (DIDWebVHState, String) {

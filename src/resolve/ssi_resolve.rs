@@ -1,7 +1,7 @@
 /*!
 *   Resolver trait methods for webvh derived from the SpruiceID SSI Library
 *
-*   NOTE: This is a niave implementation that will download the DID information on every resolve
+*   NOTE: This is a naïve implementation that will download the DID information on every resolve
 *
 *   If you want greater control and caching then please use the DIDWebVHState.resolve() method directly
 */
@@ -19,7 +19,7 @@ use tracing::{Instrument, Level, span};
 
 impl DIDMethodResolver for DIDWebVH {
     /// Resolves a webvh DID using the SSI Crate Traits
-    /// This is a niave imnplementation and will fully load the DID from source each resolve
+    /// This is a naïve implementation and will fully load the DID from source each resolve
     ///
     /// Does make use of Optional parameters
     /// parameters("network_timeout") (defaults to 10 seconds): Time in seconds before timing out
