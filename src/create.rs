@@ -198,7 +198,7 @@ fn ensure_did_key_id(secret: &mut Secret) -> Result<(), DIDWebVHError> {
 /// 5. Signs witness proofs using provided witness secrets
 ///
 /// Returns the resolved DID, signed LogEntry, and WitnessProofCollection.
-pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWebVHError> {
+pub async fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWebVHError> {
     // Parse the address
     let did_url = if config.address.starts_with("did:") {
         WebVHURL::parse_did_url(&config.address)?
@@ -234,12 +234,14 @@ pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWeb
         DIDWebVHError::LogEntryError("At least one authorization key is required".to_string())
     })?;
 
-    let log_entry_state = didwebvh.create_log_entry(
-        None, // No version time, defaults to now
-        &config.did_document,
-        &config.parameters,
-        signing_key,
-    )?;
+    let log_entry_state = didwebvh
+        .create_log_entry(
+            None, // No version time, defaults to now
+            &config.did_document,
+            &config.parameters,
+            signing_key,
+        )
+        .await?;
 
     // Validate the log entry
     log_entry_state.log_entry.verify_log_entry(None, None)?;
@@ -263,7 +265,8 @@ pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWeb
         log_entry_state,
         &active_witnesses,
         &config.witness_secrets,
-    )?;
+    )
+    .await?;
 
     Ok(CreateDIDResult {
         did: resolved_did,
@@ -385,7 +388,7 @@ fn build_alias_list(also_known_as: &Value, new_alias: &str) -> Result<Vec<Value>
 /// secret in `witness_secrets` (keyed by witness DID) and signs a proof.
 ///
 /// Returns `Ok(true)` if witness proofs were signed, `Ok(false)` if no witnesses configured.
-pub fn sign_witness_proofs(
+pub async fn sign_witness_proofs(
     witness_proofs: &mut WitnessProofCollection,
     log_entry: &LogEntryState,
     witnesses: &Option<Arc<Witnesses>>,
@@ -427,6 +430,7 @@ pub fn sign_witness_proofs(
             &secret,
             None,
         )
+        .await
         .map_err(|e| {
             DIDWebVHError::SCIDError(format!(
                 "Couldn't generate Data Integrity Proof for LogEntry. Reason: {e}",
@@ -483,11 +487,12 @@ mod tests {
     }
 
     /// Helper: create a first log entry and its LogEntryState (for witness tests).
-    fn create_log_entry_state(key: &Secret, params: &Parameters) -> (DIDWebVHState, String) {
+    async fn create_log_entry_state(key: &Secret, params: &Parameters) -> (DIDWebVHState, String) {
         let mut state = DIDWebVHState::default();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", key);
         state
             .create_log_entry(None, &doc, params, key)
+            .await
             .expect("Failed to create log entry");
         let version_id = state.log_entries.last().unwrap().get_version_id();
         (state, version_id)
@@ -621,8 +626,8 @@ mod tests {
     // create_did tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn create_did_with_url_address() {
+    #[tokio::test]
+    async fn create_did_with_url_address() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -633,7 +638,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config);
+        let result = create_did(config).await;
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.did.starts_with("did:webvh:"));
@@ -641,8 +646,8 @@ mod tests {
         assert!(!result.did.contains("{SCID}"));
     }
 
-    #[test]
-    fn create_did_with_did_address() {
+    #[tokio::test]
+    async fn create_did_with_did_address() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -653,15 +658,15 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config);
+        let result = create_did(config).await;
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.did.starts_with("did:webvh:"));
         assert!(!result.did.contains("{SCID}"));
     }
 
-    #[test]
-    fn create_did_invalid_address() {
+    #[tokio::test]
+    async fn create_did_invalid_address() {
         let (key, _params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig {
@@ -674,11 +679,11 @@ mod tests {
             also_known_as_scid: false,
         };
 
-        assert!(create_did(config).is_err());
+        assert!(create_did(config).await.is_err());
     }
 
-    #[test]
-    fn create_did_no_update_keys() {
+    #[tokio::test]
+    async fn create_did_no_update_keys() {
         let key = Secret::generate_ed25519(None, None);
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let params = Parameters::default(); // no update_keys
@@ -691,11 +696,11 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(create_did(config).is_err());
+        assert!(create_did(config).await.is_err());
     }
 
-    #[test]
-    fn create_did_with_also_known_as_web() {
+    #[tokio::test]
+    async fn create_did_with_also_known_as_web() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -707,7 +712,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let state = result.log_entry.get_state();
         let also_known_as = state.get("alsoKnownAs").unwrap().as_array().unwrap();
         assert!(
@@ -717,8 +722,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_did_with_also_known_as_scid() {
+    #[tokio::test]
+    async fn create_did_with_also_known_as_scid() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -730,7 +735,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let state = result.log_entry.get_state();
         let also_known_as = state.get("alsoKnownAs").unwrap().as_array().unwrap();
         assert!(
@@ -740,8 +745,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_did_with_both_aliases() {
+    #[tokio::test]
+    async fn create_did_with_both_aliases() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -754,7 +759,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let state = result.log_entry.get_state();
         let also_known_as = state.get("alsoKnownAs").unwrap().as_array().unwrap();
         let has_web = also_known_as
@@ -767,8 +772,8 @@ mod tests {
         assert!(has_scid);
     }
 
-    #[test]
-    fn create_did_no_witnesses_returns_empty_proofs() {
+    #[tokio::test]
+    async fn create_did_no_witnesses_returns_empty_proofs() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -779,12 +784,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert_eq!(result.witness_proofs.get_total_count(), 0);
     }
 
-    #[test]
-    fn create_did_with_witnesses() {
+    #[tokio::test]
+    async fn create_did_with_witnesses() {
         let (key, _) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let witness1 = Secret::generate_ed25519(None, None);
@@ -811,12 +816,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert_eq!(result.witness_proofs.get_total_count(), 2);
     }
 
-    #[test]
-    fn create_did_witnesses_missing_secret() {
+    #[tokio::test]
+    async fn create_did_witnesses_missing_secret() {
         let (key, _) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let witness1 = Secret::generate_ed25519(None, None);
@@ -840,11 +845,11 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(create_did(config).is_err());
+        assert!(create_did(config).await.is_err());
     }
 
-    #[test]
-    fn create_did_portable() {
+    #[tokio::test]
+    async fn create_did_portable() {
         let (key, _) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let params = Parameters {
@@ -861,12 +866,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert!(result.did.starts_with("did:webvh:"));
     }
 
-    #[test]
-    fn create_did_log_entry_serializable() {
+    #[tokio::test]
+    async fn create_did_log_entry_serializable() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -877,7 +882,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let json = serde_json::to_string(&result.log_entry);
         assert!(json.is_ok());
         assert!(!json.unwrap().is_empty());
@@ -1003,21 +1008,21 @@ mod tests {
     // sign_witness_proofs tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn sign_witness_proofs_no_witnesses() {
+    #[tokio::test]
+    async fn sign_witness_proofs_no_witnesses() {
         let (key, params) = key_and_params();
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let mut proofs = WitnessProofCollection::default();
-        let result = sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default());
+        let result = sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default()).await;
         assert!(result.is_ok());
         assert!(!result.unwrap()); // false = no witnesses
         assert_eq!(proofs.get_total_count(), 0);
     }
 
-    #[test]
-    fn sign_witness_proofs_with_witnesses() {
+    #[tokio::test]
+    async fn sign_witness_proofs_with_witnesses() {
         let (key, _) = key_and_params();
         let witness1 = Secret::generate_ed25519(None, None);
         let witness2 = Secret::generate_ed25519(None, None);
@@ -1033,7 +1038,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (state, version_id) = create_log_entry_state(&key, &params);
+        let (state, version_id) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let mut secrets = HashMap::default();
@@ -1042,14 +1047,14 @@ mod tests {
 
         let witnesses = log_entry.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
-        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &secrets);
+        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &secrets).await;
         assert!(result.is_ok());
         assert!(result.unwrap()); // true = witnesses signed
         assert_eq!(proofs.get_proof_count(&version_id), 2);
     }
 
-    #[test]
-    fn sign_witness_proofs_missing_secret() {
+    #[tokio::test]
+    async fn sign_witness_proofs_missing_secret() {
         let (key, _) = key_and_params();
         let witness1 = Secret::generate_ed25519(None, None);
         let w1_id = witness1.get_public_keymultibase().unwrap();
@@ -1063,25 +1068,25 @@ mod tests {
             ..Default::default()
         };
 
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let witnesses = log_entry.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
         // Empty secrets map — secret for witness not provided
-        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &HashMap::default());
+        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &HashMap::default()).await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn sign_witness_proofs_empty_witnesses_config() {
+    #[tokio::test]
+    async fn sign_witness_proofs_empty_witnesses_config() {
         let (key, params) = key_and_params();
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let witnesses = Some(Arc::new(Witnesses::Empty {}));
         let mut proofs = WitnessProofCollection::default();
-        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &HashMap::default());
+        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &HashMap::default()).await;
         assert!(result.is_err());
     }
 
@@ -1199,8 +1204,8 @@ mod tests {
     // Additional create_did tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn create_did_key_with_existing_did_key_id() {
+    #[tokio::test]
+    async fn create_did_key_with_existing_did_key_id() {
         let mut key = Secret::generate_ed25519(None, None);
         let pub_mb = key.get_public_keymultibase().unwrap();
         key.id = format!("did:key:{pub_mb}#{pub_mb}");
@@ -1219,12 +1224,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config);
+        let result = create_did(config).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn create_did_state_has_no_scid_placeholder() {
+    #[tokio::test]
+    async fn create_did_state_has_no_scid_placeholder() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -1235,7 +1240,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
 
         // Verify SCID placeholder is replaced everywhere
         let state_str = serde_json::to_string(result.log_entry.get_state()).unwrap();
@@ -1243,8 +1248,8 @@ mod tests {
         assert!(!result.did.contains("{SCID}"));
     }
 
-    #[test]
-    fn create_did_log_entry_has_proof() {
+    #[tokio::test]
+    async fn create_did_log_entry_has_proof() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -1255,12 +1260,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert!(!result.log_entry.get_proofs().is_empty());
     }
 
-    #[test]
-    fn create_did_version_id_starts_with_one() {
+    #[tokio::test]
+    async fn create_did_version_id_starts_with_one() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -1271,13 +1276,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let version_id = result.log_entry.get_version_id();
         assert!(version_id.starts_with("1-"));
     }
 
-    #[test]
-    fn create_did_with_url_path() {
+    #[tokio::test]
+    async fn create_did_with_url_path() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com:dids:alice", &key);
         let config = CreateDIDConfig::builder()
@@ -1288,13 +1293,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert!(result.did.starts_with("did:webvh:"));
         assert!(result.did.contains("example.com"));
     }
 
-    #[test]
-    fn create_did_result_did_matches_state_id() {
+    #[tokio::test]
+    async fn create_did_result_did_matches_state_id() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -1305,7 +1310,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let state_id = result
             .log_entry
             .get_state()
@@ -1409,8 +1414,8 @@ mod tests {
     // Additional sign_witness_proofs tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn sign_witness_proofs_are_verifiable() {
+    #[tokio::test]
+    async fn sign_witness_proofs_are_verifiable() {
         let (key, _) = key_and_params();
         let witness1 = Secret::generate_ed25519(None, None);
         let w1_id = witness1.get_public_keymultibase().unwrap();
@@ -1424,7 +1429,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (state, version_id) = create_log_entry_state(&key, &params);
+        let (state, version_id) = create_log_entry_state(&key, &params).await;
         let log_entry_state = state.log_entries.last().unwrap();
 
         let mut secrets = HashMap::default();
@@ -1432,7 +1437,7 @@ mod tests {
 
         let witnesses = log_entry_state.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
-        sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).unwrap();
+        sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).await.unwrap();
 
         // Verify the proof can be validated by the log entry
         let witness_proof = proofs.get_proofs(&version_id).unwrap();
@@ -1442,8 +1447,8 @@ mod tests {
         assert!(validation.is_ok());
     }
 
-    #[test]
-    fn sign_witness_proofs_returns_true_with_witnesses() {
+    #[tokio::test]
+    async fn sign_witness_proofs_returns_true_with_witnesses() {
         let (key, _) = key_and_params();
         let witness1 = Secret::generate_ed25519(None, None);
         let w1_id = witness1.get_public_keymultibase().unwrap();
@@ -1457,7 +1462,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry_state = state.log_entries.last().unwrap();
 
         let mut secrets = HashMap::default();
@@ -1466,19 +1471,19 @@ mod tests {
         let witnesses = log_entry_state.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
         let signed =
-            sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).unwrap();
+            sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).await.unwrap();
         assert!(signed);
     }
 
-    #[test]
-    fn sign_witness_proofs_returns_false_no_witnesses() {
+    #[tokio::test]
+    async fn sign_witness_proofs_returns_false_no_witnesses() {
         let (key, params) = key_and_params();
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let mut proofs = WitnessProofCollection::default();
         let signed =
-            sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default()).unwrap();
+            sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default()).await.unwrap();
         assert!(!signed);
     }
 

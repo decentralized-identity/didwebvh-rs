@@ -80,12 +80,13 @@ fn setup_creation_with_aliases() -> CreateDIDConfig {
 }
 
 fn bench_did_creation(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("did_creation");
 
     group.bench_function("basic", |b| {
         b.iter_batched(
             setup_basic_creation,
-            |config| create_did(config).unwrap(),
+            |config| rt.block_on(create_did(config)).unwrap(),
             BatchSize::SmallInput,
         );
     });
@@ -93,7 +94,7 @@ fn bench_did_creation(c: &mut Criterion) {
     group.bench_function("with_aliases", |b| {
         b.iter_batched(
             setup_creation_with_aliases,
-            |config| create_did(config).unwrap(),
+            |config| rt.block_on(create_did(config)).unwrap(),
             BatchSize::SmallInput,
         );
     });

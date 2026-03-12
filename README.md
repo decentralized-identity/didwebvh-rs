@@ -36,7 +36,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.2.0"
+didwebvh-rs = "0.3.0"
 ```
 
 Then:
@@ -144,11 +144,11 @@ cargo +nightly bench --bench did_benchmarks_nightly
 
 ### Benchmark Groups
 
-| Group | Benchmarks | Description |
-|-------|-----------|-------------|
-| `did_creation` | `basic`, `with_aliases` | DID creation with minimal config and with alsoKnownAs aliases |
-| `did_resolution` | `single_entry`, `large_with_witnesses_120_entries` | File-based DID resolution with 1 and 120+ log entries |
-| `validation` | `single_entry`, `large_with_witnesses_120_entries` | Log entry and witness proof validation |
+| Group            | Benchmarks                                         | Description                                                   |
+| ---------------- | -------------------------------------------------- | ------------------------------------------------------------- |
+| `did_creation`   | `basic`, `with_aliases`                            | DID creation with minimal config and with alsoKnownAs aliases |
+| `did_resolution` | `single_entry`, `large_with_witnesses_120_entries` | File-based DID resolution with 1 and 120+ log entries         |
+| `validation`     | `single_entry`, `large_with_witnesses_120_entries` | Log entry and witness proof validation                        |
 
 ## Creating a DID Programmatically
 

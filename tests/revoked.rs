@@ -39,7 +39,7 @@ fn did_doc_with_key(did: &str, key: &Secret) -> Value {
 /// Build a DID with 3 normal entries then a 4th deactivation entry,
 /// each with strictly increasing versionTime. Returns the DIDWebVHState
 /// and the resolved DID string.
-fn build_revoked_did() -> (DIDWebVHState, String) {
+async fn build_revoked_did() -> (DIDWebVHState, String) {
     let base_time = (Utc::now() - Duration::seconds(100)).fixed_offset();
 
     // Entry 1: create the DID
@@ -57,6 +57,7 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
     let mut state = DIDWebVHState::default();
     state
         .create_log_entry(Some(base_time), &doc, &params1, &key1)
+        .await
         .expect("Failed to create entry 1");
 
     // Get the actual DID (with resolved SCID)
@@ -81,6 +82,7 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
             &params2,
             &key2,
         )
+        .await
         .expect("Failed to create entry 2");
 
     // Entry 3: another normal update (disable pre-rotation)
@@ -96,6 +98,7 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
             &params3,
             &key3,
         )
+        .await
         .expect("Failed to create entry 3");
 
     // Entry 4: deactivation (signed with key3, the current update key)
@@ -111,6 +114,7 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
             &params4,
             &key3,
         )
+        .await
         .expect("Failed to create entry 4 (deactivation)");
 
     (state, did)
@@ -129,7 +133,7 @@ fn save_to_file(state: &DIDWebVHState, path: &str) {
 #[tokio::test]
 async fn test_revoked_did() {
     let path = "tests/test_vectors/revoked-did-test1.jsonl";
-    let (state, did) = build_revoked_did();
+    let (state, did) = build_revoked_did().await;
     save_to_file(&state, path);
 
     let mut resolver = DIDWebVHState::default();
@@ -147,7 +151,7 @@ async fn test_revoked_did() {
 #[tokio::test]
 async fn test_revoked_status_earlier_version() {
     let path = "tests/test_vectors/revoked-did-test2.jsonl";
-    let (state, did) = build_revoked_did();
+    let (state, did) = build_revoked_did().await;
     save_to_file(&state, path);
 
     // Query version 2 — even though it wasn't itself deactivated,

@@ -84,17 +84,19 @@ fn setup_creation_with_aliases() -> CreateDIDConfig {
 
 #[bench]
 fn bench_create_basic(b: &mut Bencher) {
+    let rt = Runtime::new().unwrap();
     b.iter(|| {
         let config = setup_basic_creation();
-        test::black_box(create_did(config).unwrap());
+        test::black_box(rt.block_on(create_did(config)).unwrap());
     });
 }
 
 #[bench]
 fn bench_create_with_aliases(b: &mut Bencher) {
+    let rt = Runtime::new().unwrap();
     b.iter(|| {
         let config = setup_creation_with_aliases();
-        test::black_box(create_did(config).unwrap());
+        test::black_box(rt.block_on(create_did(config)).unwrap());
     });
 }
 

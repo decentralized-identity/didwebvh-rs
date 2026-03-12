@@ -332,7 +332,7 @@ async fn create_new_did() -> Result<()> {
         &did_document,
         &parameters,
         authorizing_keys.first().unwrap(),
-    )?;
+    ).await?;
 
     println!(
         "{}\n{}",
@@ -361,7 +361,8 @@ async fn create_new_did() -> Result<()> {
         log_entry,
         &log_entry.get_active_witnesses(),
         &authorization_secrets,
-    )?;
+    )
+    .await?;
 
     if Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt("Save to file?")

@@ -3,7 +3,8 @@ use didwebvh_rs::prelude::*;
 use serde_json::json;
 use std::sync::Arc;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Generate or load a signing key
     let signing_key = Secret::generate_ed25519(None, None);
 
@@ -42,7 +43,7 @@ fn main() {
         .build()
         .unwrap();
 
-    let result = create_did(config).unwrap();
+    let result = create_did(config).await.unwrap();
 
     // result.did        — the resolved DID identifier (with SCID)
     // result.log_entry  — the signed first log entry (serialize to JSON for did.jsonl)

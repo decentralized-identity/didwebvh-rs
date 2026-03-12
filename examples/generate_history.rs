@@ -416,7 +416,7 @@ async fn generate_did(
         &did_document,
         &params,
         &secrets.get_secret(&signing_did1_secret.id).await.unwrap(),
-    )?;
+    ).await?;
 
     // Witness LogEntry
     witness_log_entry(didwebvh, secrets).await?;
@@ -463,6 +463,7 @@ async fn witness_log_entry(
             &secret,
             None,
         )
+        .await
         .map_err(|e| {
             anyhow!("Couldn't generate Data Integrity Proof for LogEntry. Reason: {e}",)
         })?;
@@ -528,7 +529,7 @@ async fn create_log_entry(
         previous_keys
             .first()
             .ok_or_else(|| anyhow!("No next key provided for log entry creation"))?,
-    )?;
+    ).await?;
 
     // Witness LogEntry
     witness_log_entry(didwebvh, secrets).await?;

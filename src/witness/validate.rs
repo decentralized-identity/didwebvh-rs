@@ -328,8 +328,8 @@ mod tests {
     /// This matters for DID WebVH because it validates the end-to-end witness proof
     /// flow: key generation, proof signing, proof storage, lookup, cryptographic
     /// verification, and threshold checking.
-    #[test]
-    fn test_witness_threshold_met() {
+    #[tokio::test]
+    async fn test_witness_threshold_met() {
         let mut proofs = WitnessProofCollection::default();
         // Use a real signing key for the witness proof
         let secret = affinidi_secrets_resolver::secrets::Secret::generate_ed25519(None, None);
@@ -346,6 +346,7 @@ mod tests {
             &witness_secret,
             None,
         )
+        .await
         .unwrap();
         proofs.add_proof("1-abcd", &signed_proof, false).unwrap();
 

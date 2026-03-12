@@ -125,7 +125,8 @@ pub async fn edit_did() -> Result<()> {
                     new_entry,
                     &new_entry.get_active_witnesses(),
                     &config_info,
-                )?;
+                )
+                .await?;
 
                 // Save info to files
                 new_entry.log_entry.save_to_file(&file_path)?;
@@ -155,7 +156,7 @@ pub async fn edit_did() -> Result<()> {
             }
             1 => {
                 // DID Portability
-                if migrate_did(&mut webvh_state, &mut config_info)? {
+                if migrate_did(&mut webvh_state, &mut config_info).await? {
                     let new_entry = webvh_state.log_entries.last().ok_or_else(|| {
                         DIDWebVHError::LogEntryError("No new LogEntry created".to_string())
                     })?;
@@ -165,7 +166,8 @@ pub async fn edit_did() -> Result<()> {
                         new_entry,
                         &new_entry.get_active_witnesses(),
                         &config_info,
-                    )?;
+                    )
+                    .await?;
 
                     // Save info to files
                     new_entry.log_entry.save_to_file(&file_path)?;
@@ -254,7 +256,7 @@ async fn create_log_entry(
             new_params.active_update_keys[0]
         );
     };
-    let log_entry = didwebvh.create_log_entry(None, &new_state, &new_params, signing_key)?;
+    let log_entry = didwebvh.create_log_entry(None, &new_state, &new_params, signing_key).await?;
 
     println!(
         "{}\n{}",

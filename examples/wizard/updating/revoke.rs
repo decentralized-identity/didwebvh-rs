@@ -56,7 +56,7 @@ pub async fn revoke_did(
                 style("Key pre-rotation is active, must disable first! disabling...").color256(214)
             );
             deactivate_pre_rotation(didwebvh, secrets).await?;
-            save_to_files(file_path, didwebvh, secrets)?;
+            save_to_files(file_path, didwebvh, secrets).await?;
             println!(
                 "{}",
                 style("Key Pre-rotation has been disabled").color256(34)
@@ -65,7 +65,7 @@ pub async fn revoke_did(
 
         // Revoke the DID!
         revoke_entry(didwebvh, secrets).await?;
-        save_to_files(file_path, didwebvh, secrets)?;
+        save_to_files(file_path, didwebvh, secrets).await?;
         let Some(log_entry) = didwebvh.log_entries.last() else {
             bail!("No LogEntries found after revocation!");
         };
@@ -117,6 +117,7 @@ async fn deactivate_pre_rotation(didwebvh: &mut DIDWebVHState, secrets: &ConfigI
             &new_params,
             &new_update_key,
         )
+        .await
         .map_err(|e| anyhow!("Couldn't create LogEntry: {}", e))?;
 
     Ok(())
@@ -151,11 +152,12 @@ async fn revoke_entry(didwebvh: &mut DIDWebVHState, secrets: &ConfigInfo) -> Res
     let state = last_entry.get_state().clone();
     didwebvh
         .create_log_entry(None, &state, &new_params, &new_update_key)
+        .await
         .map_err(|e| anyhow!("Couldn't create LogEntry: {}", e))?;
 
     Ok(())
 }
-fn save_to_files(
+async fn save_to_files(
     file_path: &str,
     webvh_state: &mut DIDWebVHState,
     config_info: &ConfigInfo,
@@ -174,7 +176,8 @@ fn save_to_files(
         new_entry,
         &new_entry.validated_parameters.active_witness,
         config_info,
-    )?;
+    )
+    .await?;
 
     // Save info to files
     new_entry.log_entry.save_to_file(file_path)?;

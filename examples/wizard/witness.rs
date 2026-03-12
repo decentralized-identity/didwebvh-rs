@@ -8,7 +8,7 @@ use didwebvh_rs::{
 use std::sync::Arc;
 
 /// Witnesses a LogEntry with the active LogEntries
-pub fn witness_log_entry(
+pub async fn witness_log_entry(
     witness_proofs: &mut WitnessProofCollection,
     log_entry: &LogEntryState,
     witnesses: &Option<Arc<Witnesses>>,
@@ -42,7 +42,8 @@ pub fn witness_log_entry(
         log_entry,
         witnesses,
         &secrets.witnesses,
-    )?;
+    )
+    .await?;
 
     if signed {
         println!(

@@ -179,7 +179,7 @@ impl DIDWebVHState {
     /// signing_key is the Secret used to sign the Log Entry
     ///   NOTE: A diff comparison to previous parameters is automatically done
     /// signing_key is the Secret used to sign the Log Entry
-    pub fn create_log_entry(
+    pub async fn create_log_entry(
         &mut self,
         version_time: Option<DateTime<FixedOffset>>,
         document: &Value,
@@ -325,6 +325,7 @@ impl DIDWebVHState {
 
         // Generate the proof for the log entry
         let proof = DataIntegrityProof::sign_jcs_data(&new_entry, None, signing_key, None)
+            .await
             .map_err(|e| {
                 DIDWebVHError::SCIDError(format!(
                     "Couldn't generate Data Integrity Proof for LogEntry. Reason: {e}"
@@ -566,8 +567,8 @@ mod tests {
     /// Expected: create_log_entry succeeds (returns Ok).
     /// This matters because creating the initial log entry is the foundational step
     /// in establishing a new WebVH DID, including SCID generation and proof signing.
-    #[test]
-    fn webvh_create_log_entry() {
+    #[tokio::test]
+    async fn webvh_create_log_entry() {
         let key = Secret::generate_ed25519(None, None);
 
         let state = did_doc();
@@ -582,6 +583,7 @@ mod tests {
         assert!(
             didwebvh
                 .create_log_entry(None, &state, &parameters, &key)
+                .await
                 .is_ok()
         );
     }
@@ -590,8 +592,8 @@ mod tests {
     /// Expected: create_log_entry returns an Err.
     /// This matters because update_keys are mandatory for the initial log entry to
     /// establish who is authorized to manage the DID going forward.
-    #[test]
-    fn webvh_create_log_entry_no_update_keys() {
+    #[tokio::test]
+    async fn webvh_create_log_entry_no_update_keys() {
         let key = Secret::generate_ed25519(None, None);
 
         let state = did_doc();
@@ -602,7 +604,7 @@ mod tests {
 
         let mut didwebvh = DIDWebVHState::default();
 
-        let log_entry = didwebvh.create_log_entry(None, &state, &parameters, &key);
+        let log_entry = didwebvh.create_log_entry(None, &state, &parameters, &key).await;
 
         assert!(log_entry.is_err());
     }
@@ -861,8 +863,8 @@ mod tests {
     /// Expected: create_log_entry returns Err with a message about update_keys needing to be empty.
     /// This matters because the spec requires that deactivated DIDs have empty update_keys
     /// to ensure no further updates can be made after deactivation.
-    #[test]
-    fn webvh_create_log_entry_deactivated_with_keys_error() {
+    #[tokio::test]
+    async fn webvh_create_log_entry_deactivated_with_keys_error() {
         let key = Secret::generate_ed25519(None, None);
         let state = did_doc();
         let parameters = Parameters {
@@ -871,7 +873,7 @@ mod tests {
             ..Default::default()
         };
         let mut didwebvh = DIDWebVHState::default();
-        let result = didwebvh.create_log_entry(None, &state, &parameters, &key);
+        let result = didwebvh.create_log_entry(None, &state, &parameters, &key).await;
         assert!(result.is_err());
         assert!(
             result
@@ -886,8 +888,8 @@ mod tests {
     /// Expected: The deactivation log entry is created successfully.
     /// This matters because DID deactivation must be a valid, signed operation that
     /// permanently removes the ability to update the DID while preserving its history.
-    #[test]
-    fn webvh_create_log_entry_deactivated_ok() {
+    #[tokio::test]
+    async fn webvh_create_log_entry_deactivated_ok() {
         let key = Secret::generate_ed25519(None, None);
         let mut key_with_id = key.clone();
         let pk = key.get_public_keymultibase().unwrap();
@@ -902,6 +904,7 @@ mod tests {
         let base_time = (Utc::now() - chrono::Duration::seconds(10)).fixed_offset();
         didwebvh
             .create_log_entry(Some(base_time), &state, &params1, &key_with_id)
+            .await
             .unwrap();
 
         let actual_doc = didwebvh.log_entries.last().unwrap().get_state().clone();
@@ -917,7 +920,8 @@ mod tests {
             &actual_doc,
             &params2,
             &key_with_id,
-        );
+        )
+        .await;
         assert!(result.is_ok());
     }
 
@@ -926,8 +930,8 @@ mod tests {
     /// Expected: Two log entries exist in the state after both creations succeed.
     /// This matters because the ability to append entries is the core mechanism for
     /// DID Document updates while maintaining a verifiable history chain.
-    #[test]
-    fn webvh_create_log_entry_second_entry() {
+    #[tokio::test]
+    async fn webvh_create_log_entry_second_entry() {
         let key = Secret::generate_ed25519(None, None);
         let mut key_with_id = key.clone();
         let pk = key.get_public_keymultibase().unwrap();
@@ -942,6 +946,7 @@ mod tests {
         let base_time = (Utc::now() - chrono::Duration::seconds(10)).fixed_offset();
         didwebvh
             .create_log_entry(Some(base_time), &state, &params, &key_with_id)
+            .await
             .unwrap();
 
         let actual_doc = didwebvh.log_entries.last().unwrap().get_state().clone();
@@ -956,7 +961,8 @@ mod tests {
             &actual_doc,
             &params2,
             &key_with_id,
-        );
+        )
+        .await;
         assert!(result.is_ok());
         assert_eq!(didwebvh.log_entries.len(), 2);
     }
@@ -966,8 +972,8 @@ mod tests {
     /// Expected: The stored versionTime matches the custom timestamp provided.
     /// This matters because precise version timestamps are critical for time-based
     /// DID resolution queries and for establishing an accurate audit trail.
-    #[test]
-    fn webvh_create_log_entry_custom_version_time() {
+    #[tokio::test]
+    async fn webvh_create_log_entry_custom_version_time() {
         let key = Secret::generate_ed25519(None, None);
         let pk = key.get_public_keymultibase().unwrap();
         let mut key_with_id = key.clone();
@@ -980,7 +986,7 @@ mod tests {
         };
         let custom_time = (Utc::now() - chrono::Duration::seconds(100)).fixed_offset();
         let mut didwebvh = DIDWebVHState::default();
-        let result = didwebvh.create_log_entry(Some(custom_time), &state, &params, &key_with_id);
+        let result = didwebvh.create_log_entry(Some(custom_time), &state, &params, &key_with_id).await;
         assert!(result.is_ok());
         use crate::log_entry::LogEntryMethods;
         // Compare with seconds precision (versionTime is serialized with seconds only)
@@ -995,7 +1001,7 @@ mod tests {
     /// The entries are separated by 10 seconds, allowing time-based queries to
     /// distinguish between them. Uses a single signing key for both entries.
     /// Returns the fully populated state with two validated log entries.
-    fn create_multi_entry_state() -> DIDWebVHState {
+    async fn create_multi_entry_state() -> DIDWebVHState {
         let key = Secret::generate_ed25519(None, None);
         let pk = key.get_public_keymultibase().unwrap();
         let mut key_with_id = key.clone();
@@ -1010,6 +1016,7 @@ mod tests {
         let mut didwebvh = DIDWebVHState::default();
         didwebvh
             .create_log_entry(Some(base_time), &state, &params, &key_with_id)
+            .await
             .unwrap();
 
         let actual_doc = didwebvh.log_entries.last().unwrap().get_state().clone();
@@ -1025,6 +1032,7 @@ mod tests {
                 &params2,
                 &key_with_id,
             )
+            .await
             .unwrap();
         didwebvh
     }
@@ -1033,9 +1041,9 @@ mod tests {
     /// Expected: The lookup succeeds and returns the matching entry.
     /// This matters because versionId-based queries allow resolvers to fetch a
     /// specific, cryptographically-identified snapshot of the DID Document.
-    #[test]
-    fn test_get_specific_by_version_id() {
-        let state = create_multi_entry_state();
+    #[tokio::test]
+    async fn test_get_specific_by_version_id() {
+        let state = create_multi_entry_state().await;
         use crate::log_entry::LogEntryMethods;
         let vid = state.log_entries[0].log_entry.get_version_id();
         let result = state.get_specific_log_entry(Some(&vid), None, None);
@@ -1046,9 +1054,9 @@ mod tests {
     /// Expected: The lookup fails with an error message containing "No matching".
     /// This matters because resolvers must clearly distinguish between valid and
     /// invalid version references to avoid returning stale or incorrect DID Documents.
-    #[test]
-    fn test_get_specific_by_version_id_not_found() {
-        let state = create_multi_entry_state();
+    #[tokio::test]
+    async fn test_get_specific_by_version_id_not_found() {
+        let state = create_multi_entry_state().await;
         let result = state.get_specific_log_entry(Some("999-nonexistent"), None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("No matching"));
@@ -1058,9 +1066,9 @@ mod tests {
     /// Expected: The lookup succeeds and the returned entry has version_number 1.
     /// This matters because version number queries provide a simple, sequential way
     /// to navigate the DID history without needing to know the full versionId hash.
-    #[test]
-    fn test_get_specific_by_version_number() {
-        let state = create_multi_entry_state();
+    #[tokio::test]
+    async fn test_get_specific_by_version_number() {
+        let state = create_multi_entry_state().await;
         let result = state.get_specific_log_entry(None, None, Some(1));
         assert!(result.is_ok());
         assert_eq!(result.unwrap().version_number, 1);
@@ -1070,9 +1078,9 @@ mod tests {
     /// Expected: The lookup fails for version number 999.
     /// This matters because out-of-range version queries must fail gracefully rather
     /// than panicking or returning incorrect data during DID resolution.
-    #[test]
-    fn test_get_specific_by_version_number_not_found() {
-        let state = create_multi_entry_state();
+    #[tokio::test]
+    async fn test_get_specific_by_version_number_not_found() {
+        let state = create_multi_entry_state().await;
         let result = state.get_specific_log_entry(None, None, Some(999));
         assert!(result.is_err());
     }
@@ -1082,9 +1090,9 @@ mod tests {
     /// Expected: The lookup succeeds when using the second entry's exact timestamp.
     /// This matters because time-based resolution allows clients to query the DID
     /// Document state as it existed at a specific point in time.
-    #[test]
-    fn test_get_specific_by_version_time() {
-        let state = create_multi_entry_state();
+    #[tokio::test]
+    async fn test_get_specific_by_version_time() {
+        let state = create_multi_entry_state().await;
         use crate::log_entry::LogEntryMethods;
         let time = state.log_entries[1].log_entry.get_version_time();
         let result = state.get_specific_log_entry(None, Some(time), None);
@@ -1095,9 +1103,9 @@ mod tests {
     /// Expected: The lookup fails when using a timestamp one year in the past.
     /// This matters because resolvers must not return data for timestamps that predate
     /// the DID's creation, as no valid document state existed at that time.
-    #[test]
-    fn test_get_specific_by_version_time_not_found() {
-        let state = create_multi_entry_state();
+    #[tokio::test]
+    async fn test_get_specific_by_version_time_not_found() {
+        let state = create_multi_entry_state().await;
         // Use a very old time before any entries
         let old_time = (Utc::now() - chrono::Duration::days(365)).fixed_offset();
         let result = state.get_specific_log_entry(None, Some(old_time), None);
@@ -1108,9 +1116,9 @@ mod tests {
     /// Expected: The lookup fails with a message containing "No query parameter".
     /// This matters because the API must reject ambiguous queries to prevent
     /// accidentally returning the wrong log entry during resolution.
-    #[test]
-    fn test_get_specific_no_params_error() {
-        let state = create_multi_entry_state();
+    #[tokio::test]
+    async fn test_get_specific_no_params_error() {
+        let state = create_multi_entry_state().await;
         let result = state.get_specific_log_entry(None, None, None);
         assert!(result.is_err());
         assert!(
