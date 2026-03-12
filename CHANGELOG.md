@@ -19,6 +19,14 @@
   - `CreateDIDConfig::builder_generic()` added for custom signer types;
     `CreateDIDConfig::builder()` continues to work with `Secret` as before
 
+- **Structured `NetworkError`** — `DIDWebVHError::NetworkError` now carries
+  typed fields (`url`, `status_code`, `message`) instead of a plain `String`.
+  Consumers can programmatically distinguish HTTP errors (404, 500) from
+  transport failures (timeouts, connection refused) by inspecting `status_code`.
+- **Removed `regex` dependency** — DID string operations in `did_web.rs` now use
+  `str::split_once()`, `str::strip_prefix()`, and a custom `replace_webvh_prefix()`
+  function, eliminating the `regex` crate from the dependency tree.
+
 #### Maintenance
 
 - Dependencies updated: `affinidi-data-integrity` 0.4→0.5,
@@ -26,6 +34,15 @@
 - Internal `ensure_did_key_id()` (which mutated `Secret` IDs) replaced with
   `validate_did_key_vm()` (validation only, no mutation) — signers are now
   required to provide a correctly formatted `did:key:` verification method
+- Added `wiremock` dev-dependency for network failure testing
+- Consolidated duplicate test helpers into shared `test_utils` module
+- Added comprehensive documentation for `resolve()`, `validate()`, implicit
+  services, and witness proof semantics
+- Added network failure tests (HTTP 404/500, timeout, connection refused,
+  malformed/empty responses)
+- Added file I/O error tests for log entry and witness proof loading/saving
+- Added unit tests for `LogEntryState` accessors
+- Test count: 383 tests (370 unit + 12 integration + 1 doc-test)
 
 ## 5th March 2026
 

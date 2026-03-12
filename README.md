@@ -31,6 +31,8 @@ site
 - [x] WebVH DID Create routines to make it easier to create DIDs programmatically
 - [x] Pluggable signing via the `Signer` trait — use HSMs, KMS, or any external
   signing service without exposing secret key material to the library
+- [x] Structured error types for programmatic error handling (e.g. `NetworkError`
+  exposes `url`, `status_code`, and `message` fields)
 
 ## Usage
 
