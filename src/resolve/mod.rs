@@ -464,61 +464,110 @@ impl DIDWebVHState {
 mod tests {
     use crate::{DIDWebVHError, DIDWebVHState};
 
-    #[tokio::test]
-    #[ignore] // requires network access to identity.foundation
-    async fn resolve_reference() {
-        let mut webvh = DIDWebVHState::default();
+    // ===== Mock-based resolve tests =====
+    //
+    // These tests create a DID locally and serve it via wiremock, so they
+    // run deterministically in CI without hitting any external servers.
 
-        let result = webvh.resolve(
-            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs",
-            None,
-            false,
-        ).await;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{any, path},
+    };
 
-        assert!(result.is_ok());
+    /// Helper: start a mock server, create a DID targeting its port, serialize
+    /// to JSONL, mount the mock response, and return `(server, did_url)`.
+    async fn setup_mock_resolve() -> (MockServer, String) {
+        use crate::log_entry::LogEntryMethods;
+        use crate::test_utils::{did_doc_with_key, key_and_params};
+
+        let server = MockServer::start().await;
+        let port = server.address().port();
+
+        let (key, params) = key_and_params();
+        let did_template = format!("did:webvh:{{SCID}}:localhost%3A{port}");
+        let doc = did_doc_with_key(&did_template, &key);
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(None, &doc, &params, &key)
+            .await
+            .expect("Failed to create log entry");
+
+        let log_entry = &state.log_entries[0].log_entry;
+        let jsonl = serde_json::to_string(log_entry).unwrap();
+        let scid = state.scid();
+        let did = format!("did:webvh:{scid}:localhost%3A{port}");
+
+        Mock::given(path("/.well-known/did.jsonl"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(&jsonl))
+            .mount(&server)
+            .await;
+
+        (server, did)
     }
 
+    /// Resolve a DID served from a local mock server.
     #[tokio::test]
-    #[ignore] // requires network access to identity.foundation
-    async fn resolve_reference_specific_version() {
+    async fn resolve_mock() {
+        let (_server, did) = setup_mock_resolve().await;
+
         let mut webvh = DIDWebVHState::default();
-
-        let result = webvh.resolve(
-            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs?versionId=2-QmUCFFYYGBJhzZqyouAtvRJ7ULdd8FqSUvwb61FPTMH1Aj",
-            None,
-            false,
-        ).await;
-
-        assert!(result.is_ok());
+        let result = webvh.resolve(&did, None, false).await;
+        assert!(result.is_ok(), "resolve failed: {result:?}");
     }
 
+    /// Resolve with eager witness download (no witnesses configured).
     #[tokio::test]
-    #[ignore] // requires network access to identity.foundation
-    async fn resolve_reference_specific_time() {
+    async fn resolve_mock_eager() {
+        let (server, did) = setup_mock_resolve().await;
+
+        // Witness file returns 404 — that's fine, no witnesses configured
+        Mock::given(path("/.well-known/did-witness.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
         let mut webvh = DIDWebVHState::default();
-
-        let result = webvh.resolve(
-            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs?versionTime=2025-08-01T00:00:00Z",
-            None,
-            false,
-        ).await;
-
-        assert!(result.is_ok());
+        let result = webvh.resolve(&did, None, true).await;
+        assert!(result.is_ok(), "eager resolve failed: {result:?}");
     }
 
+    /// Resolve a specific versionId served from a local mock server.
     #[tokio::test]
-    #[ignore] // requires network access to identity.foundation
-    async fn resolve_reference_eager_witness() {
+    async fn resolve_mock_specific_version() {
+        use crate::log_entry::LogEntryMethods;
+
+        let (_server, did) = setup_mock_resolve().await;
+
+        // First resolve to get the versionId
         let mut webvh = DIDWebVHState::default();
+        let (entry, _) = webvh.resolve(&did, None, false).await.unwrap();
+        let version_id = entry.get_version_id().to_string();
 
-        // Eager mode: downloads both files concurrently, no error when witnesses aren't configured
-        let result = webvh.resolve(
-            "did:webvh:Qmd1FCL9Vj2vJ433UDfC9MBstK6W6QWSQvYyeNn8va2fai:identity.foundation:didwebvh-implementations:implementations:affinidi-didwebvh-rs",
-            None,
-            true,
-        ).await;
+        // Resolve again with ?versionId=...
+        let mut webvh2 = DIDWebVHState::default();
+        let did_with_version = format!("{did}?versionId={version_id}");
+        let result = webvh2.resolve(&did_with_version, None, false).await;
+        assert!(result.is_ok(), "versionId resolve failed: {result:?}");
+    }
 
-        assert!(result.is_ok());
+    /// Resolve with ?versionTime query from a local mock server.
+    #[tokio::test]
+    async fn resolve_mock_specific_time() {
+        use crate::log_entry::LogEntryMethods;
+
+        let (_server, did) = setup_mock_resolve().await;
+
+        // Resolve to get a valid versionTime
+        let mut webvh = DIDWebVHState::default();
+        let (entry, _) = webvh.resolve(&did, None, false).await.unwrap();
+        let version_time = entry.get_version_time_string();
+
+        // Resolve again with ?versionTime=...
+        let mut webvh2 = DIDWebVHState::default();
+        let did_with_time = format!("{did}?versionTime={version_time}");
+        let result = webvh2.resolve(&did_with_time, None, false).await;
+        assert!(result.is_ok(), "versionTime resolve failed: {result:?}");
     }
 
     // ===== Network failure tests =====
@@ -537,8 +586,6 @@ mod tests {
     /// NetworkError with status_code = Some(404).
     #[tokio::test]
     async fn resolve_http_404() {
-        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
-
         let server = MockServer::start().await;
         Mock::given(any())
             .respond_with(ResponseTemplate::new(404))
@@ -562,8 +609,6 @@ mod tests {
     /// NetworkError with status_code = Some(500).
     #[tokio::test]
     async fn resolve_http_500() {
-        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
-
         let server = MockServer::start().await;
         Mock::given(any())
             .respond_with(ResponseTemplate::new(500))
@@ -587,8 +632,6 @@ mod tests {
     /// (not valid JSONL log entries) produces a deserialization error.
     #[tokio::test]
     async fn resolve_malformed_response() {
-        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
-
         let server = MockServer::start().await;
         Mock::given(any())
             .respond_with(ResponseTemplate::new(200).set_body_string("this is not jsonl"))
@@ -609,8 +652,6 @@ mod tests {
     /// produces a NotFound error (no log entries).
     #[tokio::test]
     async fn resolve_empty_response() {
-        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
-
         let server = MockServer::start().await;
         Mock::given(any())
             .respond_with(ResponseTemplate::new(200).set_body_string(""))
@@ -636,8 +677,6 @@ mod tests {
     #[tokio::test]
     async fn resolve_timeout() {
         use std::time::Duration;
-        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
-
         let server = MockServer::start().await;
         // Respond after 5 seconds — longer than our 1-second timeout
         Mock::given(any())
@@ -684,8 +723,6 @@ mod tests {
     /// (url contains the expected host, status_code and message are set).
     #[tokio::test]
     async fn resolve_network_error_fields() {
-        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
-
         let server = MockServer::start().await;
         Mock::given(any())
             .respond_with(ResponseTemplate::new(503))
