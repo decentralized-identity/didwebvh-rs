@@ -28,8 +28,16 @@ fn did_document_template() -> Value {
     })
 }
 
+/// Generate a Secret with a proper `did:key:{mb}#{mb}` ID format.
+fn generate_signing_key() -> Secret {
+    let mut key = Secret::generate_ed25519(None, None);
+    let pk = key.get_public_keymultibase().unwrap();
+    key.id = format!("did:key:{pk}#{pk}");
+    key
+}
+
 fn setup_basic_creation() -> CreateDIDConfig {
-    let key = Secret::generate_ed25519(None, None);
+    let key = generate_signing_key();
     let pub_mb = key.get_public_keymultibase().unwrap();
 
     let mut doc = did_document_template();
@@ -55,7 +63,7 @@ fn setup_basic_creation() -> CreateDIDConfig {
 }
 
 fn setup_creation_with_aliases() -> CreateDIDConfig {
-    let key = Secret::generate_ed25519(None, None);
+    let key = generate_signing_key();
     let pub_mb = key.get_public_keymultibase().unwrap();
 
     let mut doc = did_document_template();
