@@ -8,18 +8,30 @@
 
 use crate::{
     DIDWebVHError, DIDWebVHState,
-    log_entry::{LogEntry, LogEntryMethods, MetaData},
-    log_entry_state::{LogEntryState, LogEntryValidationStatus},
-    parameters::Parameters,
-    url::{URLType, WebVHURL},
+    log_entry::{LogEntry, MetaData},
+    url::WebVHURL,
     witness::proofs::WitnessProofCollection,
 };
-use chrono::{DateTime, Utc};
+#[cfg(feature = "network")]
+use crate::{
+    log_entry::LogEntryMethods,
+    log_entry_state::{LogEntryState, LogEntryValidationStatus},
+    parameters::Parameters,
+    url::URLType,
+};
+use chrono::DateTime;
+#[cfg(feature = "network")]
+use chrono::Utc;
+#[cfg(feature = "network")]
 use reqwest::{Client, StatusCode};
+#[cfg(feature = "network")]
 use std::time::Duration;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use tracing::trace;
-use tracing::{Instrument, Level, span, warn};
+#[cfg(feature = "network")]
+use tracing::warn;
+use tracing::{Instrument, Level, span};
+#[cfg(feature = "network")]
 use url::Url;
 
 /// Integration with the Spruice ID SSI Library
@@ -29,8 +41,10 @@ pub mod ssi_resolve;
 pub mod implicit; // WebVH specification implies specific Services for a DID Document
 
 /// HTTP client helpers for fetching DID log entries and witness proofs.
+#[cfg(feature = "network")]
 pub struct DIDWebVH;
 
+#[cfg(feature = "network")]
 impl DIDWebVH {
     // Handles the fetching of the file from a given URL
     async fn download_file(client: Client, url: Url) -> Result<String, DIDWebVHError> {
@@ -132,6 +146,23 @@ impl DIDWebVHState {
         .await
     }
 
+    /// Like [`resolve_file()`](Self::resolve_file), but returns owned (cloned) values
+    /// so the caller does not borrow `self`.
+    pub async fn resolve_file_owned(
+        &mut self,
+        did: &str,
+        log_entries_path: &str,
+        witness_proofs_file: Option<&str>,
+    ) -> Result<(LogEntry, MetaData), DIDWebVHError> {
+        let (entry, metadata) = self
+            .resolve_file(did, log_entries_path, witness_proofs_file)
+            .await?;
+        Ok((entry.clone(), metadata))
+    }
+}
+
+#[cfg(feature = "network")]
+impl DIDWebVHState {
     /// Parse raw log entry lines into a vec of `LogEntryState`
     fn parse_log_entries(raw: &str) -> Result<Vec<LogEntryState>, DIDWebVHError> {
         let mut log_entries = Vec::new();
@@ -349,6 +380,20 @@ impl DIDWebVHState {
         .await
     }
 
+    /// Like [`resolve()`](Self::resolve), but returns owned (cloned) values
+    /// so the caller does not borrow `self`.
+    pub async fn resolve_owned(
+        &mut self,
+        did: &str,
+        timeout: Option<Duration>,
+        eager_witness_download: bool,
+    ) -> Result<(LogEntry, MetaData), DIDWebVHError> {
+        let (entry, metadata) = self.resolve(did, timeout, eager_witness_download).await?;
+        Ok((entry.clone(), metadata))
+    }
+}
+
+impl DIDWebVHState {
     fn resolve_state(
         &mut self,
         parsed_did_url: &WebVHURL,
@@ -412,7 +457,7 @@ impl DIDWebVHState {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "network"))]
 mod tests {
     use crate::{DIDWebVHError, DIDWebVHState};
 

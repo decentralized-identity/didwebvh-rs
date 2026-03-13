@@ -9,6 +9,7 @@ pub use crate::DIDWebVHState;
 pub use crate::KeyType;
 pub use crate::Multibase;
 pub use crate::Signer;
+pub use crate::async_trait;
 pub use crate::create::{CreateDIDConfig, create_did};
 pub use crate::log_entry::LogEntryMethods;
 pub use crate::parameters::Parameters;

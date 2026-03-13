@@ -27,6 +27,14 @@ pub enum Witnesses {
 }
 
 impl Witnesses {
+    /// Create a new [`WitnessesBuilder`] for constructing a [`Witnesses`] value.
+    pub fn builder() -> WitnessesBuilder {
+        WitnessesBuilder {
+            threshold: 1,
+            witnesses: Vec::new(),
+        }
+    }
+
     /// Are any witnesses configured?
     pub fn is_empty(&self) -> bool {
         match self {
@@ -112,6 +120,48 @@ impl Witness {
     /// Use [`Self::as_did`] if you want just the base DID
     pub fn as_did_key(&self) -> String {
         [&self.as_did(), "#", self.id.as_str()].concat()
+    }
+}
+
+/// Builder for constructing a [`Witnesses`] configuration.
+///
+/// Defaults to a threshold of 1. Use [`build()`](Self::build) to validate
+/// and produce the final [`Witnesses`] value.
+pub struct WitnessesBuilder {
+    threshold: u32,
+    witnesses: Vec<Witness>,
+}
+
+impl WitnessesBuilder {
+    /// Set the minimum number of witness proofs required.
+    pub fn threshold(mut self, t: u32) -> Self {
+        self.threshold = t;
+        self
+    }
+
+    /// Add a single witness by its multibase-encoded public key.
+    pub fn witness(mut self, id: Multibase) -> Self {
+        self.witnesses.push(Witness { id });
+        self
+    }
+
+    /// Add multiple witnesses from an iterator of multibase-encoded public keys.
+    pub fn witnesses(mut self, ids: impl IntoIterator<Item = Multibase>) -> Self {
+        self.witnesses
+            .extend(ids.into_iter().map(|id| Witness { id }));
+        self
+    }
+
+    /// Build and validate the [`Witnesses`] configuration.
+    ///
+    /// Returns an error if the threshold is zero or exceeds the number of witnesses.
+    pub fn build(self) -> Result<Witnesses, DIDWebVHError> {
+        let w = Witnesses::Value {
+            threshold: self.threshold,
+            witnesses: self.witnesses,
+        };
+        w.validate()?;
+        Ok(w)
     }
 }
 
@@ -277,5 +327,51 @@ mod tests {
             }
             .is_empty()
         );
+    }
+
+    // ===== WitnessesBuilder tests =====
+
+    #[test]
+    fn builder_valid_single_witness() {
+        let w = Witnesses::builder()
+            .threshold(1)
+            .witness(Multibase::new("z6Mktest"))
+            .build();
+        assert!(w.is_ok());
+        let w = w.unwrap();
+        assert_eq!(w.threshold(), Some(1));
+        assert_eq!(w.witnesses().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn builder_valid_multiple_witnesses() {
+        let w = Witnesses::builder()
+            .threshold(2)
+            .witnesses(vec![
+                Multibase::new("z6Mk1"),
+                Multibase::new("z6Mk2"),
+                Multibase::new("z6Mk3"),
+            ])
+            .build();
+        assert!(w.is_ok());
+        assert_eq!(w.unwrap().witnesses().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn builder_threshold_zero_error() {
+        let result = Witnesses::builder()
+            .threshold(0)
+            .witness(Multibase::new("z6Mk1"))
+            .build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn builder_threshold_exceeds_witnesses_error() {
+        let result = Witnesses::builder()
+            .threshold(3)
+            .witness(Multibase::new("z6Mk1"))
+            .build();
+        assert!(result.is_err());
     }
 }

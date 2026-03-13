@@ -77,7 +77,7 @@ impl PublicKey for DataIntegrityProof {
 /// Each version of the DID gets a new log entry
 /// [Log Entries](https://identity.foundation/didwebvh/v1.0/#the-did-log-file)
 #[non_exhaustive]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum LogEntry {
     /// Official v1.0 specification

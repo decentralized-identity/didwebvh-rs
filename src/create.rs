@@ -149,6 +149,31 @@ impl<A: Signer, W: Signer> CreateDIDConfigBuilder<A, W> {
             .parameters
             .ok_or_else(|| DIDWebVHError::ParametersError("parameters is required".to_string()))?;
 
+        // Validate that the DID document has a top-level "id" field
+        match did_document.get("id") {
+            Some(Value::String(id)) => {
+                // For a new DID (no existing log), the document must contain {SCID} or {DID} placeholder
+                if !id.contains("{SCID}") && !id.contains("{DID}") {
+                    return Err(DIDWebVHError::DIDError(
+                        "DID document 'id' must contain a '{SCID}' or '{DID}' placeholder \
+                         (e.g. \"did:webvh:{SCID}:example.com\" or \"{DID}\"). \
+                         The placeholder is replaced with the actual identifier during creation."
+                            .to_string(),
+                    ));
+                }
+            }
+            Some(_) => {
+                return Err(DIDWebVHError::DIDError(
+                    "DID document 'id' field must be a string".to_string(),
+                ));
+            }
+            None => {
+                return Err(DIDWebVHError::DIDError(
+                    "DID document must have a top-level 'id' field".to_string(),
+                ));
+            }
+        }
+
         Ok(CreateDIDConfig {
             address,
             authorization_keys: self.authorization_keys,

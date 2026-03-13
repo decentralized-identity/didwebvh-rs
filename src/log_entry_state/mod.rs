@@ -27,7 +27,7 @@ pub enum LogEntryValidationStatus {
 }
 
 /// Manages state relating to a LogEntry during validation
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LogEntryState {
     /// webvh LogEntry record
     pub log_entry: LogEntry,

@@ -13,7 +13,7 @@ use crate::{
 use affinidi_data_integrity::DataIntegrityProof;
 use affinidi_secrets_resolver::secrets::Secret;
 use chrono::{DateTime, FixedOffset, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{fmt, sync::Arc};
 use thiserror::Error;
@@ -51,9 +51,12 @@ pub use affinidi_secrets_resolver;
 pub use affinidi_data_integrity::signer::Signer;
 pub use affinidi_secrets_resolver::secrets::KeyType;
 
+// Re-export async_trait so consumers implementing `Signer` don't need a separate dependency.
+pub use async_trait::async_trait;
+
 /// WebVH Specification supports multiple LogEntry versions in the same DID
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Version {
     /// Official v1.0 specification
     #[default]
@@ -160,8 +163,25 @@ pub enum DIDWebVHError {
     WitnessProofError(String),
 }
 
+impl DIDWebVHError {
+    /// Create a [`DIDWebVHError::ValidationError`] with version context.
+    pub fn validation(msg: impl fmt::Display, version: u32) -> Self {
+        Self::ValidationError(format!("[version {version}] {msg}"))
+    }
+
+    /// Create a [`DIDWebVHError::ParametersError`] with field context.
+    pub fn parameter(field: &str, msg: impl fmt::Display) -> Self {
+        Self::ParametersError(format!("[{field}] {msg}"))
+    }
+
+    /// Create a [`DIDWebVHError::LogEntryError`] with version context.
+    pub fn log_entry(msg: impl fmt::Display, version: u32) -> Self {
+        Self::LogEntryError(format!("[version {version}] {msg}"))
+    }
+}
+
 /// Information relating to a webvh DID
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct DIDWebVHState {
     pub(crate) log_entries: Vec<LogEntryState>,
     pub(crate) witness_proofs: WitnessProofCollection,
@@ -308,14 +328,16 @@ impl DIDWebVHState {
         // If this LogEntry causes the DID to be deactivated, then updateKeys should be set to
         // invalid
         if parameters.deactivated.unwrap_or_default() {
+            let version = last_log_entry.map_or(1, |e| e.version_number + 1);
             // DID will be deactivated
             if let Some(keys) = &parameters.update_keys
                 && keys.is_empty()
             {
                 // Valid empty UpdateKeys for a deactivated DID
             } else {
-                return Err(DIDWebVHError::LogEntryError(
-                    "Cannot deactivate DID unless update_keys is set to []".to_string(),
+                return Err(DIDWebVHError::log_entry(
+                    "Cannot deactivate DID unless update_keys is set to []",
+                    version,
                 ));
             }
         }
@@ -532,6 +554,100 @@ impl DIDWebVHState {
                 .cloned(),
             watchers: log_entry.validated_parameters.watchers.as_deref().cloned(),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Convenience API
+    // -----------------------------------------------------------------------
+
+    /// Returns a clone of the current parameters from the last log entry.
+    fn current_parameters(&self) -> Result<Parameters, DIDWebVHError> {
+        self.log_entries
+            .last()
+            .map(|e| e.validated_parameters.clone())
+            .ok_or_else(|| DIDWebVHError::LogEntryError("No log entries exist".to_string()))
+    }
+
+    /// Returns a clone of the current DID Document from the last log entry.
+    fn current_document(&self) -> Result<Value, DIDWebVHError> {
+        self.log_entries
+            .last()
+            .map(|e| e.get_state().clone())
+            .ok_or_else(|| DIDWebVHError::LogEntryError("No log entries exist".to_string()))
+    }
+
+    /// Update the DID document, creating a new log entry.
+    ///
+    /// This is a convenience wrapper around [`create_log_entry()`](Self::create_log_entry)
+    /// that reuses the current parameters and only changes the document.
+    pub async fn update_document(
+        &mut self,
+        document: Value,
+        signing_key: &dyn Signer,
+    ) -> Result<&LogEntryState, DIDWebVHError> {
+        let params = self.current_parameters()?;
+        self.create_log_entry(None, &document, &params, signing_key)
+            .await
+    }
+
+    /// Rotate the DID's update keys, creating a new log entry.
+    ///
+    /// The current document is preserved; only the `update_keys` parameter changes.
+    pub async fn rotate_keys(
+        &mut self,
+        new_keys: Vec<Multibase>,
+        signing_key: &dyn Signer,
+    ) -> Result<&LogEntryState, DIDWebVHError> {
+        let mut params = self.current_parameters()?;
+        let doc = self.current_document()?;
+        params.update_keys = Some(Arc::new(new_keys));
+        self.create_log_entry(None, &doc, &params, signing_key)
+            .await
+    }
+
+    /// Deactivate the DID, creating a final log entry.
+    ///
+    /// Sets `deactivated: true` and clears `update_keys` as required by the spec.
+    pub async fn deactivate(
+        &mut self,
+        signing_key: &dyn Signer,
+    ) -> Result<&LogEntryState, DIDWebVHError> {
+        let mut params = self.current_parameters()?;
+        let doc = self.current_document()?;
+        params.deactivated = Some(true);
+        params.update_keys = Some(Arc::new(vec![]));
+        self.create_log_entry(None, &doc, &params, signing_key)
+            .await
+    }
+
+    // -----------------------------------------------------------------------
+    // Cache serialization
+    // -----------------------------------------------------------------------
+
+    /// Serialize this state to a JSON file for offline caching.
+    ///
+    /// **Note:** Loaded state should be re-validated via [`resolve()`](Self::resolve) or
+    /// [`resolve_file()`](Self::resolve_file) before use, because computed fields like
+    /// `active_update_keys` use `#[serde(skip)]` and will be at their defaults after
+    /// deserialization.
+    pub fn save_state(&self, path: &str) -> Result<(), DIDWebVHError> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| DIDWebVHError::DIDError(format!("Failed to serialize state: {e}")))?;
+        std::fs::write(path, json)
+            .map_err(|e| DIDWebVHError::DIDError(format!("Failed to write state to {path}: {e}")))
+    }
+
+    /// Load state from a JSON file previously saved with [`save_state()`](Self::save_state).
+    ///
+    /// **Important:** The loaded state has `validated = false` by default and computed
+    /// fields (`active_update_keys`, `active_witness`) will be at their defaults.
+    /// You should re-resolve or re-validate before relying on the loaded state.
+    pub fn load_state(path: &str) -> Result<Self, DIDWebVHError> {
+        let json = std::fs::read_to_string(path).map_err(|e| {
+            DIDWebVHError::DIDError(format!("Failed to read state from {path}: {e}"))
+        })?;
+        serde_json::from_str(&json)
+            .map_err(|e| DIDWebVHError::DIDError(format!("Failed to deserialize state: {e}")))
     }
 
     /// Extract the multibase key fragment from a verification method URI.

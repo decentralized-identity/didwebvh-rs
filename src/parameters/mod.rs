@@ -19,7 +19,7 @@ pub(crate) mod spec_1_0;
 pub(crate) mod spec_1_0_pre;
 
 /// Parameters for WebVH DIDs
-#[derive(Clone, Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Parameters {
     /// SCID (this is often automatically generated))
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -28,7 +28,9 @@ pub struct Parameters {
     /// DID version specification
     #[serde(
         skip_serializing_if = "Option::is_none",
-        serialize_with = "method_from_version"
+        serialize_with = "method_from_version",
+        deserialize_with = "version_from_method",
+        default
     )]
     pub method: Option<Version>,
 
@@ -90,6 +92,19 @@ where
     }
 }
 
+fn version_from_method<'de, D>(deserializer: D) -> Result<Option<Version>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    match opt {
+        None => Ok(None),
+        Some(s) => Version::try_from(s.as_str())
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
+}
+
 impl Parameters {
     /// Instantiate a new default ParametersBuilder
     #[allow(clippy::new_ret_no_self)]
@@ -128,8 +143,9 @@ impl Parameters {
         // Check if portable has been turned off (can never be turned on except on first log entry)
         if self.portable != old_params.portable {
             if self.portable == Some(true) {
-                return Err(DIDWebVHError::ParametersError(
-                    "Portable cannot be set to true after the first Log Entry".to_string(),
+                return Err(DIDWebVHError::parameter(
+                    "portable",
+                    "cannot be set to true after the first Log Entry",
                 ));
             }
             diff.portable = self.portable;

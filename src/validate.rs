@@ -43,9 +43,10 @@ impl DIDWebVHState {
                         // Return last known good LogEntry
                         break;
                     }
-                    return Err(DIDWebVHError::ValidationError(format!(
-                        "No valid LogEntry found! Reason: {e}",
-                    )));
+                    return Err(DIDWebVHError::validation(
+                        format!("No valid LogEntry found! Reason: {e}"),
+                        entry.version_number,
+                    ));
                 }
             }
             // Check if this valid LogEntry has been deactivated, if so then ignore any other
