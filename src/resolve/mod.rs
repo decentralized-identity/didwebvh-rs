@@ -465,6 +465,7 @@ mod tests {
     use crate::{DIDWebVHError, DIDWebVHState};
 
     #[tokio::test]
+    #[ignore] // requires network access to identity.foundation
     async fn resolve_reference() {
         let mut webvh = DIDWebVHState::default();
 
@@ -478,6 +479,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // requires network access to identity.foundation
     async fn resolve_reference_specific_version() {
         let mut webvh = DIDWebVHState::default();
 
@@ -491,6 +493,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // requires network access to identity.foundation
     async fn resolve_reference_specific_time() {
         let mut webvh = DIDWebVHState::default();
 
@@ -504,6 +507,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // requires network access to identity.foundation
     async fn resolve_reference_eager_witness() {
         let mut webvh = DIDWebVHState::default();
 
