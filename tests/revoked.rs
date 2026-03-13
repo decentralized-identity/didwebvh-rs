@@ -6,7 +6,7 @@
 
 use affinidi_secrets_resolver::secrets::Secret;
 use chrono::{Duration, Utc};
-use didwebvh_rs::{DIDWebVHState, parameters::Parameters};
+use didwebvh_rs::{DIDWebVHState, Multibase, parameters::Parameters};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ fn did_doc_with_key(did: &str, key: &Secret) -> Value {
 /// Build a DID with 3 normal entries then a 4th deactivation entry,
 /// each with strictly increasing versionTime. Returns the DIDWebVHState
 /// and the resolved DID string.
-fn build_revoked_did() -> (DIDWebVHState, String) {
+async fn build_revoked_did() -> (DIDWebVHState, String) {
     let base_time = (Utc::now() - Duration::seconds(100)).fixed_offset();
 
     // Entry 1: create the DID
@@ -47,8 +47,12 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
     let key2 = generate_signing_key();
 
     let params1 = Parameters {
-        update_keys: Some(Arc::new(vec![key1.get_public_keymultibase().unwrap()])),
-        next_key_hashes: Some(Arc::new(vec![key2.get_public_keymultibase_hash().unwrap()])),
+        update_keys: Some(Arc::new(vec![Multibase::new(
+            key1.get_public_keymultibase().unwrap(),
+        )])),
+        next_key_hashes: Some(Arc::new(vec![Multibase::new(
+            key2.get_public_keymultibase_hash().unwrap(),
+        )])),
         portable: Some(false),
         ..Default::default()
     };
@@ -57,10 +61,11 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
     let mut state = DIDWebVHState::default();
     state
         .create_log_entry(Some(base_time), &doc, &params1, &key1)
+        .await
         .expect("Failed to create entry 1");
 
     // Get the actual DID (with resolved SCID)
-    let actual_doc = state.log_entries.last().unwrap().get_state().clone();
+    let actual_doc = state.log_entries().last().unwrap().get_state().clone();
     let did = actual_doc
         .get("id")
         .and_then(|v| v.as_str())
@@ -70,8 +75,12 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
     // Entry 2: normal update (rotate keys)
     let key3 = generate_signing_key();
     let params2 = Parameters {
-        update_keys: Some(Arc::new(vec![key2.get_public_keymultibase().unwrap()])),
-        next_key_hashes: Some(Arc::new(vec![key3.get_public_keymultibase_hash().unwrap()])),
+        update_keys: Some(Arc::new(vec![Multibase::new(
+            key2.get_public_keymultibase().unwrap(),
+        )])),
+        next_key_hashes: Some(Arc::new(vec![Multibase::new(
+            key3.get_public_keymultibase_hash().unwrap(),
+        )])),
         ..Default::default()
     };
     state
@@ -81,11 +90,14 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
             &params2,
             &key2,
         )
+        .await
         .expect("Failed to create entry 2");
 
     // Entry 3: another normal update (disable pre-rotation)
     let params3 = Parameters {
-        update_keys: Some(Arc::new(vec![key3.get_public_keymultibase().unwrap()])),
+        update_keys: Some(Arc::new(vec![Multibase::new(
+            key3.get_public_keymultibase().unwrap(),
+        )])),
         next_key_hashes: Some(Arc::new(vec![])),
         ..Default::default()
     };
@@ -96,6 +108,7 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
             &params3,
             &key3,
         )
+        .await
         .expect("Failed to create entry 3");
 
     // Entry 4: deactivation (signed with key3, the current update key)
@@ -111,6 +124,7 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
             &params4,
             &key3,
         )
+        .await
         .expect("Failed to create entry 4 (deactivation)");
 
     (state, did)
@@ -118,7 +132,7 @@ fn build_revoked_did() -> (DIDWebVHState, String) {
 
 /// Save log entries to a test file
 fn save_to_file(state: &DIDWebVHState, path: &str) {
-    for entry in &state.log_entries {
+    for entry in state.log_entries() {
         entry
             .log_entry
             .save_to_file(path)
@@ -129,7 +143,7 @@ fn save_to_file(state: &DIDWebVHState, path: &str) {
 #[tokio::test]
 async fn test_revoked_did() {
     let path = "tests/test_vectors/revoked-did-test1.jsonl";
-    let (state, did) = build_revoked_did();
+    let (state, did) = build_revoked_did().await;
     save_to_file(&state, path);
 
     let mut resolver = DIDWebVHState::default();
@@ -147,12 +161,12 @@ async fn test_revoked_did() {
 #[tokio::test]
 async fn test_revoked_status_earlier_version() {
     let path = "tests/test_vectors/revoked-did-test2.jsonl";
-    let (state, did) = build_revoked_did();
+    let (state, did) = build_revoked_did().await;
     save_to_file(&state, path);
 
     // Query version 2 — even though it wasn't itself deactivated,
     // the DID-level deactivation should still be reported
-    let version_2_id = state.log_entries[1].get_version_id();
+    let version_2_id = state.log_entries()[1].get_version_id();
     let did_with_version = format!("{did}?versionId={version_2_id}");
 
     let mut resolver = DIDWebVHState::default();

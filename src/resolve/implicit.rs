@@ -1,6 +1,15 @@
+//! Implicit service injection for WebVH DID Documents.
+//!
+//! The WebVH specification requires two implicit services on every resolved
+//! DID Document:
+//! - **`#files`** — a `relativeRef` service pointing to the DID's base HTTP URL
+//! - **`#whois`** — a `LinkedVerifiablePresentation` service pointing to `whois.vp`
+//!
+//! This module checks a resolved DID Document and appends any missing implicit
+//! services. Existing services with matching `#files` or `#whois` fragment IDs
+//! are preserved (not duplicated).
+
 use crate::{DIDWebVHError, ensure_object_mut, url::WebVHURL};
-/// The WebVH DID Specification implies specific services for DID Documents
-/// This checks a resolved DID Document and adds implied services as needed
 use serde_json::{Value, json};
 
 // Checks and adds implicit services if not present (#files and #whois)

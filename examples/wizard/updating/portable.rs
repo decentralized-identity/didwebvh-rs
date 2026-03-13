@@ -14,8 +14,8 @@ use serde_json::Value;
 use url::Url;
 
 /// Revokes a webvh DID method
-pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Result<bool> {
-    let Some(log_entry) = didwebvh.log_entries.last() else {
+pub async fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Result<bool> {
+    let Some(log_entry) = didwebvh.log_entries().last() else {
         bail!("There must at least be a first LogEntry for this DID to migrate it");
     };
 
@@ -106,7 +106,8 @@ pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Re
     let mut new_params = Parameters::default();
     update_authorization_keys(&log_entry.validated_parameters, &mut new_params, secrets)?;
 
-    let Some(signing_key) = secrets.find_secret_by_public_key(&new_params.active_update_keys[0])
+    let Some(signing_key) =
+        secrets.find_secret_by_public_key(new_params.active_update_keys[0].as_str())
     else {
         bail!(
             "No signing key found for active update key: {}",
@@ -116,6 +117,7 @@ pub fn migrate_did(didwebvh: &mut DIDWebVHState, secrets: &mut ConfigInfo) -> Re
 
     didwebvh
         .create_log_entry(None, &new_did_doc, &new_params, signing_key)
+        .await
         .map_err(|e| anyhow!("Couldn't create LogEntry: {}", e))?;
 
     Ok(true)

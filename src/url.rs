@@ -6,6 +6,7 @@ use url::Url;
 
 type QueryPairs = (Option<String>, Option<DateTime<FixedOffset>>, Option<u32>);
 
+/// Distinguishes the type of resource a WebVH URL points to.
 #[derive(Clone, Debug, PartialEq)]
 pub enum URLType {
     /// Regular DID Documentation lookup

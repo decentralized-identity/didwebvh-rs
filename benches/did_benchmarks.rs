@@ -1,7 +1,7 @@
 use affinidi_secrets_resolver::secrets::Secret;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use didwebvh_rs::{
-    DIDWebVHState,
+    DIDWebVHState, Multibase,
     create::{CreateDIDConfig, create_did},
     parameters::Parameters,
 };
@@ -24,8 +24,16 @@ fn did_document_template() -> Value {
     })
 }
 
+/// Generate a Secret with a proper `did:key:{mb}#{mb}` ID format.
+fn generate_signing_key() -> Secret {
+    let mut key = Secret::generate_ed25519(None, None);
+    let pk = key.get_public_keymultibase().unwrap();
+    key.id = format!("did:key:{pk}#{pk}");
+    key
+}
+
 fn setup_basic_creation() -> CreateDIDConfig {
-    let key = Secret::generate_ed25519(None, None);
+    let key = generate_signing_key();
     let pub_mb = key.get_public_keymultibase().unwrap();
 
     let mut doc = did_document_template();
@@ -37,7 +45,7 @@ fn setup_basic_creation() -> CreateDIDConfig {
     }
 
     let parameters = Parameters {
-        update_keys: Some(Arc::new(vec![pub_mb])),
+        update_keys: Some(Arc::new(vec![Multibase::new(pub_mb)])),
         portable: Some(true),
         ..Default::default()
     };
@@ -52,7 +60,7 @@ fn setup_basic_creation() -> CreateDIDConfig {
 }
 
 fn setup_creation_with_aliases() -> CreateDIDConfig {
-    let key = Secret::generate_ed25519(None, None);
+    let key = generate_signing_key();
     let pub_mb = key.get_public_keymultibase().unwrap();
 
     let mut doc = did_document_template();
@@ -63,7 +71,7 @@ fn setup_creation_with_aliases() -> CreateDIDConfig {
     }
 
     let parameters = Parameters {
-        update_keys: Some(Arc::new(vec![pub_mb])),
+        update_keys: Some(Arc::new(vec![Multibase::new(pub_mb)])),
         portable: Some(true),
         ..Default::default()
     };
@@ -80,12 +88,13 @@ fn setup_creation_with_aliases() -> CreateDIDConfig {
 }
 
 fn bench_did_creation(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("did_creation");
 
     group.bench_function("basic", |b| {
         b.iter_batched(
             setup_basic_creation,
-            |config| create_did(config).unwrap(),
+            |config| rt.block_on(create_did(config)).unwrap(),
             BatchSize::SmallInput,
         );
     });
@@ -93,7 +102,7 @@ fn bench_did_creation(c: &mut Criterion) {
     group.bench_function("with_aliases", |b| {
         b.iter_batched(
             setup_creation_with_aliases,
-            |config| create_did(config).unwrap(),
+            |config| rt.block_on(create_did(config)).unwrap(),
             BatchSize::SmallInput,
         );
     });

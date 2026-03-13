@@ -3,15 +3,16 @@ use didwebvh_rs::prelude::*;
 use serde_json::json;
 use std::sync::Arc;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Generate or load a signing key
     let signing_key = Secret::generate_ed25519(None, None);
 
     // Build parameters with the signing key as an update key
     let parameters = Parameters {
-        update_keys: Some(Arc::new(vec![
+        update_keys: Some(Arc::new(vec![Multibase::new(
             signing_key.get_public_keymultibase().unwrap(),
-        ])),
+        )])),
         portable: Some(true),
         ..Default::default()
     };
@@ -42,14 +43,14 @@ fn main() {
         .build()
         .unwrap();
 
-    let result = create_did(config).unwrap();
+    let result = create_did(config).await.unwrap();
 
-    // result.did        — the resolved DID identifier (with SCID)
-    // result.log_entry  — the signed first log entry (serialize to JSON for did.jsonl)
-    // result.witness_proofs — witness proofs (empty if no witnesses configured)
-    println!("DID: {}", result.did);
+    // result.did()        — the resolved DID identifier (with SCID)
+    // result.log_entry()  — the signed first log entry (serialize to JSON for did.jsonl)
+    // result.witness_proofs() — witness proofs (empty if no witnesses configured)
+    println!("DID: {}", result.did());
     println!(
         "Log Entry: {}",
-        serde_json::to_string_pretty(&result.log_entry).unwrap()
+        serde_json::to_string_pretty(result.log_entry()).unwrap()
     );
 }

@@ -16,7 +16,7 @@ use anyhow::Result;
 use console::style;
 use dialoguer::{Confirm, Editor, Input, MultiSelect, Select, theme::ColorfulTheme};
 use didwebvh_rs::{
-    DIDWebVHError, DIDWebVHState,
+    DIDWebVHError, DIDWebVHState, Multibase,
     parameters::Parameters,
     url::WebVHURL,
     witness::{Witness, Witnesses, proofs::WitnessProofCollection},
@@ -327,12 +327,14 @@ async fn create_new_did() -> Result<()> {
     // Step 7: Create preliminary JSON Log Entry
     // ************************************************************************
 
-    let log_entry = didwebvh.create_log_entry(
-        None, // No version time, defaults to now
-        &did_document,
-        &parameters,
-        authorizing_keys.first().unwrap(),
-    )?;
+    let log_entry = didwebvh
+        .create_log_entry(
+            None, // No version time, defaults to now
+            &did_document,
+            &parameters,
+            authorizing_keys.first().unwrap(),
+        )
+        .await?;
 
     println!(
         "{}\n{}",
@@ -361,7 +363,8 @@ async fn create_new_did() -> Result<()> {
         log_entry,
         &log_entry.get_active_witnesses(),
         &authorization_secrets,
-    )?;
+    )
+    .await?;
 
     if Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt("Save to file?")
@@ -1020,7 +1023,7 @@ fn configure_parameters(
     // Update Keys
     let mut update_keys = Vec::new();
     for key in authorizing_keys {
-        update_keys.push(key.get_public_keymultibase()?);
+        update_keys.push(Multibase::new(key.get_public_keymultibase()?));
     }
     parameters.update_keys = Some(Arc::new(update_keys));
 
@@ -1088,7 +1091,7 @@ fn configure_parameters(
 
 /// Creates nextKeyHashes for the DID Document
 /// Returns Secrets and the hashes
-fn create_next_key_hashes(existing_secrets: &mut ConfigInfo) -> Result<Vec<String>> {
+fn create_next_key_hashes(existing_secrets: &mut ConfigInfo) -> Result<Vec<Multibase>> {
     println!(
         "{}{}{}{}",
         style("NOTE: ").bold().color256(214),
@@ -1096,7 +1099,7 @@ fn create_next_key_hashes(existing_secrets: &mut ConfigInfo) -> Result<Vec<Strin
         style(" <no> ").color256(214),
         style("to stop generating key hashes").color256(69)
     );
-    let mut next_key_hashes: Vec<String> = Vec::new();
+    let mut next_key_hashes: Vec<Multibase> = Vec::new();
     loop {
         if Confirm::with_theme(&ColorfulTheme::default())
             .with_prompt(format!(
@@ -1117,7 +1120,7 @@ fn create_next_key_hashes(existing_secrets: &mut ConfigInfo) -> Result<Vec<Strin
                 style("key hash:").color256(69),
                 style(&key.get_public_keymultibase_hash()?).color256(214)
             );
-            next_key_hashes.push(key.get_public_keymultibase_hash()?);
+            next_key_hashes.push(Multibase::new(key.get_public_keymultibase_hash()?));
             existing_secrets.add_key(&key);
         } else {
             break;
@@ -1178,7 +1181,9 @@ fn manage_witnesses(parameters: &mut Parameters, secrets: &mut ConfigInfo) -> Re
                 style("privateKeyMultibase:").color256(69),
                 style(&key.get_private_keymultibase()?).color256(214)
             );
-            witness_nodes.push(Witness { id: did.clone() });
+            witness_nodes.push(Witness {
+                id: Multibase::new(did.clone()),
+            });
             secrets.witnesses.insert(did, key);
         }
     } else {
@@ -1188,7 +1193,9 @@ fn manage_witnesses(parameters: &mut Parameters, secrets: &mut ConfigInfo) -> Re
                 .interact()
                 .unwrap();
 
-            witness_nodes.push(Witness { id: did });
+            witness_nodes.push(Witness {
+                id: Multibase::new(did),
+            });
 
             if !Confirm::with_theme(&ColorfulTheme::default())
                 .with_prompt(format!(

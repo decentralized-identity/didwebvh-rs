@@ -26,22 +26,33 @@ pub mod spec_1_0;
 pub mod spec_1_0_pre;
 
 /// Resolved Document MetaData
-/// Returned as reolved Document MetaData on a successful resolve
+/// Returned as resolved Document MetaData on a successful resolve
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MetaData {
+    /// The `<version_number>-<hash>` identifier for this log entry.
     pub version_id: String,
+    /// RFC 3339 timestamp when this version was created.
     pub version_time: String,
+    /// RFC 3339 timestamp when the DID was first created.
     pub created: String,
+    /// RFC 3339 timestamp of the most recent update.
     pub updated: String,
+    /// Self-Certifying Identifier (SCID) for the DID.
     pub scid: String,
+    /// Whether the DID is portable (can change its web address).
     pub portable: bool,
+    /// Whether the DID has been deactivated.
     pub deactivated: bool,
+    /// Active witness configuration, if any.
     pub witness: Option<Witnesses>,
+    /// Watcher endpoints configured for this DID.
     pub watchers: Option<Vec<String>>,
 }
 
+/// Extracts raw public key bytes from a data integrity proof.
 pub trait PublicKey {
+    /// Decode the verification method into raw public key bytes.
     fn get_public_key_bytes(&self) -> Result<Vec<u8>, DIDWebVHError>;
 }
 
@@ -66,16 +77,17 @@ impl PublicKey for DataIntegrityProof {
 /// Each version of the DID gets a new log entry
 /// [Log Entries](https://identity.foundation/didwebvh/v1.0/#the-did-log-file)
 #[non_exhaustive]
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum LogEntry {
     /// Official v1.0 specification
     Spec1_0(LogEntry1_0),
 
-    /// Interim 1.0 spec where nulls were used instyead of empty arrays and objects
+    /// Interim 1.0 spec where nulls were used instead of empty arrays and objects
     Spec1_0Pre(LogEntry1_0Pre),
 }
 
+/// Common accessors shared by all log entry versions.
 pub trait LogEntryMethods {
     /// LogEntry Parameters versionTime
     fn get_version_time_string(&self) -> String;
@@ -83,25 +95,26 @@ pub trait LogEntryMethods {
     /// LogEntry Parameters versionTime
     fn get_version_time(&self) -> DateTime<FixedOffset>;
 
-    /// Set the versionId to an updated value
-    fn get_version_id(&self) -> String;
+    /// Returns the versionId for this log entry.
+    fn get_version_id(&self) -> &str;
 
-    /// Set the versionId to an updated value
+    /// Set the versionId to an updated value.
     fn set_version_id(&mut self, version_id: &str);
 
     /// Get Parameters
     fn get_parameters(&self) -> Parameters;
 
-    /// Add a proof for this LogeEntry
+    /// Add a proof for this log entry.
     fn add_proof(&mut self, proof: DataIntegrityProof);
 
-    /// Get proofs
-    fn get_proofs(&self) -> &Vec<DataIntegrityProof>;
+    /// Get proofs for this log entry.
+    fn get_proofs(&self) -> &[DataIntegrityProof];
 
     /// Resets all proofs for this LogEntry
     fn clear_proofs(&mut self);
 
-    fn get_scid(&self) -> Option<String>;
+    /// Returns the SCID if present in this log entry's parameters.
+    fn get_scid(&self) -> Option<&str>;
 
     /// Get the raw DID Document state
     /// Does NOT include implied services
@@ -171,6 +184,7 @@ macro_rules! impl_log_entry_common {
                 Ok(base58::ToBase58::to_base58(hash_encoded.to_bytes().as_slice()))
             }
 
+            /// Verifies a witness data integrity proof against this log entry's versionId.
             pub fn validate_witness_proof(
                 &self,
                 witness_proof: &affinidi_data_integrity::DataIntegrityProof,
@@ -213,8 +227,8 @@ macro_rules! impl_log_entry_common {
                 self.version_time
             }
 
-            fn get_version_id(&self) -> String {
-                self.version_id.clone()
+            fn get_version_id(&self) -> &str {
+                &self.version_id
             }
 
             fn set_version_id(&mut self, version_id: &str) {
@@ -229,7 +243,7 @@ macro_rules! impl_log_entry_common {
                 self.proof.push(proof);
             }
 
-            fn get_proofs(&self) -> &Vec<affinidi_data_integrity::DataIntegrityProof> {
+            fn get_proofs(&self) -> &[affinidi_data_integrity::DataIntegrityProof] {
                 &self.proof
             }
 
@@ -237,8 +251,8 @@ macro_rules! impl_log_entry_common {
                 self.proof.clear();
             }
 
-            fn get_scid(&self) -> Option<String> {
-                self.parameters.scid.clone().map(|scid| scid.to_string())
+            fn get_scid(&self) -> Option<&str> {
+                self.parameters.scid.as_deref().map(String::as_str)
             }
 
             fn get_state(&self) -> &serde_json::Value {
@@ -269,7 +283,7 @@ pub(crate) use impl_log_entry_common;
 
 impl LogEntry {
     /// Reading in a LogEntry and converting it requires custom logic.
-    /// [deserialize_string] handles detecting the version and deserializing the LogEntry correctly
+    /// `deserialize_string` handles detecting the version and deserializing the LogEntry correctly
     /// Attributes:
     /// - input: The input string to deserialize
     /// - version: If you want to override the default latest version, specify the previous
@@ -460,7 +474,7 @@ impl LogEntry {
     ) -> Result<bool, DIDWebVHError> {
         // Verify the Data Integrity Proof against the Signing Document
         verify_data_with_public_key(
-            &json!({"versionId": &self.get_version_id()}),
+            &json!({"versionId": self.get_version_id()}),
             None,
             witness_proof,
             witness_proof.get_public_key_bytes()?.as_slice(),
@@ -510,7 +524,7 @@ impl LogEntryMethods for LogEntry {
         }
     }
 
-    fn get_version_id(&self) -> String {
+    fn get_version_id(&self) -> &str {
         match self {
             LogEntry::Spec1_0(log_entry) => log_entry.get_version_id(),
             LogEntry::Spec1_0Pre(log_entry) => log_entry.get_version_id(),
@@ -542,7 +556,7 @@ impl LogEntryMethods for LogEntry {
         }
     }
 
-    fn get_proofs(&self) -> &Vec<DataIntegrityProof> {
+    fn get_proofs(&self) -> &[DataIntegrityProof] {
         match self {
             LogEntry::Spec1_0(log_entry) => log_entry.get_proofs(),
             LogEntry::Spec1_0Pre(log_entry) => log_entry.get_proofs(),
@@ -556,7 +570,7 @@ impl LogEntryMethods for LogEntry {
         }
     }
 
-    fn get_scid(&self) -> Option<String> {
+    fn get_scid(&self) -> Option<&str> {
         match self {
             LogEntry::Spec1_0(log_entry) => log_entry.get_scid(),
             LogEntry::Spec1_0Pre(log_entry) => log_entry.get_scid(),

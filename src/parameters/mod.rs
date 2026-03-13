@@ -7,7 +7,9 @@
 //! - ParameterSpec: ENUM representing different versions of the WebVH DID Specification
 //! - CommonParameterSpec: A generic common representation of the latest Parameter specification
 
-use crate::{DIDWebVHError, Version, parameters::spec_1_0::Parameters1_0, witness::Witnesses};
+use crate::{
+    DIDWebVHError, Multibase, Version, parameters::spec_1_0::Parameters1_0, witness::Witnesses,
+};
 use affinidi_secrets_resolver::secrets::Secret;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -17,7 +19,7 @@ pub(crate) mod spec_1_0;
 pub(crate) mod spec_1_0_pre;
 
 /// Parameters for WebVH DIDs
-#[derive(Clone, Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Parameters {
     /// SCID (this is often automatically generated))
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -26,13 +28,15 @@ pub struct Parameters {
     /// DID version specification
     #[serde(
         skip_serializing_if = "Option::is_none",
-        serialize_with = "method_from_version"
+        serialize_with = "method_from_version",
+        deserialize_with = "version_from_method",
+        default
     )]
     pub method: Option<Version>,
 
     /// Keys that are authorized to update future log entries
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub update_keys: Option<Arc<Vec<String>>>,
+    pub update_keys: Option<Arc<Vec<Multibase>>>,
 
     /// Can you change the web address for this DID?
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -40,13 +44,13 @@ pub struct Parameters {
 
     /// pre-rotation keys that must be shared prior to updating update keys
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_key_hashes: Option<Arc<Vec<String>>>,
+    pub next_key_hashes: Option<Arc<Vec<Multibase>>>,
 
     /// Parameters for witness nodes
     /// NOTE: This represents the Witness Configuraiton, which may not be the active witnesses
     /// for the LogEntry
     ///
-    /// Use [LogEntryState::get_active_witnesses] to get the active witnesses for a logEntry
+    /// Use `LogEntryState::get_active_witnesses()` to get the active witnesses for a logEntry
     #[serde(skip_serializing_if = "Option::is_none")]
     pub witness: Option<Arc<Witnesses>>,
 
@@ -68,11 +72,11 @@ pub struct Parameters {
 
     /// The following are calculated and populated as part of the validation process:
 
-    /// active_update_keys: Vec<String>
+    /// Currently active update keys, populated during validation.
     #[serde(skip)]
-    pub active_update_keys: Arc<Vec<String>>,
+    pub active_update_keys: Arc<Vec<Multibase>>,
 
-    /// active_witness: Option<Arc<Mutex<Witnesses>>>
+    /// Currently active witness configuration, populated during validation.
     #[serde(skip)]
     pub active_witness: Option<Arc<Witnesses>>,
 }
@@ -85,6 +89,19 @@ where
         serializer.serialize_str(&data.to_string())
     } else {
         serializer.serialize_none()
+    }
+}
+
+fn version_from_method<'de, D>(deserializer: D) -> Result<Option<Version>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    match opt {
+        None => Ok(None),
+        Some(s) => Version::try_from(s.as_str())
+            .map(Some)
+            .map_err(serde::de::Error::custom),
     }
 }
 
@@ -126,8 +143,9 @@ impl Parameters {
         // Check if portable has been turned off (can never be turned on except on first log entry)
         if self.portable != old_params.portable {
             if self.portable == Some(true) {
-                return Err(DIDWebVHError::ParametersError(
-                    "Portable cannot be set to true after the first Log Entry".to_string(),
+                return Err(DIDWebVHError::parameter(
+                    "portable",
+                    "cannot be set to true after the first Log Entry",
                 ));
             }
             diff.portable = self.portable;
@@ -204,11 +222,11 @@ impl Parameters {
     /// None = Absent, use previous value
     /// Some(Empty) = Clear previous values and set to empty
     /// Some(Value) = Use new value
-    fn diff_tri_state(
-        previous: &Option<Arc<Vec<String>>>,
-        current: &Option<Arc<Vec<String>>>,
+    fn diff_tri_state<T: PartialEq + Clone>(
+        previous: &Option<Arc<Vec<T>>>,
+        current: &Option<Arc<Vec<T>>>,
         _attribute_name: &str,
-    ) -> Result<Option<Arc<Vec<String>>>, DIDWebVHError> {
+    ) -> Result<Option<Arc<Vec<T>>>, DIDWebVHError> {
         let Some(current_value) = current else {
             // If current is None, then keep previous value
             return Ok(None);
@@ -518,8 +536,8 @@ impl Parameters {
     /// nextKeyHashes
     /// Returns an error if validation fails
     fn validate_pre_rotation_keys(
-        next_key_hashes: &Option<Arc<Vec<String>>>,
-        update_keys: &Arc<Vec<String>>,
+        next_key_hashes: &Option<Arc<Vec<Multibase>>>,
+        update_keys: &Arc<Vec<Multibase>>,
     ) -> Result<(), DIDWebVHError> {
         let Some(next_key_hashes) = next_key_hashes else {
             return Err(DIDWebVHError::ValidationError(
@@ -528,12 +546,12 @@ impl Parameters {
         };
         for key in update_keys.iter() {
             // Convert the key to the hash value
-            let check_hash = Secret::base58_hash_string(key).map_err(|e| {
+            let check_hash = Secret::base58_hash_string(key.as_str()).map_err(|e| {
                 DIDWebVHError::ValidationError(format!(
                     "Couldn't hash updateKeys key ({key}). Reason: {e}",
                 ))
             })?;
-            if !next_key_hashes.contains(&check_hash) {
+            if !next_key_hashes.iter().any(|h| h.as_str() == check_hash) {
                 return Err(DIDWebVHError::ValidationError(format!(
                     "updateKey ({key}) hash({check_hash}) was not specified in the previous nextKeyHashes!",
                 )));
@@ -555,13 +573,13 @@ pub struct ParametersBuilder {
     pub(crate) method: Version,
 
     /// Keys that are authorized to update future log entries
-    pub(crate) update_keys: Option<Arc<Vec<String>>>,
+    pub(crate) update_keys: Option<Arc<Vec<Multibase>>>,
 
     /// Can you change the web address for this DID?
     pub(crate) portable: Option<bool>,
 
     /// pre-rotation keys that must be shared prior to updating update keys
-    pub(crate) next_key_hashes: Option<Arc<Vec<String>>>,
+    pub(crate) next_key_hashes: Option<Arc<Vec<Multibase>>>,
 
     /// Parameters for witness nodes
     pub(crate) witness: Option<Arc<Witnesses>>,
@@ -592,13 +610,17 @@ impl ParametersBuilder {
 
     /// Specify the valid updateKeys
     pub fn with_update_keys(&mut self, update_keys: Vec<String>) -> &mut Self {
-        self.update_keys = Some(Arc::new(update_keys));
+        self.update_keys = Some(Arc::new(
+            update_keys.into_iter().map(Multibase::new).collect(),
+        ));
         self
     }
 
     /// If pre-rotation is active, what the next set of key hashes for updateKeys
     pub fn with_next_key_hashes(&mut self, next_key_hashes: Vec<String>) -> &mut Self {
-        self.next_key_hashes = Some(Arc::new(next_key_hashes));
+        self.next_key_hashes = Some(Arc::new(
+            next_key_hashes.into_iter().map(Multibase::new).collect(),
+        ));
         self
     }
 
@@ -632,6 +654,7 @@ impl ParametersBuilder {
         self
     }
 
+    /// Consume the builder and produce a [`Parameters`] instance.
     pub fn build(&mut self) -> Parameters {
         Parameters {
             scid: None, // SCID is not set in the builder, it is set during validation
@@ -658,7 +681,7 @@ pub enum ParameterVersions {
     /// Official v1.0 specification
     Spec1_0(Parameters1_0),
 
-    /// Interim 1.0 spec where nulls were used instyead of empty arrays and objects
+    /// Interim 1.0 spec where nulls were used instead of empty arrays and objects
     Spec1_0Pre {},
 }
 
@@ -671,7 +694,7 @@ impl Default for ParameterVersions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SCID_HOLDER, Version, test_utils::TEST_UPDATE_KEY, witness::Witness};
+    use crate::{Multibase, SCID_HOLDER, Version, test_utils::TEST_UPDATE_KEY, witness::Witness};
     use std::sync::Arc;
 
     // ------------------------------------------------------------------------
@@ -686,7 +709,7 @@ mod tests {
     fn first_entry_params() -> Parameters {
         Parameters {
             scid: Some(Arc::new(SCID_HOLDER.to_string())),
-            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)])),
             ..Default::default()
         }
     }
@@ -708,7 +731,7 @@ mod tests {
     /// validated first entry.
     fn subsequent_entry_params() -> Parameters {
         Parameters {
-            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)])),
             ..Default::default()
         }
     }
@@ -728,7 +751,7 @@ mod tests {
     fn diff_no_changes() {
         let params = Parameters {
             method: Some(Version::V1_0),
-            update_keys: Some(Arc::new(vec!["key1".to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new("key1")])),
             portable: Some(false),
             ttl: Some(3600),
             ..Default::default()
@@ -806,16 +829,16 @@ mod tests {
     #[test]
     fn diff_update_keys_changed() {
         let old = Parameters {
-            update_keys: Some(Arc::new(vec!["old_key".to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new("old_key")])),
             ..Default::default()
         };
         let new = Parameters {
-            update_keys: Some(Arc::new(vec!["new_key".to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new("new_key")])),
             ..Default::default()
         };
         let diff = new.diff(&old).unwrap();
         assert!(diff.update_keys.is_some());
-        assert_eq!(diff.update_keys.unwrap()[0], "new_key");
+        assert_eq!(diff.update_keys.unwrap()[0], Multibase::new("new_key"));
     }
 
     /// Given pre-rotation is active and the new entry has empty updateKeys,
@@ -868,7 +891,7 @@ mod tests {
         };
         let new = Parameters {
             deactivated: Some(true),
-            update_keys: Some(Arc::new(vec!["key".to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new("key")])),
             ..Default::default()
         };
         let err = new.diff(&old).unwrap_err();
@@ -984,7 +1007,7 @@ mod tests {
     fn validate_first_entry_missing_scid_error() {
         let params = Parameters {
             scid: None,
-            update_keys: Some(Arc::new(vec!["key".to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new("key")])),
             ..Default::default()
         };
         let err = params.validate(None).unwrap_err();
@@ -1001,7 +1024,7 @@ mod tests {
         let previous = validated_first_params();
         let current = Parameters {
             scid: Some(Arc::new("extra-scid".to_string())),
-            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)])),
             ..Default::default()
         };
         let err = current.validate(Some(&previous)).unwrap_err();
@@ -1018,11 +1041,11 @@ mod tests {
     fn validate_next_key_hashes_absent_pre_rotation_active_error() {
         let mut previous = validated_first_params();
         previous.pre_rotation_active = true;
-        previous.next_key_hashes = Some(Arc::new(vec!["hash".to_string()]));
+        previous.next_key_hashes = Some(Arc::new(vec![Multibase::new("hash")]));
 
         let current = Parameters {
             next_key_hashes: None, // absent
-            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)])),
             ..Default::default()
         };
         let err = current.validate(Some(&previous)).unwrap_err();
@@ -1041,15 +1064,17 @@ mod tests {
         previous.pre_rotation_active = true;
         previous.next_key_hashes = Some(Arc::new(vec![
             // Hash of z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY
-            affinidi_secrets_resolver::secrets::Secret::base58_hash_string(
-                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY",
-            )
-            .unwrap(),
+            Multibase::new(
+                affinidi_secrets_resolver::secrets::Secret::base58_hash_string(
+                    "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY",
+                )
+                .unwrap(),
+            ),
         ]));
 
         let current = Parameters {
             next_key_hashes: Some(Arc::new(vec![])), // empty turns off
-            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)])),
             ..Default::default()
         };
         let result = current.validate(Some(&previous)).unwrap();
@@ -1066,8 +1091,8 @@ mod tests {
     fn validate_next_key_hashes_value_activates() {
         let params = Parameters {
             scid: Some(Arc::new(SCID_HOLDER.to_string())),
-            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
-            next_key_hashes: Some(Arc::new(vec!["somehash".to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)])),
+            next_key_hashes: Some(Arc::new(vec![Multibase::new("somehash")])),
             ..Default::default()
         };
         let result = params.validate(None).unwrap();
@@ -1118,7 +1143,7 @@ mod tests {
         let previous = validated_first_params();
         let current = Parameters {
             portable: Some(true),
-            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)])),
             ..Default::default()
         };
         let err = current.validate(Some(&previous)).unwrap_err();
@@ -1135,7 +1160,7 @@ mod tests {
         let previous = validated_first_params();
         let current = Parameters {
             portable: Some(false),
-            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)])),
             ..Default::default()
         };
         let result = current.validate(Some(&previous)).unwrap();
@@ -1151,7 +1176,7 @@ mod tests {
     fn validate_deactivated_first_entry_error() {
         let params = Parameters {
             scid: Some(Arc::new(SCID_HOLDER.to_string())),
-            update_keys: Some(Arc::new(vec!["key".to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new("key")])),
             deactivated: Some(true),
             ..Default::default()
         };
@@ -1172,7 +1197,7 @@ mod tests {
         let previous = validated_first_params();
         let current = Parameters {
             deactivated: Some(true),
-            update_keys: Some(Arc::new(vec!["non-empty".to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new("non-empty")])),
             ..Default::default()
         };
         let err = current.validate(Some(&previous)).unwrap_err();
@@ -1212,7 +1237,7 @@ mod tests {
 
         let current = Parameters {
             ttl: None,
-            update_keys: Some(Arc::new(vec![TEST_UPDATE_KEY.to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)])),
             ..Default::default()
         };
         let result = current.validate(Some(&previous)).unwrap();
@@ -1234,9 +1259,11 @@ mod tests {
     #[test]
     fn pre_rotation_keys_valid() {
         let key = "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY";
-        let hash = affinidi_secrets_resolver::secrets::Secret::base58_hash_string(key).unwrap();
+        let hash = Multibase::new(
+            affinidi_secrets_resolver::secrets::Secret::base58_hash_string(key).unwrap(),
+        );
         let hashes = Some(Arc::new(vec![hash]));
-        let keys = Arc::new(vec![key.to_string()]);
+        let keys = Arc::new(vec![Multibase::new(key)]);
         assert!(Parameters::validate_pre_rotation_keys(&hashes, &keys).is_ok());
     }
 
@@ -1248,7 +1275,7 @@ mod tests {
     /// must fail.
     #[test]
     fn pre_rotation_keys_missing_hashes_error() {
-        let keys = Arc::new(vec!["somekey".to_string()]);
+        let keys = Arc::new(vec![Multibase::new("somekey")]);
         let err = Parameters::validate_pre_rotation_keys(&None, &keys).unwrap_err();
         assert!(err.to_string().contains("nextKeyHashes must be defined"));
     }
@@ -1261,8 +1288,8 @@ mod tests {
     /// pre-rotation mechanism.
     #[test]
     fn pre_rotation_keys_not_in_hashes_error() {
-        let hashes = Some(Arc::new(vec!["wrong_hash".to_string()]));
-        let keys = Arc::new(vec![TEST_UPDATE_KEY.to_string()]);
+        let hashes = Some(Arc::new(vec![Multibase::new("wrong_hash")]));
+        let keys = Arc::new(vec![Multibase::new(TEST_UPDATE_KEY)]);
         let err = Parameters::validate_pre_rotation_keys(&hashes, &keys).unwrap_err();
         assert!(
             err.to_string()
@@ -1315,9 +1342,9 @@ mod tests {
             .build();
 
         assert_eq!(params.method, Some(Version::V1_0));
-        assert_eq!(params.update_keys.unwrap()[0], "key1");
+        assert_eq!(params.update_keys.unwrap()[0], Multibase::new("key1"));
         assert_eq!(params.portable, Some(true));
-        assert_eq!(params.next_key_hashes.unwrap()[0], "hash1");
+        assert_eq!(params.next_key_hashes.unwrap()[0], Multibase::new("hash1"));
         assert!(params.pre_rotation_active);
         assert_eq!(params.deactivated, Some(false));
         assert_eq!(params.ttl, Some(7200));
@@ -1334,7 +1361,7 @@ mod tests {
         let witnesses = Witnesses::Value {
             threshold: 1,
             witnesses: vec![Witness {
-                id: "witness1".to_string(),
+                id: Multibase::new("witness1"),
             }],
         };
         let params = Parameters::new().with_witnesses(witnesses.clone()).build();

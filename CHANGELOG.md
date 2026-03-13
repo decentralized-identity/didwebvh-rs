@@ -1,5 +1,77 @@
 # didwebvh-rs Changelog history
 
+## 14th March 2026
+
+### Release 0.3.0
+
+#### New
+
+- **Convenience API** — `DIDWebVHState` now provides `update_document()`,
+  `rotate_keys()`, and `deactivate()` methods for common DID lifecycle
+  operations without manually constructing parameter diffs.
+- **Feature flags** — `reqwest` is now optional behind the `network` feature
+  (default on). Consumers who only need local file validation can opt out
+  with `default-features = false`. TLS backend selection via `rustls` and
+  `native-tls` features.
+- **`WitnessesBuilder`** — Ergonomic builder for constructing witness
+  configurations with threshold validation:
+  `Witnesses::builder().threshold(2).witness(key).build()?`
+- **`{SCID}` placeholder validation** — `CreateDIDConfigBuilder::build()`
+  now validates that the DID document `id` field contains a `{SCID}` or
+  `{DID}` placeholder, with a clear error message if missing.
+- **Error context helpers** — `DIDWebVHError::validation()`,
+  `DIDWebVHError::parameter()`, and `DIDWebVHError::log_entry()` stamp
+  version/field context into error messages for easier debugging.
+- **`async_trait` re-export** — `async_trait` moved from dev-dependencies to
+  dependencies and re-exported from the crate root and `prelude`, so `Signer`
+  implementors don't need a separate dependency.
+- **Cache serialization** — `DIDWebVHState` now implements `Serialize` and
+  `Deserialize`, with `save_state(path)` and `load_state(path)` convenience
+  methods for offline caching. `LogEntryState`, `LogEntry`, `Parameters`, and
+  `Version` now also derive `Deserialize`.
+- **`resolve_owned()` / `resolve_file_owned()`** — Return owned (cloned)
+  `(LogEntry, MetaData)` so callers don't need to borrow `DIDWebVHState`.
+- **Property-based tests** — `proptest` added for Multibase serde round-trips
+  and WitnessesBuilder threshold validation.
+- **Lifecycle examples** — `examples/update_did.rs`, `examples/rotate_keys.rs`,
+  and `examples/deactivate_did.rs` demonstrate the convenience API.
+- **Pluggable signing via `Signer` trait** — all signing operations now go through
+  the `Signer` trait from `affinidi-data-integrity`. This means secret key material
+  no longer needs to be held in-process; you can delegate signing to an HSM, cloud
+  KMS (e.g. AWS KMS, Azure Key Vault, HashiCorp Vault), or any external signing
+  service by implementing the `Signer` trait.
+  - `CreateDIDConfig<A, W>` is now generic over authorization and witness signer
+    types, with defaults of `Secret` for full backward compatibility
+  - `create_did()`, `sign_witness_proofs()`, and `DIDWebVHState::create_log_entry()`
+    accept any `Signer` implementation
+  - `Signer` trait and `KeyType` re-exported from the crate root and `prelude`
+  - `CreateDIDConfig::builder_generic()` added for custom signer types;
+    `CreateDIDConfig::builder()` continues to work with `Secret` as before
+- **Structured `NetworkError`** — `DIDWebVHError::NetworkError` now carries
+  typed fields (`url`, `status_code`, `message`) instead of a plain `String`.
+  Consumers can programmatically distinguish HTTP errors (404, 500) from
+  transport failures (timeouts, connection refused) by inspecting `status_code`.
+- **Removed `regex` dependency** — DID string operations in `did_web.rs` now use
+  `str::split_once()`, `str::strip_prefix()`, and a custom `replace_webvh_prefix()`
+  function, eliminating the `regex` crate from the dependency tree.
+
+#### Maintenance
+
+- Dependencies updated: `affinidi-data-integrity` 0.4→0.5,
+  `affinidi-secrets-resolver` 0.5.0→0.5.2
+- Internal `ensure_did_key_id()` (which mutated `Secret` IDs) replaced with
+  `validate_did_key_vm()` (validation only, no mutation) — signers are now
+  required to provide a correctly formatted `did:key:` verification method
+- Added `wiremock` dev-dependency for network failure testing
+- Consolidated duplicate test helpers into shared `test_utils` module
+- Added comprehensive documentation for `resolve()`, `validate()`, implicit
+  services, and witness proof semantics
+- Added network failure tests (HTTP 404/500, timeout, connection refused,
+  malformed/empty responses)
+- Added file I/O error tests for log entry and witness proof loading/saving
+- Added unit tests for `LogEntryState` accessors
+- Test count: 383 tests (370 unit + 12 integration + 1 doc-test)
+
 ## 5th March 2026
 
 ### Release 0.2.0

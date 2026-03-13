@@ -11,6 +11,7 @@ use anyhow::{Result, bail};
 use console::style;
 use dialoguer::{Confirm, Input, MultiSelect, theme::ColorfulTheme};
 use didwebvh_rs::{
+    Multibase,
     parameters::Parameters,
     witness::{Witness, Witnesses},
 };
@@ -158,7 +159,9 @@ fn modify_witness_nodes(
                     style("privateKeyMultibase:").color256(69),
                     style(&key.get_private_keymultibase()?).color256(214)
                 );
-                new_witnesses.push(Witness { id: did.clone() });
+                new_witnesses.push(Witness {
+                    id: Multibase::new(did.clone()),
+                });
                 secrets.witnesses.insert(did, key);
             }
             break;
@@ -168,7 +171,9 @@ fn modify_witness_nodes(
                 .interact()
                 .unwrap();
 
-            new_witnesses.push(Witness { id: did });
+            new_witnesses.push(Witness {
+                id: Multibase::new(did),
+            });
 
             if !Confirm::with_theme(&ColorfulTheme::default())
                 .with_prompt(format!(

@@ -9,7 +9,7 @@
 */
 
 use chrono::{Duration, Utc};
-use tracing::{debug, warn};
+use tracing::{debug, error};
 
 use crate::{
     DIDWebVHError, DIDWebVHState,
@@ -17,8 +17,15 @@ use crate::{
 };
 
 impl DIDWebVHState {
-    /// Validate WebVH Data
-    /// Validation will stop at the last known good version
+    /// Validates all LogEntries and their witness proofs.
+    ///
+    /// Walks the log entry chain in order, verifying each entry's signature and
+    /// parameter transitions. If a later entry fails, validation falls back to the
+    /// last known good entry. After log entry validation, witness proofs are verified
+    /// against the configured threshold for each entry.
+    ///
+    /// Sets `self.validated = true` and computes `self.expires` on success.
+    /// Returns an error only if the *first* entry is invalid (no fallback possible).
     pub fn validate(&mut self) -> Result<(), DIDWebVHError> {
         // Validate each LogEntry
         let mut previous_entry: Option<&LogEntryState> = None;
@@ -27,18 +34,19 @@ impl DIDWebVHState {
             match entry.verify_log_entry(previous_entry) {
                 Ok(()) => (),
                 Err(e) => {
-                    warn!(
+                    error!(
                         "There was an issue with LogEntry: {}! Reason: {e}",
                         entry.get_version_id()
                     );
-                    warn!("Falling back to last known good LogEntry!");
+                    error!("Falling back to last known good LogEntry!");
                     if previous_entry.is_some() {
                         // Return last known good LogEntry
                         break;
                     }
-                    return Err(DIDWebVHError::ValidationError(format!(
-                        "No valid LogEntry found! Reason: {e}",
-                    )));
+                    return Err(DIDWebVHError::validation(
+                        format!("No valid LogEntry found! Reason: {e}"),
+                        entry.version_number,
+                    ));
                 }
             }
             // Check if this valid LogEntry has been deactivated, if so then ignore any other
@@ -119,7 +127,7 @@ impl DIDWebVHState {
 #[cfg(test)]
 mod tests {
     use crate::{
-        DIDWebVHState,
+        DIDWebVHState, Multibase,
         log_entry_state::{LogEntryState, LogEntryValidationStatus},
         parameters::Parameters,
         test_utils::{did_doc_with_key, generate_signing_key},
@@ -133,11 +141,13 @@ mod tests {
     /// An optional `ttl` parameter allows TTL-specific tests to reuse this helper
     /// instead of duplicating the setup. After creation, the validation status is
     /// reset to `NotValidated` so that `validate()` can be exercised from scratch.
-    fn create_single_entry_state(ttl: Option<u32>) -> DIDWebVHState {
+    async fn create_single_entry_state(ttl: Option<u32>) -> DIDWebVHState {
         let base_time = (Utc::now() - Duration::seconds(10)).fixed_offset();
         let key = generate_signing_key();
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             portable: Some(false),
             ttl,
             ..Default::default()
@@ -147,6 +157,7 @@ mod tests {
         let mut state = DIDWebVHState::default();
         state
             .create_log_entry(Some(base_time), &doc, &params, &key)
+            .await
             .expect("Failed to create first entry");
         // Reset validation status to NotValidated so validate() can run
         for entry in &mut state.log_entries {
@@ -161,9 +172,9 @@ mod tests {
     /// (Self-Certifying Identifier) should be populated. This is the baseline
     /// happy-path test -- if a single well-formed entry cannot be validated,
     /// no WebVH DID resolution can succeed.
-    #[test]
-    fn test_validate_single_valid_entry() {
-        let mut state = create_single_entry_state(None);
+    #[tokio::test]
+    async fn test_validate_single_valid_entry() {
+        let mut state = create_single_entry_state(None).await;
         state.validate().expect("Validation should pass");
         assert!(state.validated);
         assert!(!state.scid.is_empty());
@@ -176,12 +187,14 @@ mod tests {
     /// initial entry and the deactivation entry should be retained (2 entries total).
     /// This matters because a deactivated DID must not accept further updates, and
     /// resolvers need to know the DID is no longer active.
-    #[test]
-    fn test_validate_deactivated_stops_processing() {
+    #[tokio::test]
+    async fn test_validate_deactivated_stops_processing() {
         let base_time = (Utc::now() - Duration::seconds(100)).fixed_offset();
         let key = generate_signing_key();
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             portable: Some(false),
             ..Default::default()
         };
@@ -190,6 +203,7 @@ mod tests {
         let mut state = DIDWebVHState::default();
         state
             .create_log_entry(Some(base_time), &doc, &params, &key)
+            .await
             .unwrap();
 
         let actual_doc = state.log_entries.last().unwrap().get_state().clone();
@@ -207,6 +221,7 @@ mod tests {
                 &deact_params,
                 &key,
             )
+            .await
             .unwrap();
 
         // Reset validation status
@@ -252,8 +267,8 @@ mod tests {
 
     /// Validates TTL behavior by creating a state with the given TTL, validating it,
     /// and asserting the expiration is within the expected range.
-    fn assert_ttl_produces_expiry(ttl: Option<u32>, expected_seconds: i64) {
-        let mut state = create_single_entry_state(ttl);
+    async fn assert_ttl_produces_expiry(ttl: Option<u32>, expected_seconds: i64) {
+        let mut state = create_single_entry_state(ttl).await;
         state.validate().unwrap();
         let now = Utc::now().fixed_offset();
         let diff = state.expires - now;
@@ -269,9 +284,9 @@ mod tests {
     ///
     /// A sensible default TTL is important so that resolvers know how long they can
     /// cache a resolved DID document before re-fetching.
-    #[test]
-    fn test_validate_ttl_default() {
-        assert_ttl_produces_expiry(None, 3600);
+    #[tokio::test]
+    async fn test_validate_ttl_default() {
+        assert_ttl_produces_expiry(None, 3600).await;
     }
 
     /// Tests that a TTL value of zero is treated as the default TTL of 3600 seconds.
@@ -279,9 +294,9 @@ mod tests {
     /// A zero TTL would cause immediate expiration, which is not useful. The validator
     /// treats TTL=0 as "use default" to prevent accidental misconfiguration from making
     /// a DID effectively unresolvable due to instant cache expiry.
-    #[test]
-    fn test_validate_ttl_zero_defaults_to_3600() {
-        assert_ttl_produces_expiry(Some(0), 3600);
+    #[tokio::test]
+    async fn test_validate_ttl_zero_defaults_to_3600() {
+        assert_ttl_produces_expiry(Some(0), 3600).await;
     }
 
     /// Tests that a custom TTL value (7200 seconds / 2 hours) is honored by the validator.
@@ -289,9 +304,9 @@ mod tests {
     /// When the parameters specify a non-zero TTL, the validated state's expiration
     /// should reflect that exact duration. This ensures DID publishers can control how
     /// long resolvers cache their DID documents.
-    #[test]
-    fn test_validate_ttl_custom() {
-        assert_ttl_produces_expiry(Some(7200), 7200);
+    #[tokio::test]
+    async fn test_validate_ttl_custom() {
+        assert_ttl_produces_expiry(Some(7200), 7200).await;
     }
 
     /// Tests that validating a state with no log entries at all returns an error.

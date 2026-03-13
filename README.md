@@ -29,6 +29,15 @@ site
 - [x] URL validation rejects IP addresses per spec (domain names required)
 - [x] WASM friendly for inclusion in other projects
 - [x] WebVH DID Create routines to make it easier to create DIDs programmatically
+- [x] Pluggable signing via the `Signer` trait — use HSMs, KMS, or any external
+  signing service without exposing secret key material to the library
+- [x] Structured error types for programmatic error handling (e.g. `NetworkError`
+  exposes `url`, `status_code`, and `message` fields)
+- [x] Convenience API: `update_document()`, `rotate_keys()`, `deactivate()` on `DIDWebVHState`
+- [x] `WitnessesBuilder` for ergonomic witness configuration
+- [x] Cache serialization: `save_state()` / `load_state()` for offline caching
+- [x] `async_trait` re-exported so `Signer` implementors don't need a separate dependency
+- [x] Feature flags: `network` (default), `rustls`, `native-tls` for TLS backend selection
 
 ## Usage
 
@@ -36,7 +45,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.2.0"
+didwebvh-rs = "0.3.0"
 ```
 
 Then:
@@ -52,13 +61,72 @@ webvh.load_log_entries_from_file("did.jsonl")?;
 
 The `prelude` module re-exports the most commonly needed types:
 `DIDWebVHError`, `DIDWebVHState`, `LogEntryMethods`, `Parameters`,
-`CreateDIDConfig`, `create_did`, `Witnesses`, and `WitnessProofCollection`.
+`CreateDIDConfig`, `create_did`, `Witnesses`, `WitnessProofCollection`,
+`Signer`, `KeyType`, and `async_trait`.
 
 ## Feature Flags
 
-- **ssi**
-  - Enables integration with the [ssi](https://crates.io/crates/ssi) crate
-    - This is useful when integrating into universal resolvers
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `network` | **yes** | Enables HTTP(S) resolution via `reqwest`. Disable with `default-features = false` for local-only validation. |
+| `ssi` | no | Enables integration with the [ssi](https://crates.io/crates/ssi) crate (implies `network`). |
+| `rustls` | no | Use `rustls` TLS backend (implies `network`). |
+| `native-tls` | no | Use platform-native TLS backend (implies `network`). |
+
+To use the library without network support (e.g. for local file validation only):
+
+```toml
+[dependencies]
+didwebvh-rs = { version = "0.3.0", default-features = false }
+```
+
+## Convenience API
+
+`DIDWebVHState` provides high-level methods for common DID lifecycle operations:
+
+```rust
+// Update the DID document
+state.update_document(new_doc, &signing_key).await?;
+
+// Rotate update keys
+state.rotate_keys(vec![new_key], &signing_key).await?;
+
+// Deactivate the DID
+state.deactivate(&signing_key).await?;
+```
+
+See the `examples/update_did.rs`, `examples/rotate_keys.rs`, and
+`examples/deactivate_did.rs` examples for full usage.
+
+## WitnessesBuilder
+
+Build witness configurations ergonomically:
+
+```rust
+use didwebvh_rs::prelude::*;
+
+let witnesses = Witnesses::builder()
+    .threshold(2)
+    .witness(Multibase::new("z6Mk..."))
+    .witness(Multibase::new("z6Mk..."))
+    .build()?;
+```
+
+## Cache Serialization
+
+Save and load `DIDWebVHState` for offline caching:
+
+```rust
+// Save state to disk
+state.save_state("cache.json")?;
+
+// Load state from disk (re-validate before use)
+let state = DIDWebVHState::load_state("cache.json")?;
+```
+
+**Important:** Loaded state should be re-validated because computed fields
+(`active_update_keys`, `active_witness`) use `#[serde(skip)]` and will be
+at their defaults after deserialization.
 
 ## Everyone likes a wizard
 
@@ -144,11 +212,11 @@ cargo +nightly bench --bench did_benchmarks_nightly
 
 ### Benchmark Groups
 
-| Group | Benchmarks | Description |
-|-------|-----------|-------------|
-| `did_creation` | `basic`, `with_aliases` | DID creation with minimal config and with alsoKnownAs aliases |
-| `did_resolution` | `single_entry`, `large_with_witnesses_120_entries` | File-based DID resolution with 1 and 120+ log entries |
-| `validation` | `single_entry`, `large_with_witnesses_120_entries` | Log entry and witness proof validation |
+| Group            | Benchmarks                                         | Description                                                   |
+| ---------------- | -------------------------------------------------- | ------------------------------------------------------------- |
+| `did_creation`   | `basic`, `with_aliases`                            | DID creation with minimal config and with alsoKnownAs aliases |
+| `did_resolution` | `single_entry`, `large_with_witnesses_120_entries` | File-based DID resolution with 1 and 120+ log entries         |
+| `validation`     | `single_entry`, `large_with_witnesses_120_entries` | Log entry and witness proof validation                        |
 
 ## Creating a DID Programmatically
 
@@ -206,12 +274,62 @@ let result = create_did(config).unwrap();
 // result.witness_proofs — witness proofs (empty if no witnesses configured)
 ```
 
-### Witness Support
+### Bring Your Own Signer (HSM / KMS)
 
-If your DID uses witnesses, provide the witness secrets via the builder:
+The library does not require you to hold secret key material in memory. All
+signing operations go through the `Signer` trait, so you can delegate to an
+HSM, cloud KMS, or any other external signing service. The built-in `Secret`
+type implements `Signer` for local Ed25519 keys, but you can replace it with
+your own implementation:
 
 ```rust
-// For each witness, add its DID and secret
+use didwebvh_rs::prelude::*; // async_trait is re-exported here
+
+struct MyKmsSigner { /* your KMS client, key ID, etc. */ }
+
+#[async_trait]
+impl Signer for MyKmsSigner {
+    fn key_type(&self) -> KeyType {
+        KeyType::Ed25519
+    }
+
+    fn verification_method(&self) -> &str {
+        // Must be "did:key:{multibase}#{multibase}" format
+        "did:key:z6Mk...#z6Mk..."
+    }
+
+    async fn sign(&self, data: &[u8]) -> Result<Vec<u8>, affinidi_data_integrity::DataIntegrityError> {
+        // Call your KMS / HSM here — no private key bytes needed locally
+        todo!()
+    }
+}
+```
+
+Then use your custom signer with `CreateDIDConfig::builder_generic()`:
+
+```rust
+let kms_signer = MyKmsSigner { /* ... */ };
+
+let config = CreateDIDConfig::builder_generic()
+    .address("https://example.com/")
+    .authorization_key(kms_signer)
+    .did_document(did_document)
+    .parameters(parameters)
+    .build()
+    .unwrap();
+
+let result = create_did(config).await.unwrap();
+```
+
+The same applies to witness signing — `sign_witness_proofs()` accepts any
+`HashMap<String, W>` where `W: Signer`.
+
+### Witness Support
+
+If your DID uses witnesses, provide the witness signers via the builder:
+
+```rust
+// For each witness, add its DID and signer
 let config = CreateDIDConfig::builder()
     .address("https://example.com/")
     .authorization_key(signing_key)

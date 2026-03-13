@@ -75,7 +75,7 @@ pub async fn edit_did() -> Result<()> {
         }
     }
 
-    let last_entry_state = webvh_state.log_entries.last().ok_or_else(|| {
+    let last_entry_state = webvh_state.log_entries().last().ok_or_else(|| {
         DIDWebVHError::ParametersError("No log entries found in the file".to_string())
     })?;
     let metadata = webvh_state.generate_meta_data(last_entry_state);
@@ -116,16 +116,19 @@ pub async fn edit_did() -> Result<()> {
                 // Create a new LogEntry for a given DID
                 create_log_entry(&mut webvh_state, &mut config_info).await?;
 
-                let new_entry = webvh_state.log_entries.last().ok_or_else(|| {
+                let (log_entries, witness_proofs) =
+                    webvh_state.log_entries_and_witness_proofs_mut();
+                let new_entry = log_entries.last().ok_or_else(|| {
                     DIDWebVHError::LogEntryError("No new LogEntry created".to_string())
                 })?;
 
                 let new_proofs = witness_log_entry(
-                    &mut webvh_state.witness_proofs,
+                    witness_proofs,
                     new_entry,
                     &new_entry.get_active_witnesses(),
                     &config_info,
-                )?;
+                )
+                .await?;
 
                 // Save info to files
                 new_entry.log_entry.save_to_file(&file_path)?;
@@ -138,7 +141,7 @@ pub async fn edit_did() -> Result<()> {
                 );
                 if new_proofs.is_some() {
                     webvh_state
-                        .witness_proofs
+                        .witness_proofs()
                         .save_to_file(&[file_name_prefix, "-witness.json"].concat())?;
                 }
 
@@ -148,24 +151,28 @@ pub async fn edit_did() -> Result<()> {
                     .interact()
                     .unwrap()
                 {
-                    save_did_web(new_entry)?;
+                    let entry = webvh_state.log_entries().last().unwrap();
+                    save_did_web(entry)?;
                 }
 
                 break;
             }
             1 => {
                 // DID Portability
-                if migrate_did(&mut webvh_state, &mut config_info)? {
-                    let new_entry = webvh_state.log_entries.last().ok_or_else(|| {
+                if migrate_did(&mut webvh_state, &mut config_info).await? {
+                    let (log_entries, witness_proofs) =
+                        webvh_state.log_entries_and_witness_proofs_mut();
+                    let new_entry = log_entries.last().ok_or_else(|| {
                         DIDWebVHError::LogEntryError("No new LogEntry created".to_string())
                     })?;
 
                     let new_proofs = witness_log_entry(
-                        &mut webvh_state.witness_proofs,
+                        witness_proofs,
                         new_entry,
                         &new_entry.get_active_witnesses(),
                         &config_info,
-                    )?;
+                    )
+                    .await?;
 
                     // Save info to files
                     new_entry.log_entry.save_to_file(&file_path)?;
@@ -178,7 +185,7 @@ pub async fn edit_did() -> Result<()> {
                     );
                     if new_proofs.is_some() {
                         webvh_state
-                            .witness_proofs
+                            .witness_proofs()
                             .save_to_file(&[file_name_prefix, "-witness.json"].concat())?;
                     }
 
@@ -188,7 +195,8 @@ pub async fn edit_did() -> Result<()> {
                         .interact()
                         .unwrap()
                     {
-                        save_did_web(new_entry)?;
+                        let entry = webvh_state.log_entries().last().unwrap();
+                        save_did_web(entry)?;
                     }
                 }
 
@@ -221,7 +229,7 @@ async fn create_log_entry(
     );
 
     let previous_log_entry = didwebvh
-        .log_entries
+        .log_entries()
         .last()
         .ok_or_else(|| DIDWebVHError::LogEntryError("No log entries found".to_string()))?;
 
@@ -247,14 +255,16 @@ async fn create_log_entry(
     // Create a new LogEntry
     // ************************************************************************
     let Some(signing_key) =
-        config_info.find_secret_by_public_key(&new_params.active_update_keys[0])
+        config_info.find_secret_by_public_key(new_params.active_update_keys[0].as_str())
     else {
         bail!(
             "No signing key found for active update key: {}",
             new_params.active_update_keys[0]
         );
     };
-    let log_entry = didwebvh.create_log_entry(None, &new_state, &new_params, signing_key)?;
+    let log_entry = didwebvh
+        .create_log_entry(None, &new_state, &new_params, signing_key)
+        .await?;
 
     println!(
         "{}\n{}",
@@ -269,7 +279,7 @@ async fn create_log_entry(
     {
         Ok(())
     } else {
-        didwebvh.log_entries.pop(); // Remove the last entry
+        didwebvh.remove_last_log_entry(); // Remove the last entry
         println!("{}", style("Rejecting all changes!").color256(9));
         bail!("Changes Rejected")
     }

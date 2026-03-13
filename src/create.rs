@@ -5,7 +5,7 @@
 */
 
 use crate::{
-    DIDWebVHError, DIDWebVHState, ensure_object_mut,
+    DIDWebVHError, DIDWebVHState, Signer, ensure_object_mut,
     log_entry::{LogEntry, LogEntryMethods},
     log_entry_state::LogEntryState,
     parameters::Parameters,
@@ -19,18 +19,21 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use url::Url;
 
-/// Configuration for creating a new DID
-pub struct CreateDIDConfig {
-    /// Address: URL (e.g. "https://example.com/") or DID (e.g. "did:webvh:{SCID}:example.com")
+/// Configuration for creating a new DID.
+///
+/// Generic over `A` (authorization key signer) and `W` (witness signer).
+/// Both default to [`Secret`] for backward compatibility.
+pub struct CreateDIDConfig<A: Signer = Secret, W: Signer = Secret> {
+    /// Address: URL (e.g. `https://example.com/`) or DID (e.g. `did:webvh:{SCID}:example.com`)
     pub address: String,
-    /// At least one Secret for signing the log entry
-    pub authorization_keys: Vec<Secret>,
+    /// At least one signer for signing the log entry
+    pub authorization_keys: Vec<A>,
     /// The DID Document (JSON Value). Must contain `id` matching the DID.
     pub did_document: Value,
     /// Parameters (update_keys, portable, witnesses, watchers, ttl, etc.)
     pub parameters: Parameters,
-    /// Witness secrets keyed by witness DID — required if witnesses configured
-    pub witness_secrets: HashMap<String, Secret>,
+    /// Witness signers keyed by witness DID — required if witnesses configured
+    pub witness_secrets: HashMap<String, W>,
     /// Add did:web to alsoKnownAs
     pub also_known_as_web: bool,
     /// Add did:scid:vh to alsoKnownAs
@@ -52,17 +55,17 @@ pub struct CreateDIDConfig {
 ///     .also_known_as_web(true)
 ///     .build()?;
 /// ```
-pub struct CreateDIDConfigBuilder {
+pub struct CreateDIDConfigBuilder<A: Signer = Secret, W: Signer = Secret> {
     address: Option<String>,
-    authorization_keys: Vec<Secret>,
+    authorization_keys: Vec<A>,
     did_document: Option<Value>,
     parameters: Option<Parameters>,
-    witness_secrets: HashMap<String, Secret>,
+    witness_secrets: HashMap<String, W>,
     also_known_as_web: bool,
     also_known_as_scid: bool,
 }
 
-impl CreateDIDConfigBuilder {
+impl<A: Signer, W: Signer> CreateDIDConfigBuilder<A, W> {
     fn new() -> Self {
         Self {
             address: None,
@@ -82,13 +85,13 @@ impl CreateDIDConfigBuilder {
     }
 
     /// Add a single authorization key. At least one is required.
-    pub fn authorization_key(mut self, key: Secret) -> Self {
+    pub fn authorization_key(mut self, key: A) -> Self {
         self.authorization_keys.push(key);
         self
     }
 
     /// Set all authorization keys at once, replacing any previously added.
-    pub fn authorization_keys(mut self, keys: Vec<Secret>) -> Self {
+    pub fn authorization_keys(mut self, keys: Vec<A>) -> Self {
         self.authorization_keys = keys;
         self
     }
@@ -105,14 +108,14 @@ impl CreateDIDConfigBuilder {
         self
     }
 
-    /// Add a single witness secret keyed by witness DID.
-    pub fn witness_secret(mut self, did: impl Into<String>, secret: Secret) -> Self {
+    /// Add a single witness signer keyed by witness DID.
+    pub fn witness_secret(mut self, did: impl Into<String>, secret: W) -> Self {
         self.witness_secrets.insert(did.into(), secret);
         self
     }
 
-    /// Set all witness secrets at once, replacing any previously added.
-    pub fn witness_secrets(mut self, secrets: HashMap<String, Secret>) -> Self {
+    /// Set all witness signers at once, replacing any previously added.
+    pub fn witness_secrets(mut self, secrets: HashMap<String, W>) -> Self {
         self.witness_secrets = secrets;
         self
     }
@@ -130,7 +133,7 @@ impl CreateDIDConfigBuilder {
     }
 
     /// Build the [`CreateDIDConfig`], returning an error if required fields are missing.
-    pub fn build(self) -> Result<CreateDIDConfig, DIDWebVHError> {
+    pub fn build(self) -> Result<CreateDIDConfig<A, W>, DIDWebVHError> {
         let address = self
             .address
             .ok_or_else(|| DIDWebVHError::DIDError("address is required".to_string()))?;
@@ -146,6 +149,31 @@ impl CreateDIDConfigBuilder {
             .parameters
             .ok_or_else(|| DIDWebVHError::ParametersError("parameters is required".to_string()))?;
 
+        // Validate that the DID document has a top-level "id" field
+        match did_document.get("id") {
+            Some(Value::String(id)) => {
+                // For a new DID (no existing log), the document must contain {SCID} or {DID} placeholder
+                if !id.contains("{SCID}") && !id.contains("{DID}") {
+                    return Err(DIDWebVHError::DIDError(
+                        "DID document 'id' must contain a '{SCID}' or '{DID}' placeholder \
+                         (e.g. \"did:webvh:{SCID}:example.com\" or \"{DID}\"). \
+                         The placeholder is replaced with the actual identifier during creation."
+                            .to_string(),
+                    ));
+                }
+            }
+            Some(_) => {
+                return Err(DIDWebVHError::DIDError(
+                    "DID document 'id' field must be a string".to_string(),
+                ));
+            }
+            None => {
+                return Err(DIDWebVHError::DIDError(
+                    "DID document must have a top-level 'id' field".to_string(),
+                ));
+            }
+        }
+
         Ok(CreateDIDConfig {
             address,
             authorization_keys: self.authorization_keys,
@@ -159,31 +187,55 @@ impl CreateDIDConfigBuilder {
 }
 
 impl CreateDIDConfig {
-    /// Create a new builder for `CreateDIDConfig`.
+    /// Create a new builder for `CreateDIDConfig` using default signer types (`Secret`).
+    ///
+    /// For custom signer types, use [`Self::builder_generic()`].
     pub fn builder() -> CreateDIDConfigBuilder {
         CreateDIDConfigBuilder::new()
     }
 }
 
-/// Result of creating a new DID
-pub struct CreateDIDResult {
-    /// The resolved DID identifier (with SCID)
-    pub did: String,
-    /// The signed first log entry (serialize to JSON for did.jsonl)
-    pub log_entry: LogEntry,
-    /// Witness proofs (serialize to JSON for witness.json). Empty if no witnesses.
-    pub witness_proofs: WitnessProofCollection,
+impl<A: Signer, W: Signer> CreateDIDConfig<A, W> {
+    /// Create a new builder for `CreateDIDConfig` with custom signer types.
+    pub fn builder_generic() -> CreateDIDConfigBuilder<A, W> {
+        CreateDIDConfigBuilder::new()
+    }
 }
 
-/// Ensure a Secret has a proper `did:key:` ID for use in Data Integrity Proofs.
-/// If the id doesn't start with `did:key:`, it's replaced with the
-/// `did:key:{multibase}#{multibase}` format expected by verification.
-fn ensure_did_key_id(secret: &mut Secret) -> Result<(), DIDWebVHError> {
-    if !secret.id.starts_with("did:key:") {
-        let pub_mb = secret
-            .get_public_keymultibase()
-            .map_err(|e| DIDWebVHError::LogEntryError(format!("Invalid key: {e}")))?;
-        secret.id = format!("did:key:{pub_mb}#{pub_mb}");
+/// Result of creating a new DID
+#[derive(Clone, Debug)]
+pub struct CreateDIDResult {
+    /// The resolved DID identifier (with SCID)
+    pub(crate) did: String,
+    /// The signed first log entry (serialize to JSON for did.jsonl)
+    pub(crate) log_entry: LogEntry,
+    /// Witness proofs (serialize to JSON for witness.json). Empty if no witnesses.
+    pub(crate) witness_proofs: WitnessProofCollection,
+}
+
+impl CreateDIDResult {
+    /// Returns the resolved DID identifier (with SCID).
+    pub fn did(&self) -> &str {
+        &self.did
+    }
+
+    /// Returns a reference to the signed first log entry.
+    pub fn log_entry(&self) -> &LogEntry {
+        &self.log_entry
+    }
+
+    /// Returns a reference to the witness proof collection.
+    pub fn witness_proofs(&self) -> &WitnessProofCollection {
+        &self.witness_proofs
+    }
+}
+
+/// Validate that a signer's verification method is in the expected `did:key:{mb}#{mb}` format.
+fn validate_did_key_vm(vm: &str) -> Result<(), DIDWebVHError> {
+    if !vm.starts_with("did:key:") || !vm.contains('#') {
+        return Err(DIDWebVHError::LogEntryError(format!(
+            "Signer verification_method '{vm}' must be in 'did:key:{{mb}}#{{mb}}' format"
+        )));
     }
     Ok(())
 }
@@ -198,7 +250,9 @@ fn ensure_did_key_id(secret: &mut Secret) -> Result<(), DIDWebVHError> {
 /// 5. Signs witness proofs using provided witness secrets
 ///
 /// Returns the resolved DID, signed LogEntry, and WitnessProofCollection.
-pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWebVHError> {
+pub async fn create_did<A: Signer, W: Signer>(
+    mut config: CreateDIDConfig<A, W>,
+) -> Result<CreateDIDResult, DIDWebVHError> {
     // Parse the address
     let did_url = if config.address.starts_with("did:") {
         WebVHURL::parse_did_url(&config.address)?
@@ -223,9 +277,9 @@ pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWeb
 
     replace_did_placeholder(&mut config.did_document, &webvh_did);
 
-    // Ensure authorization keys have proper did:key IDs for Data Integrity Proofs
-    for key in &mut config.authorization_keys {
-        ensure_did_key_id(key)?;
+    // Validate authorization keys have proper did:key verification methods
+    for key in &config.authorization_keys {
+        validate_did_key_vm(key.verification_method())?;
     }
 
     // Create the log entry
@@ -234,12 +288,14 @@ pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWeb
         DIDWebVHError::LogEntryError("At least one authorization key is required".to_string())
     })?;
 
-    let log_entry_state = didwebvh.create_log_entry(
-        None, // No version time, defaults to now
-        &config.did_document,
-        &config.parameters,
-        signing_key,
-    )?;
+    let log_entry_state = didwebvh
+        .create_log_entry(
+            None, // No version time, defaults to now
+            &config.did_document,
+            &config.parameters,
+            signing_key,
+        )
+        .await?;
 
     // Validate the log entry
     log_entry_state.log_entry.verify_log_entry(None, None)?;
@@ -263,7 +319,8 @@ pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWeb
         log_entry_state,
         &active_witnesses,
         &config.witness_secrets,
-    )?;
+    )
+    .await?;
 
     Ok(CreateDIDResult {
         did: resolved_did,
@@ -281,7 +338,7 @@ pub fn create_did(mut config: CreateDIDConfig) -> Result<CreateDIDResult, DIDWeb
 /// # Arguments
 /// * `did_document` - A mutable reference to a serde_json::Value representing the DID document.
 /// * `did` - The DID string to substitute for the "{DID}" placeholder.
-fn replace_did_placeholder(did_document: &mut Value, did: &String) {
+fn replace_did_placeholder(did_document: &mut Value, did: &str) {
     match did_document {
         Value::Object(map) => {
             for value in map.values_mut() {
@@ -385,11 +442,11 @@ fn build_alias_list(also_known_as: &Value, new_alias: &str) -> Result<Vec<Value>
 /// secret in `witness_secrets` (keyed by witness DID) and signs a proof.
 ///
 /// Returns `Ok(true)` if witness proofs were signed, `Ok(false)` if no witnesses configured.
-pub fn sign_witness_proofs(
+pub async fn sign_witness_proofs<W: Signer>(
     witness_proofs: &mut WitnessProofCollection,
     log_entry: &LogEntryState,
     witnesses: &Option<Arc<Witnesses>>,
-    witness_secrets: &HashMap<String, Secret>,
+    witness_secrets: &HashMap<String, W>,
 ) -> Result<bool, DIDWebVHError> {
     let Some(witnesses) = witnesses else {
         return Ok(false);
@@ -408,25 +465,25 @@ pub fn sign_witness_proofs(
     };
 
     for witness in witness_nodes {
-        // Get secret for Witness
-        let Some(secret) = witness_secrets.get(&witness.id) else {
+        // Get signer for Witness
+        let Some(secret) = witness_secrets.get(witness.id.as_str()) else {
             return Err(DIDWebVHError::WitnessProofError(format!(
                 "Couldn't find secret for witness ({})",
                 witness.id
             )));
         };
 
-        // Ensure the witness secret has a proper did:key ID
-        let mut secret = secret.clone();
-        ensure_did_key_id(&mut secret)?;
+        // Validate the witness signer has a proper did:key verification method
+        validate_did_key_vm(secret.verification_method())?;
 
         // Generate Signature
         let proof = DataIntegrityProof::sign_jcs_data(
-            &json!({"versionId": &log_entry.get_version_id()}),
+            &json!({"versionId": log_entry.get_version_id()}),
             None,
-            &secret,
+            secret,
             None,
         )
+        .await
         .map_err(|e| {
             DIDWebVHError::SCIDError(format!(
                 "Couldn't generate Data Integrity Proof for LogEntry. Reason: {e}",
@@ -435,7 +492,7 @@ pub fn sign_witness_proofs(
 
         // Save proof to collection
         witness_proofs
-            .add_proof(&log_entry.get_version_id(), &proof, false)
+            .add_proof(log_entry.get_version_id(), &proof, false)
             .map_err(|e| DIDWebVHError::WitnessProofError(format!("Error adding proof: {e}")))?;
     }
 
@@ -448,48 +505,27 @@ pub fn sign_witness_proofs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DIDWebVHState, witness::Witness};
+    use crate::{DIDWebVHState, Multibase, witness::Witness};
     use affinidi_secrets_resolver::secrets::Secret;
     use serde_json::json;
     use std::sync::Arc;
 
-    /// Helper: generate a signing key and matching parameters with update_keys set.
-    fn key_and_params() -> (Secret, Parameters) {
-        let key = Secret::generate_ed25519(None, None);
-        let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
-            ..Default::default()
-        };
-        (key, params)
-    }
-
-    /// Helper: build a minimal DID document for the given DID string.
-    /// Uses the provided key's public key in the verification method so that
-    /// log entry signature validation succeeds.
-    fn did_doc_with_key(did: &str, key: &Secret) -> Value {
-        let pk = key.get_public_keymultibase().unwrap();
-        json!({
-            "id": did,
-            "@context": ["https://www.w3.org/ns/did/v1"],
-            "verificationMethod": [{
-                "id": format!("{did}#key-0"),
-                "type": "Multikey",
-                "publicKeyMultibase": pk,
-                "controller": did
-            }],
-            "authentication": [format!("{did}#key-0")],
-            "assertionMethod": [format!("{did}#key-0")],
-        })
-    }
+    use crate::test_utils::{did_doc_with_key, key_and_params};
 
     /// Helper: create a first log entry and its LogEntryState (for witness tests).
-    fn create_log_entry_state(key: &Secret, params: &Parameters) -> (DIDWebVHState, String) {
+    async fn create_log_entry_state(key: &Secret, params: &Parameters) -> (DIDWebVHState, String) {
         let mut state = DIDWebVHState::default();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", key);
         state
             .create_log_entry(None, &doc, params, key)
+            .await
             .expect("Failed to create log entry");
-        let version_id = state.log_entries.last().unwrap().get_version_id();
+        let version_id = state
+            .log_entries
+            .last()
+            .unwrap()
+            .get_version_id()
+            .to_string();
         (state, version_id)
     }
 
@@ -564,8 +600,8 @@ mod tests {
 
     #[test]
     fn builder_authorization_keys_replaces() {
-        let key1 = Secret::generate_ed25519(None, None);
-        let key2 = Secret::generate_ed25519(None, None);
+        let key1 = crate::test_utils::generate_signing_key();
+        let key2 = crate::test_utils::generate_signing_key();
         let (_, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key2);
 
@@ -585,7 +621,7 @@ mod tests {
     fn builder_witness_secrets() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
-        let witness_key = Secret::generate_ed25519(None, None);
+        let witness_key = crate::test_utils::generate_signing_key();
 
         let config = CreateDIDConfig::builder()
             .address("https://example.com/")
@@ -621,8 +657,8 @@ mod tests {
     // create_did tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn create_did_with_url_address() {
+    #[tokio::test]
+    async fn create_did_with_url_address() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -633,7 +669,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config);
+        let result = create_did(config).await;
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.did.starts_with("did:webvh:"));
@@ -641,8 +677,8 @@ mod tests {
         assert!(!result.did.contains("{SCID}"));
     }
 
-    #[test]
-    fn create_did_with_did_address() {
+    #[tokio::test]
+    async fn create_did_with_did_address() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -653,18 +689,18 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config);
+        let result = create_did(config).await;
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.did.starts_with("did:webvh:"));
         assert!(!result.did.contains("{SCID}"));
     }
 
-    #[test]
-    fn create_did_invalid_address() {
+    #[tokio::test]
+    async fn create_did_invalid_address() {
         let (key, _params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
-        let config = CreateDIDConfig {
+        let config: CreateDIDConfig = CreateDIDConfig {
             address: "not a valid url or did".to_string(),
             authorization_keys: vec![key],
             did_document: doc,
@@ -674,12 +710,12 @@ mod tests {
             also_known_as_scid: false,
         };
 
-        assert!(create_did(config).is_err());
+        assert!(create_did(config).await.is_err());
     }
 
-    #[test]
-    fn create_did_no_update_keys() {
-        let key = Secret::generate_ed25519(None, None);
+    #[tokio::test]
+    async fn create_did_no_update_keys() {
+        let key = crate::test_utils::generate_signing_key();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let params = Parameters::default(); // no update_keys
 
@@ -691,11 +727,11 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(create_did(config).is_err());
+        assert!(create_did(config).await.is_err());
     }
 
-    #[test]
-    fn create_did_with_also_known_as_web() {
+    #[tokio::test]
+    async fn create_did_with_also_known_as_web() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -707,7 +743,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let state = result.log_entry.get_state();
         let also_known_as = state.get("alsoKnownAs").unwrap().as_array().unwrap();
         assert!(
@@ -717,8 +753,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_did_with_also_known_as_scid() {
+    #[tokio::test]
+    async fn create_did_with_also_known_as_scid() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -730,7 +766,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let state = result.log_entry.get_state();
         let also_known_as = state.get("alsoKnownAs").unwrap().as_array().unwrap();
         assert!(
@@ -740,8 +776,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_did_with_both_aliases() {
+    #[tokio::test]
+    async fn create_did_with_both_aliases() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -754,7 +790,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let state = result.log_entry.get_state();
         let also_known_as = state.get("alsoKnownAs").unwrap().as_array().unwrap();
         let has_web = also_known_as
@@ -767,8 +803,8 @@ mod tests {
         assert!(has_scid);
     }
 
-    #[test]
-    fn create_did_no_witnesses_returns_empty_proofs() {
+    #[tokio::test]
+    async fn create_did_no_witnesses_returns_empty_proofs() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -779,24 +815,33 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert_eq!(result.witness_proofs.get_total_count(), 0);
     }
 
-    #[test]
-    fn create_did_with_witnesses() {
+    #[tokio::test]
+    async fn create_did_with_witnesses() {
         let (key, _) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
-        let witness1 = Secret::generate_ed25519(None, None);
-        let witness2 = Secret::generate_ed25519(None, None);
+        let witness1 = crate::test_utils::generate_signing_key();
+        let witness2 = crate::test_utils::generate_signing_key();
         let w1_id = witness1.get_public_keymultibase().unwrap();
         let w2_id = witness2.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id.clone() }, Witness { id: w2_id.clone() }],
+                witnesses: vec![
+                    Witness {
+                        id: Multibase::new(w1_id.clone()),
+                    },
+                    Witness {
+                        id: Multibase::new(w2_id.clone()),
+                    },
+                ],
             })),
             ..Default::default()
         };
@@ -811,22 +856,26 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert_eq!(result.witness_proofs.get_total_count(), 2);
     }
 
-    #[test]
-    fn create_did_witnesses_missing_secret() {
+    #[tokio::test]
+    async fn create_did_witnesses_missing_secret() {
         let (key, _) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
-        let witness1 = Secret::generate_ed25519(None, None);
+        let witness1 = crate::test_utils::generate_signing_key();
         let w1_id = witness1.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id }],
+                witnesses: vec![Witness {
+                    id: Multibase::new(w1_id),
+                }],
             })),
             ..Default::default()
         };
@@ -840,15 +889,17 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(create_did(config).is_err());
+        assert!(create_did(config).await.is_err());
     }
 
-    #[test]
-    fn create_did_portable() {
+    #[tokio::test]
+    async fn create_did_portable() {
         let (key, _) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             portable: Some(true),
             ..Default::default()
         };
@@ -861,12 +912,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert!(result.did.starts_with("did:webvh:"));
     }
 
-    #[test]
-    fn create_did_log_entry_serializable() {
+    #[tokio::test]
+    async fn create_did_log_entry_serializable() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -877,7 +928,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let json = serde_json::to_string(&result.log_entry);
         assert!(json.is_ok());
         assert!(!json.unwrap().is_empty());
@@ -1003,37 +1054,52 @@ mod tests {
     // sign_witness_proofs tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn sign_witness_proofs_no_witnesses() {
+    #[tokio::test]
+    async fn sign_witness_proofs_no_witnesses() {
         let (key, params) = key_and_params();
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let mut proofs = WitnessProofCollection::default();
-        let result = sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default());
+        let result = sign_witness_proofs(
+            &mut proofs,
+            log_entry,
+            &None,
+            &HashMap::<String, Secret>::default(),
+        )
+        .await;
         assert!(result.is_ok());
         assert!(!result.unwrap()); // false = no witnesses
         assert_eq!(proofs.get_total_count(), 0);
     }
 
-    #[test]
-    fn sign_witness_proofs_with_witnesses() {
+    #[tokio::test]
+    async fn sign_witness_proofs_with_witnesses() {
         let (key, _) = key_and_params();
-        let witness1 = Secret::generate_ed25519(None, None);
-        let witness2 = Secret::generate_ed25519(None, None);
+        let witness1 = crate::test_utils::generate_signing_key();
+        let witness2 = crate::test_utils::generate_signing_key();
         let w1_id = witness1.get_public_keymultibase().unwrap();
         let w2_id = witness2.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id.clone() }, Witness { id: w2_id.clone() }],
+                witnesses: vec![
+                    Witness {
+                        id: Multibase::new(w1_id.clone()),
+                    },
+                    Witness {
+                        id: Multibase::new(w2_id.clone()),
+                    },
+                ],
             })),
             ..Default::default()
         };
 
-        let (state, version_id) = create_log_entry_state(&key, &params);
+        let (state, version_id) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let mut secrets = HashMap::default();
@@ -1042,90 +1108,90 @@ mod tests {
 
         let witnesses = log_entry.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
-        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &secrets);
+        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &secrets).await;
         assert!(result.is_ok());
         assert!(result.unwrap()); // true = witnesses signed
         assert_eq!(proofs.get_proof_count(&version_id), 2);
     }
 
-    #[test]
-    fn sign_witness_proofs_missing_secret() {
+    #[tokio::test]
+    async fn sign_witness_proofs_missing_secret() {
         let (key, _) = key_and_params();
-        let witness1 = Secret::generate_ed25519(None, None);
+        let witness1 = crate::test_utils::generate_signing_key();
         let w1_id = witness1.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id }],
+                witnesses: vec![Witness {
+                    id: Multibase::new(w1_id),
+                }],
             })),
             ..Default::default()
         };
 
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let witnesses = log_entry.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
         // Empty secrets map — secret for witness not provided
-        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &HashMap::default());
+        let result = sign_witness_proofs(
+            &mut proofs,
+            log_entry,
+            &witnesses,
+            &HashMap::<String, Secret>::default(),
+        )
+        .await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn sign_witness_proofs_empty_witnesses_config() {
+    #[tokio::test]
+    async fn sign_witness_proofs_empty_witnesses_config() {
         let (key, params) = key_and_params();
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let witnesses = Some(Arc::new(Witnesses::Empty {}));
         let mut proofs = WitnessProofCollection::default();
-        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &HashMap::default());
+        let result = sign_witness_proofs(
+            &mut proofs,
+            log_entry,
+            &witnesses,
+            &HashMap::<String, Secret>::default(),
+        )
+        .await;
         assert!(result.is_err());
     }
 
     // -----------------------------------------------------------------------
-    // ensure_did_key_id tests
+    // validate_did_key_vm tests
     // -----------------------------------------------------------------------
 
     #[test]
-    fn ensure_did_key_id_normalizes_random_id() {
-        let mut key = Secret::generate_ed25519(None, None);
-        let pub_mb = key.get_public_keymultibase().unwrap();
-        // Default id is a random base64url value, not a did:key
-        assert!(!key.id.starts_with("did:key:"));
-
-        ensure_did_key_id(&mut key).unwrap();
-
-        assert_eq!(key.id, format!("did:key:{pub_mb}#{pub_mb}"));
+    fn validate_did_key_vm_accepts_valid() {
+        let vm = "did:key:z6MkTest#z6MkTest";
+        assert!(validate_did_key_vm(vm).is_ok());
     }
 
     #[test]
-    fn ensure_did_key_id_preserves_existing() {
-        let mut key = Secret::generate_ed25519(None, None);
-        let pub_mb = key.get_public_keymultibase().unwrap();
-        let did_key_id = format!("did:key:{pub_mb}#{pub_mb}");
-        key.id = did_key_id.clone();
-
-        ensure_did_key_id(&mut key).unwrap();
-
-        // Should be unchanged
-        assert_eq!(key.id, did_key_id);
+    fn validate_did_key_vm_rejects_missing_hash() {
+        let vm = "did:key:z6MkTest";
+        assert!(validate_did_key_vm(vm).is_err());
     }
 
     #[test]
-    fn ensure_did_key_id_explicit_kid() {
-        // Key created with an explicit kid that is already a did:key
-        let pub_mb_source = Secret::generate_ed25519(None, None);
-        let pub_mb = pub_mb_source.get_public_keymultibase().unwrap();
-        let kid = format!("did:key:{pub_mb}#{pub_mb}");
-        let mut key = Secret::generate_ed25519(Some(&kid), None);
+    fn validate_did_key_vm_rejects_wrong_prefix() {
+        let vm = "did:web:example.com#key-0";
+        assert!(validate_did_key_vm(vm).is_err());
+    }
 
-        assert_eq!(key.id, kid);
-        ensure_did_key_id(&mut key).unwrap();
-        // Still unchanged
-        assert_eq!(key.id, kid);
+    #[test]
+    fn validate_did_key_vm_rejects_empty() {
+        assert!(validate_did_key_vm("").is_err());
     }
 
     // -----------------------------------------------------------------------
@@ -1152,8 +1218,8 @@ mod tests {
 
     #[test]
     fn builder_multiple_authorization_keys_accumulate() {
-        let key1 = Secret::generate_ed25519(None, None);
-        let key2 = Secret::generate_ed25519(None, None);
+        let key1 = crate::test_utils::generate_signing_key();
+        let key2 = crate::test_utils::generate_signing_key();
         let (_, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key1);
 
@@ -1173,8 +1239,8 @@ mod tests {
     fn builder_witness_secrets_bulk_replaces() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
-        let w1 = Secret::generate_ed25519(None, None);
-        let w2 = Secret::generate_ed25519(None, None);
+        let w1 = crate::test_utils::generate_signing_key();
+        let w2 = crate::test_utils::generate_signing_key();
 
         let mut bulk = HashMap::default();
         bulk.insert("did:key:z6MkBulk".to_string(), w2);
@@ -1199,14 +1265,14 @@ mod tests {
     // Additional create_did tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn create_did_key_with_existing_did_key_id() {
-        let mut key = Secret::generate_ed25519(None, None);
+    #[tokio::test]
+    async fn create_did_key_with_existing_did_key_id() {
+        let mut key = crate::test_utils::generate_signing_key();
         let pub_mb = key.get_public_keymultibase().unwrap();
         key.id = format!("did:key:{pub_mb}#{pub_mb}");
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![pub_mb])),
+            update_keys: Some(Arc::new(vec![Multibase::new(pub_mb)])),
             ..Default::default()
         };
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
@@ -1219,12 +1285,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config);
+        let result = create_did(config).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn create_did_state_has_no_scid_placeholder() {
+    #[tokio::test]
+    async fn create_did_state_has_no_scid_placeholder() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -1235,7 +1301,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
 
         // Verify SCID placeholder is replaced everywhere
         let state_str = serde_json::to_string(result.log_entry.get_state()).unwrap();
@@ -1243,8 +1309,8 @@ mod tests {
         assert!(!result.did.contains("{SCID}"));
     }
 
-    #[test]
-    fn create_did_log_entry_has_proof() {
+    #[tokio::test]
+    async fn create_did_log_entry_has_proof() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -1255,12 +1321,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert!(!result.log_entry.get_proofs().is_empty());
     }
 
-    #[test]
-    fn create_did_version_id_starts_with_one() {
+    #[tokio::test]
+    async fn create_did_version_id_starts_with_one() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -1271,13 +1337,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let version_id = result.log_entry.get_version_id();
         assert!(version_id.starts_with("1-"));
     }
 
-    #[test]
-    fn create_did_with_url_path() {
+    #[tokio::test]
+    async fn create_did_with_url_path() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com:dids:alice", &key);
         let config = CreateDIDConfig::builder()
@@ -1288,13 +1354,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         assert!(result.did.starts_with("did:webvh:"));
         assert!(result.did.contains("example.com"));
     }
 
-    #[test]
-    fn create_did_result_did_matches_state_id() {
+    #[tokio::test]
+    async fn create_did_result_did_matches_state_id() {
         let (key, params) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let config = CreateDIDConfig::builder()
@@ -1305,7 +1371,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = create_did(config).unwrap();
+        let result = create_did(config).await.unwrap();
         let state_id = result
             .log_entry
             .get_state()
@@ -1409,22 +1475,26 @@ mod tests {
     // Additional sign_witness_proofs tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn sign_witness_proofs_are_verifiable() {
+    #[tokio::test]
+    async fn sign_witness_proofs_are_verifiable() {
         let (key, _) = key_and_params();
-        let witness1 = Secret::generate_ed25519(None, None);
+        let witness1 = crate::test_utils::generate_signing_key();
         let w1_id = witness1.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id.clone() }],
+                witnesses: vec![Witness {
+                    id: Multibase::new(w1_id.clone()),
+                }],
             })),
             ..Default::default()
         };
 
-        let (state, version_id) = create_log_entry_state(&key, &params);
+        let (state, version_id) = create_log_entry_state(&key, &params).await;
         let log_entry_state = state.log_entries.last().unwrap();
 
         let mut secrets = HashMap::default();
@@ -1432,7 +1502,9 @@ mod tests {
 
         let witnesses = log_entry_state.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
-        sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).unwrap();
+        sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets)
+            .await
+            .unwrap();
 
         // Verify the proof can be validated by the log entry
         let witness_proof = proofs.get_proofs(&version_id).unwrap();
@@ -1442,22 +1514,26 @@ mod tests {
         assert!(validation.is_ok());
     }
 
-    #[test]
-    fn sign_witness_proofs_returns_true_with_witnesses() {
+    #[tokio::test]
+    async fn sign_witness_proofs_returns_true_with_witnesses() {
         let (key, _) = key_and_params();
-        let witness1 = Secret::generate_ed25519(None, None);
+        let witness1 = crate::test_utils::generate_signing_key();
         let w1_id = witness1.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id.clone() }],
+                witnesses: vec![Witness {
+                    id: Multibase::new(w1_id.clone()),
+                }],
             })),
             ..Default::default()
         };
 
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry_state = state.log_entries.last().unwrap();
 
         let mut secrets = HashMap::default();
@@ -1465,20 +1541,27 @@ mod tests {
 
         let witnesses = log_entry_state.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
-        let signed =
-            sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).unwrap();
+        let signed = sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets)
+            .await
+            .unwrap();
         assert!(signed);
     }
 
-    #[test]
-    fn sign_witness_proofs_returns_false_no_witnesses() {
+    #[tokio::test]
+    async fn sign_witness_proofs_returns_false_no_witnesses() {
         let (key, params) = key_and_params();
-        let (state, _) = create_log_entry_state(&key, &params);
+        let (state, _) = create_log_entry_state(&key, &params).await;
         let log_entry = state.log_entries.last().unwrap();
 
         let mut proofs = WitnessProofCollection::default();
-        let signed =
-            sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::default()).unwrap();
+        let signed = sign_witness_proofs(
+            &mut proofs,
+            log_entry,
+            &None,
+            &HashMap::<String, Secret>::default(),
+        )
+        .await
+        .unwrap();
         assert!(!signed);
     }
 

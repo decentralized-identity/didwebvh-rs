@@ -4,7 +4,7 @@
 
 use super::LogEntry;
 use crate::{
-    DIDWebVHError, SCID_HOLDER,
+    DIDWebVHError, Multibase, SCID_HOLDER,
     log_entry::{LogEntryMethods, PublicKey, spec_1_0::LogEntry1_0, spec_1_0_pre::LogEntry1_0Pre},
     parameters::Parameters,
 };
@@ -155,14 +155,17 @@ impl LogEntry {
     /// Format of authorized keys will be a multikey E.g. z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15
     /// Format of proof_key will be a DID (only supports DID:key)
     /// Returns true if key is authorized or false if not
-    fn check_signing_key_authorized(authorized_keys: &Arc<Vec<String>>, proof_key: &str) -> bool {
+    fn check_signing_key_authorized(
+        authorized_keys: &Arc<Vec<Multibase>>,
+        proof_key: &str,
+    ) -> bool {
         if authorized_keys.is_empty() {
             warn!("No authorized keys found, skipping signing key check");
             return false;
         }
 
         if let Some((_, key)) = proof_key.split_once('#') {
-            authorized_keys.iter().any(|f| f == key)
+            authorized_keys.iter().any(|f| f.as_str() == key)
         } else {
             false
         }
@@ -182,17 +185,20 @@ impl LogEntry {
                 )));
             }
             // Set the versionId to the previous versionId to calculate the hash
-            self.set_version_id(&previous.get_version_id());
+            self.set_version_id(previous.get_version_id());
         } else if current_id != 1 {
             return Err(DIDWebVHError::ValidationError(format!(
                 "First LogEntry must have version ID 1, got {current_id}",
             )));
         } else {
-            let Some(scid) = self.get_scid() else {
-                return Err(DIDWebVHError::ValidationError(
-                    "First LogEntry must have a valid SCID".to_string(),
-                ));
-            };
+            let scid = self
+                .get_scid()
+                .ok_or_else(|| {
+                    DIDWebVHError::ValidationError(
+                        "First LogEntry must have a valid SCID".to_string(),
+                    )
+                })?
+                .to_string();
             self.set_version_id(&scid);
         };
 
@@ -275,11 +281,12 @@ impl LogEntry {
     fn verify_scid(&mut self) -> Result<(), DIDWebVHError> {
         self.set_version_id(SCID_HOLDER);
 
-        let Some(scid) = self.get_scid() else {
-            return Err(DIDWebVHError::ValidationError(
-                "First LogEntry must have a valid SCID".to_string(),
-            ));
-        };
+        let scid = self
+            .get_scid()
+            .ok_or_else(|| {
+                DIDWebVHError::ValidationError("First LogEntry must have a valid SCID".to_string())
+            })?
+            .to_string();
 
         // Convert the SCID value to holder
         let temp = serde_json::to_string(&self).map_err(|e| {
@@ -315,6 +322,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::DIDWebVHError;
+    use crate::Multibase;
     use crate::log_entry::LogEntry;
     use crate::log_entry::spec_1_0::LogEntry1_0;
     use crate::parameters::Parameters;
@@ -643,7 +651,7 @@ mod tests {
     /// allowing any key through would be a critical security vulnerability.
     #[test]
     fn test_authorized_keys_fail() {
-        let authorized_keys: Vec<String> = Vec::new();
+        let authorized_keys: Vec<Multibase> = Vec::new();
         assert!(!LogEntry::check_signing_key_authorized(
             &Arc::new(authorized_keys),
             "did:key:z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15#z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15"
@@ -657,7 +665,7 @@ mod tests {
     /// after '#'; without it, the key cannot be matched against authorized keys.
     #[test]
     fn test_authorized_keys_missing_key_id_fail() {
-        let authorized_keys: Vec<String> = Vec::new();
+        let authorized_keys: Vec<Multibase> = Vec::new();
         assert!(!LogEntry::check_signing_key_authorized(
             &Arc::new(authorized_keys),
             "did:key:z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15"
@@ -671,8 +679,9 @@ mod tests {
     /// log entries; this is the core authorization check for DID updates.
     #[test]
     fn test_authorized_keys_ok() {
-        let authorized_keys: Vec<String> =
-            vec!["z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15".to_string()];
+        let authorized_keys: Vec<Multibase> = vec![Multibase::new(
+            "z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15",
+        )];
 
         assert!(LogEntry::check_signing_key_authorized(
             &Arc::new(authorized_keys),
@@ -758,6 +767,67 @@ mod tests {
                 .to_string()
                 .contains("must be one greater")
         );
+    }
+
+    // ===== File I/O error tests =====
+
+    /// Tests that load_from_file returns an error when the file does not exist.
+    /// Expected: Returns a LogEntryError mentioning "Failed to open".
+    #[test]
+    fn test_load_from_file_missing_file() {
+        let result = LogEntry::load_from_file("/nonexistent/path/did.jsonl");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to open log file")
+        );
+    }
+
+    /// Tests that load_from_file returns an error when the file contains invalid JSON.
+    /// Expected: Returns an error during deserialization.
+    #[test]
+    fn test_load_from_file_corrupted_content() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir
+            .join(format!(
+                "test_corrupted_{}.jsonl",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .to_string_lossy()
+            .to_string();
+
+        std::fs::write(&file_path, "this is not valid json\n").unwrap();
+        let result = LogEntry::load_from_file(&file_path);
+        assert!(result.is_err());
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    /// Tests that load_from_file returns an empty vec for an empty file.
+    /// Expected: Returns Ok with an empty Vec since there are no lines to parse.
+    #[test]
+    fn test_load_from_file_empty_file() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir
+            .join(format!(
+                "test_empty_{}.jsonl",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .to_string_lossy()
+            .to_string();
+
+        std::fs::write(&file_path, "").unwrap();
+        let result = LogEntry::load_from_file(&file_path);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+        let _ = std::fs::remove_file(&file_path);
     }
 
     /// Tests that verify_version_time rejects a log entry whose timestamp is

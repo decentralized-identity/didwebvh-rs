@@ -1,5 +1,22 @@
 /*!
 *   Validating LogEntries using Witness Proofs
+*
+*   # Witness proof version semantics
+*
+*   A witness proof attests that a witness observed a particular version of the DID log.
+*   During validation, proofs are matched against log entries with the following rules:
+*
+*   - **Future proofs** (proof version > highest published version) are **skipped** entirely,
+*     preventing premature acceptance of proofs for unpublished entries.
+*   - **Older proofs** (proof version > current entry version, but within published range)
+*     **still count** toward the threshold. This supports efficient batched witnessing
+*     where a single proof covers a range of entries.
+*   - **Current proofs** (proof version == current entry version) are **cryptographically
+*     verified** against the log entry data before counting.
+*
+*   This design means a resolver cannot be tricked by proofs referencing unpublished
+*   future entries, while still allowing witnesses to attest in batches rather than
+*   per-entry.
 */
 
 use crate::{
@@ -33,9 +50,10 @@ impl WitnessProofCollection {
         // For each witness, check if there is a proof available
         let mut valid_proofs = 0;
         for w in witness_nodes {
-            let key = w.id.split_at(8);
-            let Some((_, oldest_id, proof)) =
-                self.witness_version.get(&[&w.id, "#", key.1].concat())
+            let key = w.id.as_str().split_at(8);
+            let Some((_, oldest_id, proof)) = self
+                .witness_version
+                .get(&[w.id.as_str(), "#", key.1].concat())
             else {
                 // No proof available for this witness, threshold will catch if too few proofs
                 debug!("No Witness proofs exist for witness ({})", w.id);
@@ -128,6 +146,7 @@ mod tests {
     use serde_json::json;
 
     use crate::{
+        Multibase,
         log_entry::{LogEntry, spec_1_0::LogEntry1_0},
         log_entry_state::{LogEntryState, LogEntryValidationStatus},
         parameters::{Parameters, spec_1_0::Parameters1_0},
@@ -235,10 +254,10 @@ mod tests {
             threshold: 1,
             witnesses: vec![
                 Witness {
-                    id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+                    id: Multibase::new("z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"),
                 },
                 Witness {
-                    id: "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp".to_string(),
+                    id: Multibase::new("z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"),
                 },
             ],
         };
@@ -271,7 +290,7 @@ mod tests {
         let witnesses = Witnesses::Value {
             threshold: 1,
             witnesses: vec![Witness {
-                id: witness_id.to_string(),
+                id: Multibase::new(witness_id),
             }],
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
@@ -306,7 +325,7 @@ mod tests {
         let witnesses = Witnesses::Value {
             threshold: 1,
             witnesses: vec![Witness {
-                id: witness_id.to_string(),
+                id: Multibase::new(witness_id),
             }],
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
@@ -328,8 +347,8 @@ mod tests {
     /// This matters for DID WebVH because it validates the end-to-end witness proof
     /// flow: key generation, proof signing, proof storage, lookup, cryptographic
     /// verification, and threshold checking.
-    #[test]
-    fn test_witness_threshold_met() {
+    #[tokio::test]
+    async fn test_witness_threshold_met() {
         let mut proofs = WitnessProofCollection::default();
         // Use a real signing key for the witness proof
         let secret = affinidi_secrets_resolver::secrets::Secret::generate_ed25519(None, None);
@@ -346,6 +365,7 @@ mod tests {
             &witness_secret,
             None,
         )
+        .await
         .unwrap();
         proofs.add_proof("1-abcd", &signed_proof, false).unwrap();
 
@@ -355,7 +375,9 @@ mod tests {
         let witness_id = format!("did:key:{pk}");
         let witnesses = Witnesses::Value {
             threshold: 1,
-            witnesses: vec![Witness { id: witness_id }],
+            witnesses: vec![Witness {
+                id: Multibase::new(witness_id),
+            }],
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
 
@@ -381,10 +403,10 @@ mod tests {
             threshold: 2,
             witnesses: vec![
                 Witness {
-                    id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+                    id: Multibase::new("z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"),
                 },
                 Witness {
-                    id: "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp".to_string(),
+                    id: Multibase::new("z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"),
                 },
             ],
         };
@@ -413,7 +435,7 @@ mod tests {
         let witnesses = Witnesses::Value {
             threshold: 0,
             witnesses: vec![Witness {
-                id: "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6".to_string(),
+                id: Multibase::new("z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"),
             }],
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
