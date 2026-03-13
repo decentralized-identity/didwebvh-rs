@@ -2,6 +2,7 @@
 *   DID method for Web with Verifiable History
 *   See [WebVH Spec](https://identity.foundation/didwebvh/v1.0)
 */
+#![warn(missing_docs)]
 
 use crate::{
     log_entry::{LogEntry, LogEntryMethods, MetaData},
@@ -21,13 +22,18 @@ use tracing::debug;
 pub mod create;
 pub mod did_web;
 pub mod log_entry;
+/// Manages per-entry validation state during DID log processing.
 pub mod log_entry_state;
+pub mod multibase_type;
 pub mod parameters;
 pub mod prelude;
 pub mod resolve;
+/// Parsing and conversion of `did:webvh` URLs and HTTP URLs.
 pub mod url;
 pub mod validate;
 pub mod witness;
+
+pub use multibase_type::Multibase;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
@@ -103,12 +109,16 @@ pub(crate) fn ensure_object_mut(
 /// Error types for WebVH method
 #[derive(Error, Debug)]
 pub enum DIDWebVHError {
+    /// The DID has been deactivated and can no longer be resolved.
     #[error("DeactivatedError: {0}")]
     DeactivatedError(String),
+    /// A general DID-related error (e.g. invalid query parameters).
     #[error("DIDError: {0}")]
     DIDError(String),
+    /// The DID method-specific identifier is malformed or invalid.
     #[error("Invalid method identifier: {0}")]
     InvalidMethodIdentifier(String),
+    /// An error occurred while parsing or processing a log entry.
     #[error("LogEntryError: {0}")]
     LogEntryError(String),
     /// A network request failed.
@@ -124,16 +134,22 @@ pub enum DIDWebVHError {
         /// Human-readable error description.
         message: String,
     },
+    /// The requested DID or log entry version was not found.
     #[error("DID Query NotFound: {0}")]
     NotFound(String),
+    /// The requested operation is not yet implemented.
     #[error("NotImplemented: {0}")]
     NotImplemented(String),
+    /// A log entry parameters block is invalid or inconsistent.
     #[error("ParametersError: {0}")]
     ParametersError(String),
+    /// An error related to the Self-Certifying Identifier (SCID).
     #[error("SCIDError: {0}")]
     SCIDError(String),
+    /// A server-side error occurred while processing the DID.
     #[error("ServerError: {0}")]
     ServerError(String),
+    /// The DID method is not `did:webvh`.
     #[error("UnsupportedMethod: {0}")]
     UnsupportedMethod(String),
     /// There was an error in validating the DID
@@ -147,26 +163,97 @@ pub enum DIDWebVHError {
 /// Information relating to a webvh DID
 #[derive(Debug, Default)]
 pub struct DIDWebVHState {
-    pub log_entries: Vec<LogEntryState>,
-    pub witness_proofs: WitnessProofCollection,
+    pub(crate) log_entries: Vec<LogEntryState>,
+    pub(crate) witness_proofs: WitnessProofCollection,
 
     /// What SCID is this state representing?
-    pub scid: String,
+    pub(crate) scid: String,
 
     /// Timestamp of the first LogEntry
-    pub meta_first_ts: String,
+    pub(crate) meta_first_ts: String,
 
     /// Timestamp of the last LogEntry
-    pub meta_last_ts: String,
+    pub(crate) meta_last_ts: String,
 
     /// Timestamp for when this DID will expire and need to be reloaded
-    pub expires: DateTime<FixedOffset>,
+    pub(crate) expires: DateTime<FixedOffset>,
 
     /// Validated?
-    pub validated: bool,
+    pub(crate) validated: bool,
 
     /// Deactivated?
-    pub deactivated: bool,
+    pub(crate) deactivated: bool,
+}
+
+impl DIDWebVHState {
+    /// Returns a reference to all log entries.
+    pub fn log_entries(&self) -> &[LogEntryState] {
+        &self.log_entries
+    }
+
+    /// Returns a mutable reference to the log entries.
+    pub fn log_entries_mut(&mut self) -> &mut Vec<LogEntryState> {
+        &mut self.log_entries
+    }
+
+    /// Removes and returns the last log entry, if any.
+    pub fn remove_last_log_entry(&mut self) -> Option<LogEntryState> {
+        self.log_entries.pop()
+    }
+
+    /// Returns a reference to the witness proof collection.
+    pub fn witness_proofs(&self) -> &WitnessProofCollection {
+        &self.witness_proofs
+    }
+
+    /// Returns a mutable reference to the witness proof collection.
+    pub fn witness_proofs_mut(&mut self) -> &mut WitnessProofCollection {
+        &mut self.witness_proofs
+    }
+
+    /// Returns references to both the log entries and the mutable witness proof collection.
+    /// This allows simultaneous read access to log entries and write access to witness proofs,
+    /// which would otherwise conflict when using separate accessor methods.
+    pub fn log_entries_and_witness_proofs_mut(
+        &mut self,
+    ) -> (&[LogEntryState], &mut WitnessProofCollection) {
+        (&self.log_entries, &mut self.witness_proofs)
+    }
+
+    /// Sets the witness proof collection.
+    pub fn set_witness_proofs(&mut self, proofs: WitnessProofCollection) {
+        self.witness_proofs = proofs;
+    }
+
+    /// Returns the SCID for this DID.
+    pub fn scid(&self) -> &str {
+        &self.scid
+    }
+
+    /// Returns the timestamp of the first log entry.
+    pub fn meta_first_ts(&self) -> &str {
+        &self.meta_first_ts
+    }
+
+    /// Returns the timestamp of the last log entry.
+    pub fn meta_last_ts(&self) -> &str {
+        &self.meta_last_ts
+    }
+
+    /// Returns the expiration timestamp for cached resolution.
+    pub fn expires(&self) -> DateTime<FixedOffset> {
+        self.expires
+    }
+
+    /// Returns whether this DID state has been validated.
+    pub fn validated(&self) -> bool {
+        self.validated
+    }
+
+    /// Returns whether this DID has been deactivated.
+    pub fn deactivated(&self) -> bool {
+        self.deactivated
+    }
 }
 
 impl DIDWebVHState {
@@ -188,8 +275,9 @@ impl DIDWebVHState {
     /// NOTE: NO WEBVH VALIDATION IS DONE HERE
     /// NOTE: Not all DIDs will have witness proofs, so this is optional
     pub fn load_witness_proofs_from_file(&mut self, file_path: &str) {
-        if let Ok(proofs) = WitnessProofCollection::read_from_file(file_path) {
-            self.witness_proofs = proofs;
+        match WitnessProofCollection::read_from_file(file_path) {
+            Ok(proofs) => self.witness_proofs = proofs,
+            Err(e) => tracing::warn!("Failed to load witness proofs from {}: {}", file_path, e),
         }
     }
 
@@ -488,7 +576,7 @@ impl DIDWebVHState {
                     let key_hash = Secret::base58_hash_string(multibase).map_err(|e| {
                         DIDWebVHError::LogEntryError(format!("signing_key isn't valid: {e}"))
                     })?;
-                    if !hashes.contains(&key_hash) {
+                    if !hashes.iter().any(|h| h.as_str() == key_hash) {
                         return Err(DIDWebVHError::ParametersError(format!(
                             "Signing key ID {multibase} does not match any next key hashes {:#?}",
                             previous.get_active_update_keys()
@@ -504,7 +592,8 @@ impl DIDWebVHState {
                 //Check if signing key exists in the previous verified LogEntry UpdateKeys
                 if !previous
                     .get_active_update_keys()
-                    .contains(&multibase.to_string())
+                    .iter()
+                    .any(|k| k.as_str() == multibase)
                 {
                     return Err(DIDWebVHError::ParametersError(format!(
                         "Signing key ID {multibase} does not match any updateKey {:#?}",
@@ -515,7 +604,7 @@ impl DIDWebVHState {
         } else {
             // This is the first LogEntry, thus update_keys must exist
             if let Some(keys) = &parameters.update_keys {
-                if !keys.contains(&multibase.to_string()) {
+                if !keys.iter().any(|k| k.as_str() == multibase) {
                     return Err(DIDWebVHError::ParametersError(format!(
                         "Signing key ID {multibase} does not match any updateKey {keys:#?}",
                     )));
@@ -531,10 +620,21 @@ impl DIDWebVHState {
     }
 }
 
+// Compile-time assertions that core types are Send + Sync,
+// ensuring they are safe to use across async runtimes and thread pools.
+#[allow(dead_code)]
+const _: () = {
+    fn assert_send_sync<T: Send + Sync>() {}
+    fn assertions() {
+        assert_send_sync::<DIDWebVHState>();
+        assert_send_sync::<DIDWebVHError>();
+    }
+};
+
 #[cfg(test)]
 mod tests {
     use crate::{
-        DIDWebVHState, Version,
+        DIDWebVHState, Multibase, Version,
         log_entry::LogEntry,
         log_entry_state::{LogEntryState, LogEntryValidationStatus},
         parameters::Parameters,
@@ -617,7 +717,9 @@ mod tests {
         let state = did_doc();
 
         let parameters = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             ..Default::default()
         };
 
@@ -647,7 +749,9 @@ mod tests {
 
         let mut didwebvh = DIDWebVHState::default();
 
-        let log_entry = didwebvh.create_log_entry(None, &state, &parameters, &key).await;
+        let log_entry = didwebvh
+            .create_log_entry(None, &state, &parameters, &key)
+            .await;
 
         assert!(log_entry.is_err());
     }
@@ -664,11 +768,11 @@ mod tests {
         let result = DIDWebVHState::check_signing_key(
             None,
             &Parameters {
-                update_keys: Some(Arc::new(vec![
+                update_keys: Some(Arc::new(vec![Multibase::new(
                     secret
                         .get_public_keymultibase()
                         .expect("Couldn't get public_key from Secret"),
-                ])),
+                )])),
                 ..Default::default()
             },
             &secret,
@@ -689,7 +793,7 @@ mod tests {
         let result = DIDWebVHState::check_signing_key(
             None,
             &Parameters {
-                update_keys: Some(Arc::new(vec!["bad_key1234".to_string()])),
+                update_keys: Some(Arc::new(vec![Multibase::new("bad_key1234")])),
                 ..Default::default()
             },
             &secret,
@@ -709,11 +813,11 @@ mod tests {
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
-            update_keys: Some(Arc::new(vec![
+            update_keys: Some(Arc::new(vec![Multibase::new(
                 secret
                     .get_public_keymultibase()
                     .expect("Couldn't get public_key from Secret"),
-            ])),
+            )])),
             ..Default::default()
         };
         let previous = LogEntryState {
@@ -752,7 +856,7 @@ mod tests {
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
-            update_keys: Some(Arc::new(vec!["bad-key1234".to_string()])),
+            update_keys: Some(Arc::new(vec![Multibase::new("bad-key1234")])),
             ..Default::default()
         };
         let previous = LogEntryState {
@@ -792,16 +896,16 @@ mod tests {
         let result = DIDWebVHState::check_signing_key(
             None,
             &Parameters {
-                update_keys: Some(Arc::new(vec![
+                update_keys: Some(Arc::new(vec![Multibase::new(
                     secret
                         .get_public_keymultibase()
                         .expect("Couldn't get public_key from Secret"),
-                ])),
-                next_key_hashes: Some(Arc::new(vec![
+                )])),
+                next_key_hashes: Some(Arc::new(vec![Multibase::new(
                     secret
                         .get_public_keymultibase_hash()
                         .expect("Couldn't get public_key_hash from Secret"),
-                ])),
+                )])),
                 ..Default::default()
             },
             &secret,
@@ -823,15 +927,15 @@ mod tests {
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
-            update_keys: Some(Arc::new(vec![
+            update_keys: Some(Arc::new(vec![Multibase::new(
                 secret
                     .get_public_keymultibase()
                     .expect("Couldn't get public_key from Secret"),
-            ])),
-            next_key_hashes: Some(Arc::new(vec![
+            )])),
+            next_key_hashes: Some(Arc::new(vec![Multibase::new(
                 next.get_public_keymultibase_hash()
                     .expect("Couldn't get public_key_hash from Secret"),
-            ])),
+            )])),
             ..Default::default()
         };
 
@@ -852,14 +956,14 @@ mod tests {
         let result = DIDWebVHState::check_signing_key(
             Some(&previous),
             &Parameters {
-                update_keys: Some(Arc::new(vec![
+                update_keys: Some(Arc::new(vec![Multibase::new(
                     next.get_public_keymultibase()
                         .expect("Couldn't get public_key from Secret"),
-                ])),
-                next_key_hashes: Some(Arc::new(vec![
+                )])),
+                next_key_hashes: Some(Arc::new(vec![Multibase::new(
                     next.get_public_keymultibase_hash()
                         .expect("Couldn't get public_key_hash from Secret"),
-                ])),
+                )])),
                 ..Default::default()
             },
             &next,
@@ -911,12 +1015,16 @@ mod tests {
         let key = crate::test_utils::generate_signing_key();
         let state = did_doc();
         let parameters = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             deactivated: Some(true),
             ..Default::default()
         };
         let mut didwebvh = DIDWebVHState::default();
-        let result = didwebvh.create_log_entry(None, &state, &parameters, &key).await;
+        let result = didwebvh
+            .create_log_entry(None, &state, &parameters, &key)
+            .await;
         assert!(result.is_err());
         assert!(
             result
@@ -940,7 +1048,7 @@ mod tests {
 
         let state = did_doc();
         let params1 = Parameters {
-            update_keys: Some(Arc::new(vec![pk.clone()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(pk.clone())])),
             ..Default::default()
         };
         let mut didwebvh = DIDWebVHState::default();
@@ -958,13 +1066,14 @@ mod tests {
             deactivated: Some(true),
             ..Default::default()
         };
-        let result = didwebvh.create_log_entry(
-            Some(base_time + chrono::Duration::seconds(1)),
-            &actual_doc,
-            &params2,
-            &key_with_id,
-        )
-        .await;
+        let result = didwebvh
+            .create_log_entry(
+                Some(base_time + chrono::Duration::seconds(1)),
+                &actual_doc,
+                &params2,
+                &key_with_id,
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -982,7 +1091,7 @@ mod tests {
 
         let state = did_doc();
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![pk.clone()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(pk.clone())])),
             ..Default::default()
         };
         let mut didwebvh = DIDWebVHState::default();
@@ -996,16 +1105,17 @@ mod tests {
 
         // Second entry — just update with same keys
         let params2 = Parameters {
-            update_keys: Some(Arc::new(vec![pk])),
+            update_keys: Some(Arc::new(vec![Multibase::new(pk)])),
             ..Default::default()
         };
-        let result = didwebvh.create_log_entry(
-            Some(base_time + chrono::Duration::seconds(1)),
-            &actual_doc,
-            &params2,
-            &key_with_id,
-        )
-        .await;
+        let result = didwebvh
+            .create_log_entry(
+                Some(base_time + chrono::Duration::seconds(1)),
+                &actual_doc,
+                &params2,
+                &key_with_id,
+            )
+            .await;
         assert!(result.is_ok());
         assert_eq!(didwebvh.log_entries.len(), 2);
     }
@@ -1024,12 +1134,14 @@ mod tests {
 
         let state = did_doc();
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![pk])),
+            update_keys: Some(Arc::new(vec![Multibase::new(pk)])),
             ..Default::default()
         };
         let custom_time = (Utc::now() - chrono::Duration::seconds(100)).fixed_offset();
         let mut didwebvh = DIDWebVHState::default();
-        let result = didwebvh.create_log_entry(Some(custom_time), &state, &params, &key_with_id).await;
+        let result = didwebvh
+            .create_log_entry(Some(custom_time), &state, &params, &key_with_id)
+            .await;
         assert!(result.is_ok());
         use crate::log_entry::LogEntryMethods;
         // Compare with seconds precision (versionTime is serialized with seconds only)
@@ -1052,7 +1164,7 @@ mod tests {
 
         let state = did_doc();
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![pk.clone()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(pk.clone())])),
             ..Default::default()
         };
         let base_time = (Utc::now() - chrono::Duration::seconds(100)).fixed_offset();
@@ -1065,7 +1177,7 @@ mod tests {
         let actual_doc = didwebvh.log_entries.last().unwrap().get_state().clone();
 
         let params2 = Parameters {
-            update_keys: Some(Arc::new(vec![pk])),
+            update_keys: Some(Arc::new(vec![Multibase::new(pk)])),
             ..Default::default()
         };
         didwebvh
@@ -1229,7 +1341,9 @@ mod tests {
 
         let parameters = Parameters {
             scid: Some(Arc::new("1-abcdef1234567890".to_string())),
-            update_keys: Some(Arc::new(vec![secret.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                secret.get_public_keymultibase().unwrap(),
+            )])),
             ..Default::default()
         };
         let mut validated = parameters.validate(None).unwrap();

@@ -41,12 +41,12 @@ impl DIDWebVHState {
         // input: did:webvh:<SCID>:<path>
         // Extract SCID and path after "did:webvh:"
         let mut new_did = String::from("did:scid:vh:1:");
-        if let Some(rest) = id.strip_prefix("did:webvh:") {
-            if let Some((scid, path)) = rest.split_once(':') {
-                new_did.push_str(scid);
-                new_did.push_str("?src=");
-                new_did.push_str(&path.replace(':', "/"));
-            }
+        if let Some(rest) = id.strip_prefix("did:webvh:")
+            && let Some((scid, path)) = rest.split_once(':')
+        {
+            new_did.push_str(scid);
+            new_did.push_str("?src=");
+            new_did.push_str(&path.replace(':', "/"));
         }
         new_did
     }
@@ -349,7 +349,8 @@ mod tests {
 
     #[test]
     fn test_convert_webvh_to_scid() {
-        let scid = DIDWebVHState::convert_webvh_id_to_scid_id("did:webvh:acme1234:affinidi.com:path");
+        let scid =
+            DIDWebVHState::convert_webvh_id_to_scid_id("did:webvh:acme1234:affinidi.com:path");
         assert_eq!(scid, "did:scid:vh:1:acme1234?src=affinidi.com/path");
     }
 

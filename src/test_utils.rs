@@ -10,7 +10,7 @@ use affinidi_secrets_resolver::secrets::Secret;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-use crate::parameters::Parameters;
+use crate::{Multibase, parameters::Parameters};
 
 /// A well-known ed25519 multibase public key used as a default in parameter tests.
 ///
@@ -57,7 +57,9 @@ pub fn did_doc_with_key(did: &str, key: &Secret) -> Value {
 pub fn key_and_params() -> (Secret, Parameters) {
     let key = generate_signing_key();
     let params = Parameters {
-        update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+        update_keys: Some(Arc::new(vec![Multibase::new(
+            key.get_public_keymultibase().unwrap(),
+        )])),
         ..Default::default()
     };
     (key, params)

@@ -37,6 +37,7 @@ pub struct WitnessProof {
     pub future_entry: bool,
 }
 
+/// Stores and manages witness proofs across all log entry versions.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(try_from = "WitnessProofShadow")]
 pub struct WitnessProofCollection {

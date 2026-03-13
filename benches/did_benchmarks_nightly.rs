@@ -4,7 +4,7 @@ extern crate test;
 
 use affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::{
-    DIDWebVHState,
+    DIDWebVHState, Multibase,
     create::{CreateDIDConfig, create_did},
     parameters::Parameters,
 };
@@ -40,7 +40,7 @@ fn setup_basic_creation() -> CreateDIDConfig {
     }
 
     let parameters = Parameters {
-        update_keys: Some(Arc::new(vec![pub_mb])),
+        update_keys: Some(Arc::new(vec![Multibase::new(pub_mb)])),
         portable: Some(true),
         ..Default::default()
     };
@@ -66,7 +66,7 @@ fn setup_creation_with_aliases() -> CreateDIDConfig {
     }
 
     let parameters = Parameters {
-        update_keys: Some(Arc::new(vec![pub_mb])),
+        update_keys: Some(Arc::new(vec![Multibase::new(pub_mb)])),
         portable: Some(true),
         ..Default::default()
     };

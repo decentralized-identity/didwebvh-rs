@@ -30,18 +30,29 @@ pub mod spec_1_0_pre;
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MetaData {
+    /// The `<version_number>-<hash>` identifier for this log entry.
     pub version_id: String,
+    /// RFC 3339 timestamp when this version was created.
     pub version_time: String,
+    /// RFC 3339 timestamp when the DID was first created.
     pub created: String,
+    /// RFC 3339 timestamp of the most recent update.
     pub updated: String,
+    /// Self-Certifying Identifier (SCID) for the DID.
     pub scid: String,
+    /// Whether the DID is portable (can change its web address).
     pub portable: bool,
+    /// Whether the DID has been deactivated.
     pub deactivated: bool,
+    /// Active witness configuration, if any.
     pub witness: Option<Witnesses>,
+    /// Watcher endpoints configured for this DID.
     pub watchers: Option<Vec<String>>,
 }
 
+/// Extracts raw public key bytes from a data integrity proof.
 pub trait PublicKey {
+    /// Decode the verification method into raw public key bytes.
     fn get_public_key_bytes(&self) -> Result<Vec<u8>, DIDWebVHError>;
 }
 
@@ -76,6 +87,7 @@ pub enum LogEntry {
     Spec1_0Pre(LogEntry1_0Pre),
 }
 
+/// Common accessors shared by all log entry versions.
 pub trait LogEntryMethods {
     /// LogEntry Parameters versionTime
     fn get_version_time_string(&self) -> String;
@@ -101,6 +113,7 @@ pub trait LogEntryMethods {
     /// Resets all proofs for this LogEntry
     fn clear_proofs(&mut self);
 
+    /// Returns the SCID if present in this log entry's parameters.
     fn get_scid(&self) -> Option<String>;
 
     /// Get the raw DID Document state
@@ -171,6 +184,7 @@ macro_rules! impl_log_entry_common {
                 Ok(base58::ToBase58::to_base58(hash_encoded.to_bytes().as_slice()))
             }
 
+            /// Verifies a witness data integrity proof against this log entry's versionId.
             pub fn validate_witness_proof(
                 &self,
                 witness_proof: &affinidi_data_integrity::DataIntegrityProof,
@@ -269,7 +283,7 @@ pub(crate) use impl_log_entry_common;
 
 impl LogEntry {
     /// Reading in a LogEntry and converting it requires custom logic.
-    /// [deserialize_string] handles detecting the version and deserializing the LogEntry correctly
+    /// `deserialize_string` handles detecting the version and deserializing the LogEntry correctly
     /// Attributes:
     /// - input: The input string to deserialize
     /// - version: If you want to override the default latest version, specify the previous

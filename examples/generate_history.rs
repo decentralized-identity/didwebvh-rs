@@ -18,7 +18,7 @@ use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
 use clap::Parser;
 use console::style;
 use didwebvh_rs::{
-    DIDWebVHState,
+    DIDWebVHState, Multibase,
     parameters::Parameters,
     witness::{Witness, Witnesses},
 };
@@ -123,7 +123,7 @@ pub async fn main() -> Result<()> {
         .open("did.jsonl")?;
 
     let mut byte_count: u64 = 0;
-    for entry in didwebvh.log_entries.iter() {
+    for entry in didwebvh.log_entries().iter() {
         // Convert LogEntry to JSON and write to file
         let json_entry = serde_json::to_string(&entry.log_entry)?;
         file.write_all(json_entry.as_bytes())?;
@@ -138,24 +138,24 @@ pub async fn main() -> Result<()> {
     println!(
         "\t{}{}",
         style("DID First LogEntry created: ").color256(34),
-        style(&didwebvh.log_entries.first().unwrap().get_version_id()).color256(69)
+        style(&didwebvh.log_entries().first().unwrap().get_version_id()).color256(69)
     );
     println!(
         "\t{}{}",
         style("DID Last LogEntry created: ").color256(34),
-        style(&didwebvh.log_entries.last().unwrap().get_version_id()).color256(69)
+        style(&didwebvh.log_entries().last().unwrap().get_version_id()).color256(69)
     );
 
     println!(
         "\t{}{} {}{}",
         style("LogEntries Count: ").color256(34),
-        style(format_num!(",.0", didwebvh.log_entries.len() as f64)).color256(69),
+        style(format_num!(",.0", didwebvh.log_entries().len() as f64)).color256(69),
         style("File Size (bytes): ").color256(34),
         style(format!("{bytes:#.2}")).color256(199),
     );
 
     let throughput = (1000.0 / (webvh_generate_duration + webvh_le_save_duration) as f64)
-        * didwebvh.log_entries.len() as f64;
+        * didwebvh.log_entries().len() as f64;
 
     let throughput = format_num!(",.02", throughput);
 
@@ -185,15 +185,15 @@ pub async fn main() -> Result<()> {
         );
         let start = SystemTime::now();
         // Witness proofs
-        didwebvh.witness_proofs.write_optimise_records()?;
-        let bytes = didwebvh.witness_proofs.save_to_file("did-witness.json")?;
+        didwebvh.witness_proofs_mut().write_optimise_records()?;
+        let bytes = didwebvh.witness_proofs().save_to_file("did-witness.json")?;
         let end = SystemTime::now();
         let bytes = Byte::from_u64(bytes as u64).get_appropriate_unit(UnitType::Decimal);
 
         println!(
             "\t{}{} {}{}",
             style("Witness Proof Count: ").color256(34),
-            style(didwebvh.witness_proofs.get_total_count().to_string()).color256(69),
+            style(didwebvh.witness_proofs().get_total_count().to_string()).color256(69),
             style("File Size (bytes): ").color256(34),
             style(format!("{bytes:#.2}")).color256(199),
         );
@@ -237,7 +237,7 @@ pub async fn main() -> Result<()> {
     let end = SystemTime::now();
 
     let throughput = (1000.0 / end.duration_since(start).unwrap().as_millis() as f64)
-        * verify_state.log_entries.len() as f64;
+        * verify_state.log_entries().len() as f64;
 
     let throughput = format_num!(",.02", throughput);
 
@@ -266,7 +266,7 @@ pub async fn main() -> Result<()> {
     let end = SystemTime::now();
 
     let throughput = (1000.0 / end.duration_since(start2).unwrap().as_millis() as f64)
-        * verify_state.witness_proofs.get_total_count() as f64;
+        * verify_state.witness_proofs().get_total_count() as f64;
     let throughput = format_num!(",.02", throughput);
 
     println!(
@@ -306,7 +306,7 @@ pub async fn main() -> Result<()> {
     );
     total_validation += end.duration_since(start3).unwrap().as_millis();
 
-    let throughput = (1000.0 / total_validation as f64) * verify_state.log_entries.len() as f64;
+    let throughput = (1000.0 / total_validation as f64) * verify_state.log_entries().len() as f64;
     let throughput = format_num!(",.02", throughput);
     println!();
     println!(
@@ -384,7 +384,9 @@ async fn generate_did(
         for _ in 0..args.witnesses {
             let (w_did, w_secret) = DID::generate_did_key(KeyType::Ed25519)?;
             secrets.insert(w_secret.clone()).await;
-            witness_nodes.push(Witness { id: w_did });
+            witness_nodes.push(Witness {
+                id: Multibase::new(w_did),
+            });
         }
 
         Some(Witnesses::Value {
@@ -411,12 +413,14 @@ async fn generate_did(
         .with_ttl(3600)
         .build();
 
-    let _ = didwebvh.create_log_entry(
-        Some(version_time),
-        &did_document,
-        &params,
-        &secrets.get_secret(&signing_did1_secret.id).await.unwrap(),
-    ).await?;
+    let _ = didwebvh
+        .create_log_entry(
+            Some(version_time),
+            &did_document,
+            &params,
+            &secrets.get_secret(&signing_did1_secret.id).await.unwrap(),
+        )
+        .await?;
 
     // Witness LogEntry
     witness_log_entry(didwebvh, secrets).await?;
@@ -428,8 +432,8 @@ async fn witness_log_entry(
     didwebvh: &mut DIDWebVHState,
     secrets: &SimpleSecretsResolver,
 ) -> Result<()> {
-    let log_entry = didwebvh
-        .log_entries
+    let (log_entries, witness_proofs) = didwebvh.log_entries_and_witness_proofs_mut();
+    let log_entry = log_entries
         .last()
         .ok_or_else(|| anyhow!("Couldn't find a LogEntry to witness"))?;
 
@@ -447,10 +451,10 @@ async fn witness_log_entry(
     };
 
     for witness in witness_nodes {
-        let key = witness.id.split_at(8);
+        let key = witness.id.as_str().split_at(8);
         // Get secret for Witness
         let Some(secret) = secrets
-            .get_secret(&[&witness.id, "#", key.1].concat())
+            .get_secret(&[witness.id.as_str(), "#", key.1].concat())
             .await
         else {
             bail!("Couldn't find secret for witness ({})!", witness.id)
@@ -469,8 +473,7 @@ async fn witness_log_entry(
         })?;
 
         // Save proof to collection
-        didwebvh
-            .witness_proofs
+        witness_proofs
             .add_proof(&log_entry.get_version_id(), &proof, false)
             .map_err(|e| anyhow!("Error adding proof: {e}"))?;
     }
@@ -487,7 +490,7 @@ async fn create_log_entry(
     version_time: DateTime<FixedOffset>,
 ) -> Result<Vec<Secret>> {
     let old_log_entry = didwebvh
-        .log_entries
+        .log_entries()
         .last()
         .ok_or_else(|| anyhow!("No previous log entry found. Please generate a DID first."))?;
     let new_state = old_log_entry.get_state().clone();
@@ -501,14 +504,14 @@ async fn create_log_entry(
     secrets.insert(next_key2.clone()).await;
 
     new_params.next_key_hashes = Some(Arc::new(vec![
-        next_key1.get_public_keymultibase_hash()?,
-        next_key2.get_public_keymultibase_hash()?,
+        Multibase::new(next_key1.get_public_keymultibase_hash()?),
+        Multibase::new(next_key2.get_public_keymultibase_hash()?),
     ]));
 
     // Modify update_key for this entry
     let update_keys = previous_keys
         .iter()
-        .map(|s| s.get_public_keymultibase().unwrap())
+        .map(|s| Multibase::new(s.get_public_keymultibase().unwrap()))
         .collect();
     new_params.update_keys = Some(Arc::new(update_keys));
 
@@ -522,14 +525,16 @@ async fn create_log_entry(
         swap_watcher(&mut new_params)?;
     }
 
-    let _ = didwebvh.create_log_entry(
-        Some(version_time),
-        &new_state,
-        &new_params,
-        previous_keys
-            .first()
-            .ok_or_else(|| anyhow!("No next key provided for log entry creation"))?,
-    ).await?;
+    let _ = didwebvh
+        .create_log_entry(
+            Some(version_time),
+            &new_state,
+            &new_params,
+            previous_keys
+                .first()
+                .ok_or_else(|| anyhow!("No next key provided for log entry creation"))?,
+        )
+        .await?;
 
     // Witness LogEntry
     witness_log_entry(didwebvh, secrets).await?;
@@ -562,7 +567,7 @@ async fn swap_witness(params: &mut Parameters, secrets: &mut SimpleSecretsResolv
     secrets.insert(secret.clone()).await;
 
     new_witnesses.push(Witness {
-        id: new_witness_did,
+        id: Multibase::new(new_witness_did),
     });
 
     params.witness = Some(Arc::new(Witnesses::Value {

@@ -3,7 +3,7 @@
 *   used when processing the current and previous Log Entry
 */
 
-use crate::{Version, parameters::Parameters, witness::Witnesses};
+use crate::{Multibase, Version, parameters::Parameters, witness::Witnesses};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -36,7 +36,7 @@ pub struct Parameters1_0Pre {
         skip_serializing_if = "Option::is_none",    // <- important for serialization
         with = "::serde_with::rust::double_option",
     )]
-    pub update_keys: Option<Option<Arc<Vec<String>>>>,
+    pub update_keys: Option<Option<Arc<Vec<Multibase>>>>,
 
     /// Can you change the web address for this DID?
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,7 +48,7 @@ pub struct Parameters1_0Pre {
         skip_serializing_if = "Option::is_none",    // <- important for serialization
         with = "::serde_with::rust::double_option",
     )]
-    pub next_key_hashes: Option<Option<Arc<Vec<String>>>>,
+    pub next_key_hashes: Option<Option<Arc<Vec<Multibase>>>>,
 
     /// Parameters for witness nodes
     #[serde(
@@ -222,7 +222,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::{
-        SCID_HOLDER,
+        Multibase, SCID_HOLDER,
         witness::{Witness, Witnesses},
     };
 
@@ -247,22 +247,22 @@ mod tests {
             method: Some(crate::Version::V1_0Pre),
             scid: Some(Arc::new("scid123".to_string())),
             update_keys: Some(Arc::new(vec![
-                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY".to_string(),
-                "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp".to_string(),
+                Multibase::new("z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY"),
+                Multibase::new("z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"),
             ])),
             portable: Some(true),
             next_key_hashes: Some(Arc::new(vec![
-                "zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155".to_string(),
-                "zQmctZhRGCKrE2R58K9rkfA1aUL74mecrrJRvicz42resii".to_string(),
+                Multibase::new("zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155"),
+                Multibase::new("zQmctZhRGCKrE2R58K9rkfA1aUL74mecrrJRvicz42resii"),
             ])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 2,
                 witnesses: vec![
                     Witness {
-                        id: "witness1".to_string(),
+                        id: Multibase::new("witness1"),
                     },
                     Witness {
-                        id: "witness2".to_string(),
+                        id: Multibase::new("witness2"),
                     },
                 ],
             })),
@@ -308,12 +308,12 @@ mod tests {
     fn pre_rotation_active() {
         // On first LogEntry, if next_hashes is configured, then pre-rotation is active
         let first_params = Parameters {
-            update_keys: Some(Arc::new(vec![
-                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY".to_string(),
-            ])),
-            next_key_hashes: Some(Arc::new(vec![
-                "zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155".to_string(),
-            ])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                "z6Mkp7QveNebyWs4z1kJ7Aa7CymUjRpjPYnBYh6Cr1t6JoXY",
+            )])),
+            next_key_hashes: Some(Arc::new(vec![Multibase::new(
+                "zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155",
+            )])),
             scid: Some(Arc::new(SCID_HOLDER.to_string())),
             ..Default::default()
         };
@@ -328,19 +328,19 @@ mod tests {
     // ****** Checking differential on Parameter attribute tri-state
     #[test]
     fn diff_tri_state_absent() {
-        let diff = Parameters::diff_tri_state(&None, &None, "test");
+        let diff = Parameters::diff_tri_state::<String>(&None, &None, "test");
         assert!(diff.is_ok_and(|a| a.is_none()));
     }
 
     #[test]
     fn diff_tri_state_empty() {
         // Absent --> Empty = Empty
-        let diff = Parameters::diff_tri_state(&None, &Some(Arc::new(Vec::new())), "test")
+        let diff = Parameters::diff_tri_state::<String>(&None, &Some(Arc::new(Vec::new())), "test")
             .expect("Parameters::diff_update_keys() error");
         assert!(diff.is_some_and(|a| a.is_empty()));
 
         // Values --> Empty = Empty
-        let diff = Parameters::diff_tri_state(
+        let diff = Parameters::diff_tri_state::<String>(
             &Some(Arc::new(vec!["test".to_string()])),
             &Some(Arc::new(Vec::new())),
             "test",
@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn diff_tri_state_double_empty() {
         // Both empty -> no change (not an error)
-        let diff = Parameters::diff_tri_state(
+        let diff = Parameters::diff_tri_state::<String>(
             &Some(Arc::new(Vec::new())),
             &Some(Arc::new(Vec::new())),
             "test",
@@ -365,14 +365,14 @@ mod tests {
     fn diff_tri_state_value() {
         // From nothing to something
         let test = Some(Arc::new(vec!["test".to_string()]));
-        let diff = Parameters::diff_tri_state(&None, &test.clone(), "test")
+        let diff = Parameters::diff_tri_state::<String>(&None, &test.clone(), "test")
             .expect("Parameters::diff_update_keys error");
         assert!(diff == test);
     }
 
     #[test]
     fn diff_tri_state_same_value() {
-        let diff = Parameters::diff_tri_state(
+        let diff = Parameters::diff_tri_state::<String>(
             &Some(Arc::new(vec!["test".to_string()])),
             &Some(Arc::new(vec!["test".to_string()])),
             "test",
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn diff_tri_state_different_value() {
-        let diff = Parameters::diff_tri_state(
+        let diff = Parameters::diff_tri_state::<String>(
             &Some(Arc::new(vec!["old".to_string()])),
             &Some(Arc::new(vec!["new".to_string()])),
             "test",

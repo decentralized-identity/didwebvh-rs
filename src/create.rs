@@ -24,7 +24,7 @@ use url::Url;
 /// Generic over `A` (authorization key signer) and `W` (witness signer).
 /// Both default to [`Secret`] for backward compatibility.
 pub struct CreateDIDConfig<A: Signer = Secret, W: Signer = Secret> {
-    /// Address: URL (e.g. "https://example.com/") or DID (e.g. "did:webvh:{SCID}:example.com")
+    /// Address: URL (e.g. `https://example.com/`) or DID (e.g. `did:webvh:{SCID}:example.com`)
     pub address: String,
     /// At least one signer for signing the log entry
     pub authorization_keys: Vec<A>,
@@ -164,7 +164,7 @@ impl<A: Signer, W: Signer> CreateDIDConfigBuilder<A, W> {
 impl CreateDIDConfig {
     /// Create a new builder for `CreateDIDConfig` using default signer types (`Secret`).
     ///
-    /// For custom signer types, use [`CreateDIDConfigBuilder::new_generic()`].
+    /// For custom signer types, use [`Self::builder_generic()`].
     pub fn builder() -> CreateDIDConfigBuilder {
         CreateDIDConfigBuilder::new()
     }
@@ -180,11 +180,28 @@ impl<A: Signer, W: Signer> CreateDIDConfig<A, W> {
 /// Result of creating a new DID
 pub struct CreateDIDResult {
     /// The resolved DID identifier (with SCID)
-    pub did: String,
+    pub(crate) did: String,
     /// The signed first log entry (serialize to JSON for did.jsonl)
-    pub log_entry: LogEntry,
+    pub(crate) log_entry: LogEntry,
     /// Witness proofs (serialize to JSON for witness.json). Empty if no witnesses.
-    pub witness_proofs: WitnessProofCollection,
+    pub(crate) witness_proofs: WitnessProofCollection,
+}
+
+impl CreateDIDResult {
+    /// Returns the resolved DID identifier (with SCID).
+    pub fn did(&self) -> &str {
+        &self.did
+    }
+
+    /// Returns a reference to the signed first log entry.
+    pub fn log_entry(&self) -> &LogEntry {
+        &self.log_entry
+    }
+
+    /// Returns a reference to the witness proof collection.
+    pub fn witness_proofs(&self) -> &WitnessProofCollection {
+        &self.witness_proofs
+    }
 }
 
 /// Validate that a signer's verification method is in the expected `did:key:{mb}#{mb}` format.
@@ -423,7 +440,7 @@ pub async fn sign_witness_proofs<W: Signer>(
 
     for witness in witness_nodes {
         // Get signer for Witness
-        let Some(secret) = witness_secrets.get(&witness.id) else {
+        let Some(secret) = witness_secrets.get(witness.id.as_str()) else {
             return Err(DIDWebVHError::WitnessProofError(format!(
                 "Couldn't find secret for witness ({})",
                 witness.id
@@ -462,7 +479,7 @@ pub async fn sign_witness_proofs<W: Signer>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DIDWebVHState, witness::Witness};
+    use crate::{DIDWebVHState, Multibase, witness::Witness};
     use affinidi_secrets_resolver::secrets::Secret;
     use serde_json::json;
     use std::sync::Arc;
@@ -781,10 +798,19 @@ mod tests {
         let w2_id = witness2.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id.clone() }, Witness { id: w2_id.clone() }],
+                witnesses: vec![
+                    Witness {
+                        id: Multibase::new(w1_id.clone()),
+                    },
+                    Witness {
+                        id: Multibase::new(w2_id.clone()),
+                    },
+                ],
             })),
             ..Default::default()
         };
@@ -811,10 +837,14 @@ mod tests {
         let w1_id = witness1.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id }],
+                witnesses: vec![Witness {
+                    id: Multibase::new(w1_id),
+                }],
             })),
             ..Default::default()
         };
@@ -836,7 +866,9 @@ mod tests {
         let (key, _) = key_and_params();
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             portable: Some(true),
             ..Default::default()
         };
@@ -998,7 +1030,13 @@ mod tests {
         let log_entry = state.log_entries.last().unwrap();
 
         let mut proofs = WitnessProofCollection::default();
-        let result = sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::<String, Secret>::default()).await;
+        let result = sign_witness_proofs(
+            &mut proofs,
+            log_entry,
+            &None,
+            &HashMap::<String, Secret>::default(),
+        )
+        .await;
         assert!(result.is_ok());
         assert!(!result.unwrap()); // false = no witnesses
         assert_eq!(proofs.get_total_count(), 0);
@@ -1013,10 +1051,19 @@ mod tests {
         let w2_id = witness2.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id.clone() }, Witness { id: w2_id.clone() }],
+                witnesses: vec![
+                    Witness {
+                        id: Multibase::new(w1_id.clone()),
+                    },
+                    Witness {
+                        id: Multibase::new(w2_id.clone()),
+                    },
+                ],
             })),
             ..Default::default()
         };
@@ -1043,10 +1090,14 @@ mod tests {
         let w1_id = witness1.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id }],
+                witnesses: vec![Witness {
+                    id: Multibase::new(w1_id),
+                }],
             })),
             ..Default::default()
         };
@@ -1057,7 +1108,13 @@ mod tests {
         let witnesses = log_entry.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
         // Empty secrets map — secret for witness not provided
-        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &HashMap::<String, Secret>::default()).await;
+        let result = sign_witness_proofs(
+            &mut proofs,
+            log_entry,
+            &witnesses,
+            &HashMap::<String, Secret>::default(),
+        )
+        .await;
         assert!(result.is_err());
     }
 
@@ -1069,7 +1126,13 @@ mod tests {
 
         let witnesses = Some(Arc::new(Witnesses::Empty {}));
         let mut proofs = WitnessProofCollection::default();
-        let result = sign_witness_proofs(&mut proofs, log_entry, &witnesses, &HashMap::<String, Secret>::default()).await;
+        let result = sign_witness_proofs(
+            &mut proofs,
+            log_entry,
+            &witnesses,
+            &HashMap::<String, Secret>::default(),
+        )
+        .await;
         assert!(result.is_err());
     }
 
@@ -1178,7 +1241,7 @@ mod tests {
         key.id = format!("did:key:{pub_mb}#{pub_mb}");
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![pub_mb])),
+            update_keys: Some(Arc::new(vec![Multibase::new(pub_mb)])),
             ..Default::default()
         };
         let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &key);
@@ -1388,10 +1451,14 @@ mod tests {
         let w1_id = witness1.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id.clone() }],
+                witnesses: vec![Witness {
+                    id: Multibase::new(w1_id.clone()),
+                }],
             })),
             ..Default::default()
         };
@@ -1404,7 +1471,9 @@ mod tests {
 
         let witnesses = log_entry_state.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
-        sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).await.unwrap();
+        sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets)
+            .await
+            .unwrap();
 
         // Verify the proof can be validated by the log entry
         let witness_proof = proofs.get_proofs(&version_id).unwrap();
@@ -1421,10 +1490,14 @@ mod tests {
         let w1_id = witness1.get_public_keymultibase().unwrap();
 
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             witness: Some(Arc::new(Witnesses::Value {
                 threshold: 1,
-                witnesses: vec![Witness { id: w1_id.clone() }],
+                witnesses: vec![Witness {
+                    id: Multibase::new(w1_id.clone()),
+                }],
             })),
             ..Default::default()
         };
@@ -1437,8 +1510,9 @@ mod tests {
 
         let witnesses = log_entry_state.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
-        let signed =
-            sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets).await.unwrap();
+        let signed = sign_witness_proofs(&mut proofs, log_entry_state, &witnesses, &secrets)
+            .await
+            .unwrap();
         assert!(signed);
     }
 
@@ -1449,8 +1523,14 @@ mod tests {
         let log_entry = state.log_entries.last().unwrap();
 
         let mut proofs = WitnessProofCollection::default();
-        let signed =
-            sign_witness_proofs(&mut proofs, log_entry, &None, &HashMap::<String, Secret>::default()).await.unwrap();
+        let signed = sign_witness_proofs(
+            &mut proofs,
+            log_entry,
+            &None,
+            &HashMap::<String, Secret>::default(),
+        )
+        .await
+        .unwrap();
         assert!(!signed);
     }
 

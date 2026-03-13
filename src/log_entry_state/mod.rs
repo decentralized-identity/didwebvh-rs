@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    DIDWebVHError, Version,
+    DIDWebVHError, Multibase, Version,
     log_entry::{LogEntry, LogEntryMethods},
     parameters::Parameters,
     witness::Witnesses,
@@ -104,6 +104,7 @@ impl LogEntryState {
         self.validated_parameters.method.unwrap_or_default()
     }
 
+    /// Returns the full versionId string for this log entry.
     pub fn get_version_id(&self) -> String {
         self.log_entry.get_version_id()
     }
@@ -115,7 +116,7 @@ impl LogEntryState {
             .map(|scid| scid.to_string())
     }
 
-    pub(crate) fn get_active_update_keys(&self) -> Arc<Vec<String>> {
+    pub(crate) fn get_active_update_keys(&self) -> Arc<Vec<Multibase>> {
         self.validated_parameters.active_update_keys.clone()
     }
 }
@@ -159,7 +160,10 @@ mod tests {
     fn get_state_returns_did_document() {
         let entry = make_entry("1-test", 1);
         let state = entry.get_state();
-        assert_eq!(state["id"].as_str().unwrap(), "did:webvh:scid123:example.com");
+        assert_eq!(
+            state["id"].as_str().unwrap(),
+            "did:webvh:scid123:example.com"
+        );
     }
 
     #[test]
@@ -201,6 +205,9 @@ mod tests {
     #[test]
     fn validation_status_defaults_to_not_validated() {
         let entry = make_entry("1-test", 1);
-        assert_eq!(entry.validation_status, LogEntryValidationStatus::NotValidated);
+        assert_eq!(
+            entry.validation_status,
+            LogEntryValidationStatus::NotValidated
+        );
     }
 }

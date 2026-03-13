@@ -6,10 +6,11 @@
 
 pub use crate::DIDWebVHError;
 pub use crate::DIDWebVHState;
+pub use crate::KeyType;
+pub use crate::Multibase;
+pub use crate::Signer;
 pub use crate::create::{CreateDIDConfig, create_did};
 pub use crate::log_entry::LogEntryMethods;
 pub use crate::parameters::Parameters;
 pub use crate::witness::Witnesses;
 pub use crate::witness::proofs::WitnessProofCollection;
-pub use crate::KeyType;
-pub use crate::Signer;

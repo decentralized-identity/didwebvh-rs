@@ -9,7 +9,7 @@
 */
 
 use chrono::{Duration, Utc};
-use tracing::{debug, warn};
+use tracing::{debug, error};
 
 use crate::{
     DIDWebVHError, DIDWebVHState,
@@ -34,11 +34,11 @@ impl DIDWebVHState {
             match entry.verify_log_entry(previous_entry) {
                 Ok(()) => (),
                 Err(e) => {
-                    warn!(
+                    error!(
                         "There was an issue with LogEntry: {}! Reason: {e}",
                         entry.get_version_id()
                     );
-                    warn!("Falling back to last known good LogEntry!");
+                    error!("Falling back to last known good LogEntry!");
                     if previous_entry.is_some() {
                         // Return last known good LogEntry
                         break;
@@ -126,7 +126,7 @@ impl DIDWebVHState {
 #[cfg(test)]
 mod tests {
     use crate::{
-        DIDWebVHState,
+        DIDWebVHState, Multibase,
         log_entry_state::{LogEntryState, LogEntryValidationStatus},
         parameters::Parameters,
         test_utils::{did_doc_with_key, generate_signing_key},
@@ -144,7 +144,9 @@ mod tests {
         let base_time = (Utc::now() - Duration::seconds(10)).fixed_offset();
         let key = generate_signing_key();
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             portable: Some(false),
             ttl,
             ..Default::default()
@@ -189,7 +191,9 @@ mod tests {
         let base_time = (Utc::now() - Duration::seconds(100)).fixed_offset();
         let key = generate_signing_key();
         let params = Parameters {
-            update_keys: Some(Arc::new(vec![key.get_public_keymultibase().unwrap()])),
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
             portable: Some(false),
             ..Default::default()
         };

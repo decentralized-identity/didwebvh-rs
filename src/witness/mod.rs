@@ -2,7 +2,7 @@
 *   Handling of witnessing changes to the log entries
 */
 
-use crate::DIDWebVHError;
+use crate::{DIDWebVHError, Multibase};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
@@ -13,12 +13,16 @@ pub mod validate;
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum Witnesses {
+    /// Active witness configuration with a threshold and list of witness nodes.
     Value {
+        /// Minimum number of witness proofs required for acceptance.
         threshold: u32,
+        /// List of configured witness nodes.
         witnesses: Vec<Witness>,
     },
     // WARN: This must always go last, otherwise it will become the default as it matches on
     // anything
+    /// No witnesses are configured.
     Empty {},
 }
 
@@ -87,7 +91,8 @@ impl Witnesses {
 /// Single Witness Node
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Witness {
-    pub id: String,
+    /// Multibase-encoded public key identifying this witness node.
+    pub id: Multibase,
 }
 
 impl Display for Witness {
@@ -98,21 +103,22 @@ impl Display for Witness {
 
 impl Witness {
     /// Returns the witness ID as a did:key
-    /// use [as_did_key] if you wan the DID#Key value
+    /// Use [`Self::as_did_key`] if you want the DID#Key value
     pub fn as_did(&self) -> String {
-        ["did:key:", &self.id].concat()
+        ["did:key:", self.id.as_str()].concat()
     }
 
     /// Returns the witness ID as a did:key:z6...#z6...
-    /// Use [as_did] if you want just the base DID
+    /// Use [`Self::as_did`] if you want just the base DID
     pub fn as_did_key(&self) -> String {
-        [&self.as_did(), "#", &self.id].concat()
+        [&self.as_did(), "#", self.id.as_str()].concat()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Multibase;
 
     /// Tests that validating an empty `Witnesses::Empty` variant returns an error.
     ///
@@ -136,7 +142,7 @@ mod tests {
         let w = Witnesses::Value {
             threshold: 0,
             witnesses: vec![Witness {
-                id: "w1".to_string(),
+                id: Multibase::new("w1"),
             }],
         };
         assert!(w.validate().is_err());
@@ -153,7 +159,7 @@ mod tests {
         let w = Witnesses::Value {
             threshold: 3,
             witnesses: vec![Witness {
-                id: "w1".to_string(),
+                id: Multibase::new("w1"),
             }],
         };
         let err = w.validate().unwrap_err();
@@ -171,7 +177,7 @@ mod tests {
         let w = Witnesses::Value {
             threshold: 1,
             witnesses: vec![Witness {
-                id: "w1".to_string(),
+                id: Multibase::new("w1"),
             }],
         };
         assert!(w.validate().is_ok());
@@ -193,10 +199,10 @@ mod tests {
             threshold: 2,
             witnesses: vec![
                 Witness {
-                    id: "w1".to_string(),
+                    id: Multibase::new("w1"),
                 },
                 Witness {
-                    id: "w2".to_string(),
+                    id: Multibase::new("w2"),
                 },
             ],
         };
@@ -213,7 +219,7 @@ mod tests {
     #[test]
     fn test_witness_as_did() {
         let w = Witness {
-            id: "z6Mktest".to_string(),
+            id: Multibase::new("z6Mktest"),
         };
         assert_eq!(w.as_did(), "did:key:z6Mktest");
     }
@@ -227,7 +233,7 @@ mod tests {
     #[test]
     fn test_witness_as_did_key() {
         let w = Witness {
-            id: "z6Mktest".to_string(),
+            id: Multibase::new("z6Mktest"),
         };
         assert_eq!(w.as_did_key(), "did:key:z6Mktest#z6Mktest");
     }
@@ -240,7 +246,7 @@ mod tests {
     #[test]
     fn test_witness_display() {
         let w = Witness {
-            id: "z6Mktest".to_string(),
+            id: Multibase::new("z6Mktest"),
         };
         assert_eq!(format!("{}", w), "z6Mktest");
     }
@@ -266,7 +272,7 @@ mod tests {
             !Witnesses::Value {
                 threshold: 1,
                 witnesses: vec![Witness {
-                    id: "w1".to_string()
+                    id: Multibase::new("w1")
                 }],
             }
             .is_empty()

@@ -6,7 +6,8 @@ repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
 authors = ["Glenn Gore <glenn@affinidi.com>"]
 homepage = "https://didwebvh.info/"
-keywords = ["ssi"]
+categories = ["authentication", "cryptography", "web-programming"]
+keywords = ["ssi", "did", "decentralized-identity", "webvh", "verifiable"]
 publish = true
 license = "Apache-2.0"
 readme = "README.md"
@@ -39,7 +40,7 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [dev-dependencies]
 affinidi-tdk = "0.6"
-
+async-trait = "0.1"
 anyhow = "1.0"
 byte-unit = "5.2"
 clap = { version = "4.5", features = ["derive"] }

@@ -10,7 +10,7 @@ use affinidi_secrets_resolver::secrets::Secret;
 use anyhow::{Result, bail};
 use console::style;
 use dialoguer::{Confirm, MultiSelect, theme::ColorfulTheme};
-use didwebvh_rs::{DIDWebVHError, parameters::Parameters};
+use didwebvh_rs::{DIDWebVHError, Multibase, parameters::Parameters};
 
 /// Handles all possible states of updating updateKeys including pre-rotation and non-pre-rotation
 /// modes. updateKeys and NextKeyHashes are modified here
@@ -37,7 +37,7 @@ pub fn update_authorization_keys(
                 select_update_keys_from_next_hashes(&old_params.next_key_hashes, existing_secrets)?;
             let mut tmp_keys = Vec::new();
             for key in update_keys {
-                tmp_keys.push(key.get_public_keymultibase()?);
+                tmp_keys.push(Multibase::new(key.get_public_keymultibase()?));
             }
             let new_keys = Arc::new(tmp_keys);
             new_params.update_keys = Some(new_keys.clone());
@@ -51,7 +51,7 @@ pub fn update_authorization_keys(
                 select_update_keys_from_next_hashes(&old_params.next_key_hashes, existing_secrets)?;
             let mut tmp_keys = Vec::new();
             for key in update_keys {
-                tmp_keys.push(key.get_public_keymultibase()?);
+                tmp_keys.push(Multibase::new(key.get_public_keymultibase()?));
             }
             let new_keys = Arc::new(tmp_keys);
             new_params.update_keys = Some(new_keys.clone());
@@ -93,7 +93,7 @@ pub fn update_authorization_keys(
 /// What update key will we use? Must be from an existing set of keys authorized keys
 /// Returns array of Secrets
 fn select_update_keys_from_next_hashes(
-    next_key_hashes: &Option<Arc<Vec<String>>>,
+    next_key_hashes: &Option<Arc<Vec<Multibase>>>,
     existing_secrets: &ConfigInfo,
 ) -> Result<Vec<Secret>> {
     let Some(hashes) = next_key_hashes else {
@@ -120,7 +120,7 @@ fn select_update_keys_from_next_hashes(
     let mut selected_secrets = Vec::new();
     for i in selected {
         existing_secrets
-            .find_secret_by_hash(&hashes[i])
+            .find_secret_by_hash(hashes[i].as_str())
             .map(|secret| selected_secrets.push(secret.to_owned()))
             .ok_or_else(|| {
                 DIDWebVHError::ParametersError(format!(
@@ -169,7 +169,7 @@ fn modify_update_keys(
         {
             let keys = get_keys()?;
             for k in keys {
-                new_update_keys.push(k.get_public_keymultibase()?);
+                new_update_keys.push(Multibase::new(k.get_public_keymultibase()?));
                 existing_secrets.add_key(&k);
             }
         }

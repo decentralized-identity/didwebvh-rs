@@ -3,7 +3,7 @@
 //! A WebVH DID can be loaded via HTTP(S) or local file (testing)
 //! [`crate::DIDWebVHState::resolve`] Will load a WebVH DID using HTTP(S)
 //! [`crate::DIDWebVHState::resolve_file`] Will load a WebVH DID using a local file path
-//! [`crate::DIDWebVHState::resolve_state`] Is an internal function that will validate the DID return
+//! `resolve_state` is an internal function that will validate the DID and return
 //! the resolved result
 
 use crate::{
@@ -28,28 +28,33 @@ pub mod ssi_resolve;
 
 pub mod implicit; // WebVH specification implies specific Services for a DID Document
 
+/// HTTP client helpers for fetching DID log entries and witness proofs.
 pub struct DIDWebVH;
 
 impl DIDWebVH {
     // Handles the fetching of the file from a given URL
     async fn download_file(client: Client, url: Url) -> Result<String, DIDWebVHError> {
         let url_str = url.to_string();
-        let response = client
-            .get(url.clone())
-            .send()
-            .await
-            .map_err(|e| DIDWebVHError::NetworkError {
-                url: url_str.clone(),
-                status_code: None,
-                message: format!("Request failed: {e}"),
-            })?;
+        let response =
+            client
+                .get(url.clone())
+                .send()
+                .await
+                .map_err(|e| DIDWebVHError::NetworkError {
+                    url: url_str.clone(),
+                    status_code: None,
+                    message: format!("Request failed: {e}"),
+                })?;
 
         if response.status() == StatusCode::OK {
-            response.text().await.map_err(|e| DIDWebVHError::NetworkError {
-                url: url_str,
-                status_code: Some(200),
-                message: format!("Failed to read response body: {e}"),
-            })
+            response
+                .text()
+                .await
+                .map_err(|e| DIDWebVHError::NetworkError {
+                    url: url_str,
+                    status_code: Some(200),
+                    message: format!("Failed to read response body: {e}"),
+                })
         } else {
             let status = response.status().as_u16();
             warn!("url ({url_str}): HTTP Status code = {status}");
@@ -542,7 +547,10 @@ mod tests {
         let mut webvh = DIDWebVHState::default();
         let result = webvh.resolve(&did, None, false).await;
 
-        assert!(result.is_err(), "Expected error for malformed response body");
+        assert!(
+            result.is_err(),
+            "Expected error for malformed response body"
+        );
     }
 
     /// Tests that resolving against a server that returns 200 with an empty body
@@ -563,7 +571,10 @@ mod tests {
 
         match result {
             Err(DIDWebVHError::NotFound(msg)) => {
-                assert!(msg.contains("No LogEntries"), "Expected 'No LogEntries' message, got: {msg}");
+                assert!(
+                    msg.contains("No LogEntries"),
+                    "Expected 'No LogEntries' message, got: {msg}"
+                );
             }
             other => panic!("Expected NotFound error, got: {other:?}"),
         }
@@ -639,9 +650,15 @@ mod tests {
                 status_code,
                 ref message,
             }) => {
-                assert!(url.contains("localhost"), "url should contain localhost: {url}");
+                assert!(
+                    url.contains("localhost"),
+                    "url should contain localhost: {url}"
+                );
                 assert_eq!(status_code, Some(503));
-                assert!(message.contains("503"), "message should contain status: {message}");
+                assert!(
+                    message.contains("503"),
+                    "message should contain status: {message}"
+                );
             }
             other => panic!("Expected structured NetworkError, got: {other:?}"),
         }
