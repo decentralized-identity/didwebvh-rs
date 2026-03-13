@@ -870,7 +870,10 @@ mod tests {
 
         match log_entry {
             Err(DIDWebVHError::LogEntryError(msg)) => {
-                assert!(msg.contains("update_keys"), "Expected update_keys error, got: {msg}");
+                assert!(
+                    msg.contains("update_keys"),
+                    "Expected update_keys error, got: {msg}"
+                );
             }
             other => panic!("Expected LogEntryError about update_keys, got: {other:?}"),
         }
@@ -921,7 +924,10 @@ mod tests {
 
         match &result {
             Err(DIDWebVHError::ParametersError(msg)) => {
-                assert!(msg.contains("does not match"), "Expected key mismatch error, got: {msg}");
+                assert!(
+                    msg.contains("does not match"),
+                    "Expected key mismatch error, got: {msg}"
+                );
             }
             other => panic!("Expected ParametersError about key mismatch, got: {other:?}"),
         }
@@ -1008,7 +1014,10 @@ mod tests {
 
         match &result {
             Err(DIDWebVHError::ParametersError(msg)) => {
-                assert!(msg.contains("does not match"), "Expected key mismatch error, got: {msg}");
+                assert!(
+                    msg.contains("does not match"),
+                    "Expected key mismatch error, got: {msg}"
+                );
             }
             other => panic!("Expected ParametersError about key mismatch, got: {other:?}"),
         }
@@ -1369,7 +1378,10 @@ mod tests {
         let result = state.get_specific_log_entry(None, None, Some(999));
         match &result {
             Err(DIDWebVHError::NotFound(msg)) => {
-                assert!(msg.contains("No matching"), "Expected 'No matching' message, got: {msg}");
+                assert!(
+                    msg.contains("No matching"),
+                    "Expected 'No matching' message, got: {msg}"
+                );
             }
             other => panic!("Expected NotFound error, got: {other:?}"),
         }
@@ -1401,7 +1413,10 @@ mod tests {
         let result = state.get_specific_log_entry(None, Some(old_time), None);
         match &result {
             Err(DIDWebVHError::NotFound(msg)) => {
-                assert!(msg.contains("No matching"), "Expected 'No matching' message, got: {msg}");
+                assert!(
+                    msg.contains("No matching"),
+                    "Expected 'No matching' message, got: {msg}"
+                );
             }
             other => panic!("Expected NotFound error, got: {other:?}"),
         }
@@ -1651,19 +1666,32 @@ mod tests {
 
         match state.update_document(serde_json::json!({}), &key).await {
             Err(DIDWebVHError::LogEntryError(msg)) => {
-                assert!(msg.contains("No log entries"), "Expected 'No log entries', got: {msg}");
+                assert!(
+                    msg.contains("No log entries"),
+                    "Expected 'No log entries', got: {msg}"
+                );
             }
-            other => panic!("Expected LogEntryError for update_document on empty state, got: {other:?}"),
+            other => {
+                panic!("Expected LogEntryError for update_document on empty state, got: {other:?}")
+            }
         }
         match state.rotate_keys(vec![Multibase::new("z6Mk1")], &key).await {
             Err(DIDWebVHError::LogEntryError(msg)) => {
-                assert!(msg.contains("No log entries"), "Expected 'No log entries', got: {msg}");
+                assert!(
+                    msg.contains("No log entries"),
+                    "Expected 'No log entries', got: {msg}"
+                );
             }
-            other => panic!("Expected LogEntryError for rotate_keys on empty state, got: {other:?}"),
+            other => {
+                panic!("Expected LogEntryError for rotate_keys on empty state, got: {other:?}")
+            }
         }
         match state.deactivate(&key).await {
             Err(DIDWebVHError::LogEntryError(msg)) => {
-                assert!(msg.contains("No log entries"), "Expected 'No log entries', got: {msg}");
+                assert!(
+                    msg.contains("No log entries"),
+                    "Expected 'No log entries', got: {msg}"
+                );
             }
             other => panic!("Expected LogEntryError for deactivate on empty state, got: {other:?}"),
         }
