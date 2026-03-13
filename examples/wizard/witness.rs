@@ -49,7 +49,7 @@ pub async fn witness_log_entry(
         println!(
             "{}{}{}{}",
             style("Witnessing completed: ").color256(69),
-            style(witness_proofs.get_proof_count(&log_entry.get_version_id())).color256(45),
+            style(witness_proofs.get_proof_count(log_entry.get_version_id())).color256(45),
             style("/").color256(69),
             style(threshold).color256(45),
         );

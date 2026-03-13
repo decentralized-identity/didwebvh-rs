@@ -71,7 +71,7 @@ pub async fn revoke_did(
         };
         println!(
             "{}{}{}{}{}",
-            style(&log_entry.get_version_id()).color256(141),
+            style(log_entry.get_version_id()).color256(141),
             style(": ").color256(69),
             style("DID (").color256(9),
             style(&our_did).color256(141),

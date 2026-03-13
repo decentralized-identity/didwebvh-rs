@@ -105,15 +105,15 @@ impl LogEntryState {
     }
 
     /// Returns the full versionId string for this log entry.
-    pub fn get_version_id(&self) -> String {
+    pub fn get_version_id(&self) -> &str {
         self.log_entry.get_version_id()
     }
 
-    pub(crate) fn get_scid(&self) -> Option<String> {
+    pub(crate) fn get_scid(&self) -> Option<&str> {
         self.validated_parameters
             .scid
-            .clone()
-            .map(|scid| scid.to_string())
+            .as_deref()
+            .map(String::as_str)
     }
 
     pub(crate) fn get_active_update_keys(&self) -> Arc<Vec<Multibase>> {

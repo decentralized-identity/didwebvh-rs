@@ -419,9 +419,12 @@ impl DIDWebVHState {
 
         // Ensure metadata is set for the DID
         if let Some(first) = self.log_entries.first() {
-            self.scid = first.get_scid().ok_or_else(|| {
-                DIDWebVHError::ValidationError("First log entry is missing SCID".to_string())
-            })?;
+            self.scid = first
+                .get_scid()
+                .ok_or_else(|| {
+                    DIDWebVHError::ValidationError("First log entry is missing SCID".to_string())
+                })?
+                .to_string();
             self.meta_first_ts = first.get_version_time_string();
         }
         if let Some(last) = self.log_entries.last() {

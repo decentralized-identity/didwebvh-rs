@@ -478,7 +478,7 @@ pub async fn sign_witness_proofs<W: Signer>(
 
         // Generate Signature
         let proof = DataIntegrityProof::sign_jcs_data(
-            &json!({"versionId": &log_entry.get_version_id()}),
+            &json!({"versionId": log_entry.get_version_id()}),
             None,
             secret,
             None,
@@ -492,7 +492,7 @@ pub async fn sign_witness_proofs<W: Signer>(
 
         // Save proof to collection
         witness_proofs
-            .add_proof(&log_entry.get_version_id(), &proof, false)
+            .add_proof(log_entry.get_version_id(), &proof, false)
             .map_err(|e| DIDWebVHError::WitnessProofError(format!("Error adding proof: {e}")))?;
     }
 
@@ -520,7 +520,12 @@ mod tests {
             .create_log_entry(None, &doc, params, key)
             .await
             .expect("Failed to create log entry");
-        let version_id = state.log_entries.last().unwrap().get_version_id();
+        let version_id = state
+            .log_entries
+            .last()
+            .unwrap()
+            .get_version_id()
+            .to_string();
         (state, version_id)
     }
 

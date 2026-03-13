@@ -138,12 +138,12 @@ pub async fn main() -> Result<()> {
     println!(
         "\t{}{}",
         style("DID First LogEntry created: ").color256(34),
-        style(&didwebvh.log_entries().first().unwrap().get_version_id()).color256(69)
+        style(didwebvh.log_entries().first().unwrap().get_version_id()).color256(69)
     );
     println!(
         "\t{}{}",
         style("DID Last LogEntry created: ").color256(34),
-        style(&didwebvh.log_entries().last().unwrap().get_version_id()).color256(69)
+        style(didwebvh.log_entries().last().unwrap().get_version_id()).color256(69)
     );
 
     println!(
@@ -462,7 +462,7 @@ async fn witness_log_entry(
 
         // Generate Signature
         let proof = DataIntegrityProof::sign_jcs_data(
-            &json!({"versionId": &log_entry.get_version_id()}),
+            &json!({"versionId": log_entry.get_version_id()}),
             None,
             &secret,
             None,
@@ -474,7 +474,7 @@ async fn witness_log_entry(
 
         // Save proof to collection
         witness_proofs
-            .add_proof(&log_entry.get_version_id(), &proof, false)
+            .add_proof(log_entry.get_version_id(), &proof, false)
             .map_err(|e| anyhow!("Error adding proof: {e}"))?;
     }
 

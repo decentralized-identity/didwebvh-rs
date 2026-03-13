@@ -370,7 +370,7 @@ impl DIDWebVHState {
             };
 
             LogEntry::create(
-                last_log_entry.get_version_id(),
+                last_log_entry.get_version_id().to_string(),
                 version_time.unwrap_or_else(|| now.fixed_offset()),
                 // Only use the difference of the parameters
                 parameters.diff(&last_log_entry.validated_parameters)?,
@@ -441,20 +441,19 @@ impl DIDWebVHState {
         } else {
             // First LogEntry
             new_entry.set_version_id(&["1-", &entry_hash].concat());
-            let scid = if let Some(scid) = new_entry.get_scid() {
-                scid
-            } else {
-                return Err(DIDWebVHError::LogEntryError(
-                    "First LogEntry does not have a SCID!".to_string(),
-                ));
-            };
+            let scid = new_entry
+                .get_scid()
+                .ok_or_else(|| {
+                    DIDWebVHError::LogEntryError("First LogEntry does not have a SCID!".to_string())
+                })?
+                .to_string();
 
             let validated_parameters = new_params.validate(None)?;
             //let mut validated_params = new_entry.get_parameters();
             //validated_params.active_witness = validated_params.witness.clone();
             self.meta_first_ts = new_entry.get_version_time_string().to_string();
             self.meta_last_ts = self.meta_first_ts.clone();
-            self.scid = scid.clone();
+            self.scid = scid.to_string();
             validated_parameters
         };
 
@@ -1317,7 +1316,7 @@ mod tests {
         let state = create_multi_entry_state().await;
         use crate::log_entry::LogEntryMethods;
         let vid = state.log_entries[0].log_entry.get_version_id();
-        let result = state.get_specific_log_entry(Some(&vid), None, None);
+        let result = state.get_specific_log_entry(Some(vid), None, None);
         assert!(result.is_ok());
     }
 

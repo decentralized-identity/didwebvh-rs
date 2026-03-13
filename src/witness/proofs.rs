@@ -32,7 +32,7 @@ pub struct WitnessProof {
 
     /// Internally used for partial proofs
     /// Set to true if versionId relates to an unpublished LogEntry
-    /// Defauklts to false
+    /// Defaults to false
     #[serde(skip)]
     pub future_entry: bool,
 }

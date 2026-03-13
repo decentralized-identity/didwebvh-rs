@@ -185,17 +185,20 @@ impl LogEntry {
                 )));
             }
             // Set the versionId to the previous versionId to calculate the hash
-            self.set_version_id(&previous.get_version_id());
+            self.set_version_id(previous.get_version_id());
         } else if current_id != 1 {
             return Err(DIDWebVHError::ValidationError(format!(
                 "First LogEntry must have version ID 1, got {current_id}",
             )));
         } else {
-            let Some(scid) = self.get_scid() else {
-                return Err(DIDWebVHError::ValidationError(
-                    "First LogEntry must have a valid SCID".to_string(),
-                ));
-            };
+            let scid = self
+                .get_scid()
+                .ok_or_else(|| {
+                    DIDWebVHError::ValidationError(
+                        "First LogEntry must have a valid SCID".to_string(),
+                    )
+                })?
+                .to_string();
             self.set_version_id(&scid);
         };
 
@@ -278,11 +281,12 @@ impl LogEntry {
     fn verify_scid(&mut self) -> Result<(), DIDWebVHError> {
         self.set_version_id(SCID_HOLDER);
 
-        let Some(scid) = self.get_scid() else {
-            return Err(DIDWebVHError::ValidationError(
-                "First LogEntry must have a valid SCID".to_string(),
-            ));
-        };
+        let scid = self
+            .get_scid()
+            .ok_or_else(|| {
+                DIDWebVHError::ValidationError("First LogEntry must have a valid SCID".to_string())
+            })?
+            .to_string();
 
         // Convert the SCID value to holder
         let temp = serde_json::to_string(&self).map_err(|e| {
