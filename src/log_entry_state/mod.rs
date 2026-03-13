@@ -85,7 +85,7 @@ impl LogEntryState {
     }
 
     /// Get the version Number of this LogEntry
-    /// WHich is the prefix in versionId
+    /// Which is the prefix in versionId
     pub(crate) fn get_version_number(&self) -> u32 {
         self.version_number
     }

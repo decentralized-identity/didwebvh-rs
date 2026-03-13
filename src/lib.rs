@@ -537,7 +537,7 @@ impl DIDWebVHState {
         ))
     }
 
-    /// Creates a MatatData struct from a validaed LogEntryState
+    /// Creates a MetaData struct from a validated LogEntryState
     pub fn generate_meta_data(&self, log_entry: &LogEntryState) -> MetaData {
         MetaData {
             version_id: log_entry.get_version_id().to_string(),
@@ -1490,5 +1490,153 @@ mod tests {
                 .to_string()
                 .contains("no next_key_hashes")
         );
+    }
+
+    // ===== save_state / load_state round-trip tests =====
+
+    #[tokio::test]
+    async fn state_save_load_roundtrip() {
+        let key = crate::test_utils::generate_signing_key();
+        let doc = crate::test_utils::did_doc_with_key("did:webvh:{SCID}:localhost%3A8000", &key);
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
+            portable: Some(false),
+            ..Default::default()
+        };
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(None, &doc, &params, &key)
+            .await
+            .unwrap();
+
+        let path = "/tmp/didwebvh_test_state_roundtrip.json";
+        state.save_state(path).unwrap();
+
+        let loaded = DIDWebVHState::load_state(path).unwrap();
+
+        // Core fields survive the round-trip
+        assert_eq!(loaded.log_entries().len(), state.log_entries().len());
+        assert_eq!(loaded.scid(), state.scid());
+        assert_eq!(loaded.meta_first_ts(), state.meta_first_ts());
+        assert_eq!(loaded.meta_last_ts(), state.meta_last_ts());
+
+        // Computed fields are at defaults after load (documented behavior)
+        assert!(!loaded.validated());
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn load_state_nonexistent_file_returns_error() {
+        let result = DIDWebVHState::load_state("/tmp/this_file_does_not_exist_12345.json");
+        assert!(result.is_err());
+    }
+
+    // ===== Convenience API tests =====
+
+    #[tokio::test]
+    async fn update_document_creates_new_entry() {
+        let key = crate::test_utils::generate_signing_key();
+        let doc = crate::test_utils::did_doc_with_key("did:webvh:{SCID}:localhost%3A8000", &key);
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
+            portable: Some(false),
+            ..Default::default()
+        };
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(None, &doc, &params, &key)
+            .await
+            .unwrap();
+        assert_eq!(state.log_entries().len(), 1);
+
+        // Update with the same document (just creates a new version)
+        let current_doc = state.log_entries().last().unwrap().get_state().clone();
+        state.update_document(current_doc, &key).await.unwrap();
+        assert_eq!(state.log_entries().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn rotate_keys_changes_update_keys() {
+        let key = crate::test_utils::generate_signing_key();
+        let doc = crate::test_utils::did_doc_with_key("did:webvh:{SCID}:localhost%3A8000", &key);
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
+            portable: Some(false),
+            ..Default::default()
+        };
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(None, &doc, &params, &key)
+            .await
+            .unwrap();
+
+        let new_key = crate::test_utils::generate_signing_key();
+        let new_mb = Multibase::new(new_key.get_public_keymultibase().unwrap());
+
+        state.rotate_keys(vec![new_mb.clone()], &key).await.unwrap();
+        assert_eq!(state.log_entries().len(), 2);
+        // The new update key should be in the validated parameters
+        let last = state.log_entries().last().unwrap();
+        assert!(
+            last.validated_parameters
+                .update_keys
+                .as_ref()
+                .unwrap()
+                .contains(&new_mb)
+        );
+    }
+
+    #[tokio::test]
+    async fn deactivate_sets_deactivated_flag() {
+        let key = crate::test_utils::generate_signing_key();
+        let doc = crate::test_utils::did_doc_with_key("did:webvh:{SCID}:localhost%3A8000", &key);
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
+            portable: Some(false),
+            ..Default::default()
+        };
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(None, &doc, &params, &key)
+            .await
+            .unwrap();
+
+        state.deactivate(&key).await.unwrap();
+        assert_eq!(state.log_entries().len(), 2);
+        let last = state.log_entries().last().unwrap();
+        assert_eq!(last.validated_parameters.deactivated, Some(true));
+    }
+
+    #[tokio::test]
+    async fn convenience_api_on_empty_state_returns_error() {
+        let key = crate::test_utils::generate_signing_key();
+        let mut state = DIDWebVHState::default();
+
+        assert!(
+            state
+                .update_document(serde_json::json!({}), &key)
+                .await
+                .is_err()
+        );
+        assert!(
+            state
+                .rotate_keys(vec![Multibase::new("z6Mk1")], &key)
+                .await
+                .is_err()
+        );
+        assert!(state.deactivate(&key).await.is_err());
     }
 }

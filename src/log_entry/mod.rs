@@ -83,7 +83,7 @@ pub enum LogEntry {
     /// Official v1.0 specification
     Spec1_0(LogEntry1_0),
 
-    /// Interim 1.0 spec where nulls were used instyead of empty arrays and objects
+    /// Interim 1.0 spec where nulls were used instead of empty arrays and objects
     Spec1_0Pre(LogEntry1_0Pre),
 }
 

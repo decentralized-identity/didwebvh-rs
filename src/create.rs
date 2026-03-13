@@ -203,6 +203,7 @@ impl<A: Signer, W: Signer> CreateDIDConfig<A, W> {
 }
 
 /// Result of creating a new DID
+#[derive(Clone, Debug)]
 pub struct CreateDIDResult {
     /// The resolved DID identifier (with SCID)
     pub(crate) did: String,
@@ -337,7 +338,7 @@ pub async fn create_did<A: Signer, W: Signer>(
 /// # Arguments
 /// * `did_document` - A mutable reference to a serde_json::Value representing the DID document.
 /// * `did` - The DID string to substitute for the "{DID}" placeholder.
-fn replace_did_placeholder(did_document: &mut Value, did: &String) {
+fn replace_did_placeholder(did_document: &mut Value, did: &str) {
     match did_document {
         Value::Object(map) => {
             for value in map.values_mut() {

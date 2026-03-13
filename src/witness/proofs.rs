@@ -39,7 +39,7 @@ pub struct WitnessProof {
 
 /// Stores and manages witness proofs across all log entry versions.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-#[serde(try_from = "WitnessProofShadow")]
+#[serde(try_from = "WitnessProofShadow", into = "WitnessProofShadow")]
 pub struct WitnessProofCollection {
     /// Raw Witness Proofs
     pub(crate) proofs: WitnessProofShadow,
@@ -48,6 +48,12 @@ pub struct WitnessProofCollection {
     /// Value = versionId, integer prefix of versionId, Data Integrity Proof
     #[serde(skip)]
     pub(crate) witness_version: HashMap<String, (Arc<String>, u32, Arc<DataIntegrityProof>)>,
+}
+
+impl From<WitnessProofCollection> for WitnessProofShadow {
+    fn from(collection: WitnessProofCollection) -> Self {
+        collection.proofs
+    }
 }
 
 /// Converts the inner Secret Shadow to a public Shadow Struct
