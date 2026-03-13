@@ -749,7 +749,7 @@ const _: () = {
 #[cfg(test)]
 mod tests {
     use crate::{
-        DIDWebVHState, Multibase, Version,
+        DIDWebVHError, DIDWebVHState, Multibase, Version,
         log_entry::LogEntry,
         log_entry_state::{LogEntryState, LogEntryValidationStatus},
         parameters::Parameters,
@@ -868,7 +868,12 @@ mod tests {
             .create_log_entry(None, &state, &parameters, &key)
             .await;
 
-        assert!(log_entry.is_err());
+        match log_entry {
+            Err(DIDWebVHError::LogEntryError(msg)) => {
+                assert!(msg.contains("update_keys"), "Expected update_keys error, got: {msg}");
+            }
+            other => panic!("Expected LogEntryError about update_keys, got: {other:?}"),
+        }
     }
 
     /// Tests that a signing key is accepted for the first log entry when it matches
@@ -914,7 +919,12 @@ mod tests {
             &secret,
         );
 
-        assert!(result.is_err())
+        match &result {
+            Err(DIDWebVHError::ParametersError(msg)) => {
+                assert!(msg.contains("does not match"), "Expected key mismatch error, got: {msg}");
+            }
+            other => panic!("Expected ParametersError about key mismatch, got: {other:?}"),
+        }
     }
 
     /// Tests that a signing key is accepted for a subsequent log entry when it matches
@@ -996,7 +1006,12 @@ mod tests {
             &secret,
         );
 
-        assert!(result.is_err())
+        match &result {
+            Err(DIDWebVHError::ParametersError(msg)) => {
+                assert!(msg.contains("does not match"), "Expected key mismatch error, got: {msg}");
+            }
+            other => panic!("Expected ParametersError about key mismatch, got: {other:?}"),
+        }
     }
 
     /// Tests that a signing key is accepted for the first log entry when pre-rotation
@@ -1352,7 +1367,12 @@ mod tests {
     async fn test_get_specific_by_version_number_not_found() {
         let state = create_multi_entry_state().await;
         let result = state.get_specific_log_entry(None, None, Some(999));
-        assert!(result.is_err());
+        match &result {
+            Err(DIDWebVHError::NotFound(msg)) => {
+                assert!(msg.contains("No matching"), "Expected 'No matching' message, got: {msg}");
+            }
+            other => panic!("Expected NotFound error, got: {other:?}"),
+        }
     }
 
     /// Tests that a log entry can be retrieved by versionTime, returning the latest
@@ -1379,7 +1399,12 @@ mod tests {
         // Use a very old time before any entries
         let old_time = (Utc::now() - chrono::Duration::days(365)).fixed_offset();
         let result = state.get_specific_log_entry(None, Some(old_time), None);
-        assert!(result.is_err());
+        match &result {
+            Err(DIDWebVHError::NotFound(msg)) => {
+                assert!(msg.contains("No matching"), "Expected 'No matching' message, got: {msg}");
+            }
+            other => panic!("Expected NotFound error, got: {other:?}"),
+        }
     }
 
     /// Tests that calling get_specific_log_entry with no query parameters returns an error.
@@ -1624,18 +1649,23 @@ mod tests {
         let key = crate::test_utils::generate_signing_key();
         let mut state = DIDWebVHState::default();
 
-        assert!(
-            state
-                .update_document(serde_json::json!({}), &key)
-                .await
-                .is_err()
-        );
-        assert!(
-            state
-                .rotate_keys(vec![Multibase::new("z6Mk1")], &key)
-                .await
-                .is_err()
-        );
-        assert!(state.deactivate(&key).await.is_err());
+        match state.update_document(serde_json::json!({}), &key).await {
+            Err(DIDWebVHError::LogEntryError(msg)) => {
+                assert!(msg.contains("No log entries"), "Expected 'No log entries', got: {msg}");
+            }
+            other => panic!("Expected LogEntryError for update_document on empty state, got: {other:?}"),
+        }
+        match state.rotate_keys(vec![Multibase::new("z6Mk1")], &key).await {
+            Err(DIDWebVHError::LogEntryError(msg)) => {
+                assert!(msg.contains("No log entries"), "Expected 'No log entries', got: {msg}");
+            }
+            other => panic!("Expected LogEntryError for rotate_keys on empty state, got: {other:?}"),
+        }
+        match state.deactivate(&key).await {
+            Err(DIDWebVHError::LogEntryError(msg)) => {
+                assert!(msg.contains("No log entries"), "Expected 'No log entries', got: {msg}");
+            }
+            other => panic!("Expected LogEntryError for deactivate on empty state, got: {other:?}"),
+        }
     }
 }

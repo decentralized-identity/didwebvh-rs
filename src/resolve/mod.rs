@@ -477,7 +477,6 @@ mod tests {
     /// Helper: start a mock server, create a DID targeting its port, serialize
     /// to JSONL, mount the mock response, and return `(server, did_url)`.
     async fn setup_mock_resolve() -> (MockServer, String) {
-        use crate::log_entry::LogEntryMethods;
         use crate::test_utils::{did_doc_with_key, key_and_params};
 
         let server = MockServer::start().await;
@@ -642,10 +641,10 @@ mod tests {
         let mut webvh = DIDWebVHState::default();
         let result = webvh.resolve(&did, None, false).await;
 
-        assert!(
-            result.is_err(),
-            "Expected error for malformed response body"
-        );
+        match result {
+            Err(DIDWebVHError::LogEntryError(_)) => {} // expected: invalid JSON
+            other => panic!("Expected LogEntryError for malformed response body, got: {other:?}"),
+        }
     }
 
     /// Tests that resolving against a server that returns 200 with an empty body
