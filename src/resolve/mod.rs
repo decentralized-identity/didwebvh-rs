@@ -1,24 +1,22 @@
 //! Resolving WebVH DID's logic is handled here
 //!
-//! A WebVH DID can be loaded via HTTP(S) or local file (testing)
+//! A WebVH DID can be loaded via HTTP(S), local file (testing), or raw string data
 //! [`crate::DIDWebVHState::resolve`] Will load a WebVH DID using HTTP(S)
 //! [`crate::DIDWebVHState::resolve_file`] Will load a WebVH DID using a local file path
+//! [`crate::DIDWebVHState::resolve_log`] Will load a WebVH DID from raw JSONL string data
 //! `resolve_state` is an internal function that will validate the DID and return
 //! the resolved result
 
 use crate::{
     DIDWebVHError, DIDWebVHState,
-    log_entry::{LogEntry, MetaData},
+    log_entry::{LogEntry, LogEntryMethods, MetaData},
+    log_entry_state::{LogEntryState, LogEntryValidationStatus},
+    parameters::Parameters,
     url::WebVHURL,
     witness::proofs::WitnessProofCollection,
 };
 #[cfg(feature = "network")]
-use crate::{
-    log_entry::LogEntryMethods,
-    log_entry_state::{LogEntryState, LogEntryValidationStatus},
-    parameters::Parameters,
-    url::URLType,
-};
+use crate::url::URLType;
 use chrono::DateTime;
 #[cfg(feature = "network")]
 use chrono::Utc;
@@ -159,12 +157,12 @@ impl DIDWebVHState {
             .await?;
         Ok((entry.clone(), metadata))
     }
-}
 
-#[cfg(feature = "network")]
-impl DIDWebVHState {
-    /// Parse raw log entry lines into a vec of `LogEntryState`
-    fn parse_log_entries(raw: &str) -> Result<Vec<LogEntryState>, DIDWebVHError> {
+    /// Parse raw JSONL log entry lines into a vec of [`LogEntryState`].
+    ///
+    /// Each line in `raw` must be a valid JSON-serialized log entry.
+    /// Returns an error if any line fails to parse.
+    pub fn parse_log_entries(raw: &str) -> Result<Vec<LogEntryState>, DIDWebVHError> {
         let mut log_entries = Vec::new();
         let mut version = None;
         for line in raw.lines() {
@@ -180,8 +178,8 @@ impl DIDWebVHState {
         Ok(log_entries)
     }
 
-    /// Check whether any log entry has a non-empty witness parameter
-    fn needs_witness_proofs(log_entries: &[LogEntryState]) -> bool {
+    /// Check whether any log entry has a non-empty witness parameter.
+    pub fn needs_witness_proofs(log_entries: &[LogEntryState]) -> bool {
         log_entries.iter().any(|e| {
             e.log_entry
                 .get_parameters()
@@ -191,8 +189,8 @@ impl DIDWebVHState {
         })
     }
 
-    /// Parse a raw witness proofs string into a `WitnessProofCollection`
-    fn parse_witness_proofs(raw: &str) -> Result<WitnessProofCollection, DIDWebVHError> {
+    /// Parse a raw witness proofs JSON string into a [`WitnessProofCollection`].
+    pub fn parse_witness_proofs(raw: &str) -> Result<WitnessProofCollection, DIDWebVHError> {
         Ok(WitnessProofCollection {
             proofs: serde_json::from_str(raw).map_err(|e| {
                 DIDWebVHError::WitnessProofError(format!(
@@ -206,7 +204,6 @@ impl DIDWebVHState {
     /// Validate that parsed log entries are non-empty, returning a contextual error.
     fn validate_log_entries(log_entries: &[LogEntryState], did: &str) -> Result<(), DIDWebVHError> {
         if log_entries.is_empty() {
-            warn!("No LogEntries found for DID: {did}");
             return Err(DIDWebVHError::NotFound(format!(
                 "No LogEntries found for DID: {did}",
             )));
@@ -214,6 +211,81 @@ impl DIDWebVHState {
         Ok(())
     }
 
+    /// Resolve a `did:webvh` DID from raw JSONL log data and optional witness proofs.
+    ///
+    /// This method performs the same cryptographic verification as [`resolve()`](Self::resolve)
+    /// and [`resolve_file()`](Self::resolve_file), but accepts the log data as in-memory strings
+    /// rather than fetching from a network endpoint or reading from the filesystem.
+    ///
+    /// This is useful for client-side verification of DID documents received from a
+    /// cache server, where the raw log is transmitted alongside the resolved document
+    /// to enable independent verification without an additional network round-trip.
+    ///
+    /// # Arguments
+    /// * `did` — The DID to resolve (may include query parameters like `?versionId=...`).
+    /// * `log_entries` — Raw JSONL string containing one log entry per line.
+    /// * `witness_proofs` — Optional raw JSON string containing witness proofs.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use didwebvh_rs::DIDWebVHState;
+    ///
+    /// let raw_log = r#"{"versionId":"1-abc...","parameters":{...},...}"#;
+    /// let mut state = DIDWebVHState::default();
+    /// let (log_entry, metadata) = state
+    ///     .resolve_log("did:webvh:abc:example.com", raw_log, None)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn resolve_log(
+        &mut self,
+        did: &str,
+        log_entries: &str,
+        witness_proofs: Option<&str>,
+    ) -> Result<(&LogEntry, MetaData), DIDWebVHError> {
+        let _span = span!(Level::DEBUG, "resolve_log", DID = did);
+        async move {
+            let parsed_did_url = WebVHURL::parse_did_url(did)?;
+
+            let parsed_entries = Self::parse_log_entries(log_entries)?;
+            Self::validate_log_entries(&parsed_entries, did)?;
+
+            let witness_collection = if let Some(raw_witnesses) = witness_proofs {
+                Self::parse_witness_proofs(raw_witnesses)?
+            } else {
+                WitnessProofCollection::default()
+            };
+
+            self.log_entries = parsed_entries;
+            self.witness_proofs = witness_collection;
+            self.validated = false;
+            self.expires = DateTime::default();
+
+            self.resolve_state(&parsed_did_url)
+        }
+        .instrument(_span)
+        .await
+    }
+
+    /// Like [`resolve_log()`](Self::resolve_log), but returns owned (cloned) values
+    /// so the caller does not borrow `self`.
+    pub async fn resolve_log_owned(
+        &mut self,
+        did: &str,
+        log_entries: &str,
+        witness_proofs: Option<&str>,
+    ) -> Result<(LogEntry, MetaData), DIDWebVHError> {
+        let (entry, metadata) = self
+            .resolve_log(did, log_entries, witness_proofs)
+            .await?;
+        Ok((entry.clone(), metadata))
+    }
+}
+
+#[cfg(feature = "network")]
+impl DIDWebVHState {
     /// Resolve witness proofs from a download result, applying the
     /// "witnesses configured but download failed" policy.
     fn resolve_witness_proofs(
@@ -750,5 +822,136 @@ mod tests {
             }
             other => panic!("Expected structured NetworkError, got: {other:?}"),
         }
+    }
+
+    // ===== resolve_log tests =====
+
+    /// Helper: create a DID with log entries and return (did_string, jsonl_string)
+    async fn setup_resolve_log_data() -> (String, String) {
+        use crate::test_utils::{did_doc_with_key, key_and_params};
+
+        let server = MockServer::start().await;
+        let port = server.address().port();
+
+        let (key, params) = key_and_params();
+        let did_template = format!("did:webvh:{{SCID}}:localhost%3A{port}");
+        let doc = did_doc_with_key(&did_template, &key);
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(None, &doc, &params, &key)
+            .await
+            .expect("Failed to create log entry");
+
+        let log_entry = &state.log_entries[0].log_entry;
+        let jsonl = serde_json::to_string(log_entry).unwrap();
+        let scid = state.scid();
+        let did = format!("did:webvh:{scid}:localhost%3A{port}");
+
+        (did, jsonl)
+    }
+
+    /// Resolve a DID from raw JSONL log data (no network needed for verification).
+    #[tokio::test]
+    async fn resolve_log_from_str() {
+        let (did, jsonl) = setup_resolve_log_data().await;
+
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve_log(&did, &jsonl, None).await;
+        assert!(result.is_ok(), "resolve_log failed: {result:?}");
+    }
+
+    /// Resolve a DID from raw JSONL log data and verify the returned document
+    /// matches what was resolved via network.
+    #[tokio::test]
+    async fn resolve_log_matches_network_resolve() {
+        use crate::log_entry::LogEntryMethods;
+
+        let (server, did) = setup_mock_resolve().await;
+        // Also need witness endpoint for eager
+        Mock::given(path("/.well-known/did-witness.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        // Resolve via network
+        let mut webvh_net = DIDWebVHState::default();
+        let (net_entry, _) = webvh_net.resolve(&did, None, false).await.unwrap();
+        let net_doc = net_entry.get_did_document().unwrap();
+
+        // Get the raw log from the network-resolved state
+        let log_entry = &webvh_net.log_entries()[0].log_entry;
+        let jsonl = serde_json::to_string(log_entry).unwrap();
+
+        // Resolve via resolve_log
+        let mut webvh_log = DIDWebVHState::default();
+        let (log_entry, _) = webvh_log.resolve_log(&did, &jsonl, None).await.unwrap();
+        let log_doc = log_entry.get_did_document().unwrap();
+
+        assert_eq!(net_doc, log_doc, "Documents from network and log resolution should match");
+    }
+
+    /// resolve_log_owned returns owned values without borrowing self.
+    #[tokio::test]
+    async fn resolve_log_owned_works() {
+        let (did, jsonl) = setup_resolve_log_data().await;
+
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve_log_owned(&did, &jsonl, None).await;
+        assert!(result.is_ok(), "resolve_log_owned failed: {result:?}");
+    }
+
+    /// resolve_log rejects empty log data.
+    #[tokio::test]
+    async fn resolve_log_empty_log() {
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh
+            .resolve_log("did:webvh:testscid:example.com", "", None)
+            .await;
+
+        match result {
+            Err(DIDWebVHError::NotFound(msg)) => {
+                assert!(
+                    msg.contains("No LogEntries"),
+                    "Expected 'No LogEntries' message, got: {msg}"
+                );
+            }
+            other => panic!("Expected NotFound error, got: {other:?}"),
+        }
+    }
+
+    /// resolve_log rejects malformed JSONL.
+    #[tokio::test]
+    async fn resolve_log_malformed_jsonl() {
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh
+            .resolve_log("did:webvh:testscid:example.com", "not valid json", None)
+            .await;
+
+        match result {
+            Err(DIDWebVHError::LogEntryError(_)) => {} // expected
+            other => panic!("Expected LogEntryError, got: {other:?}"),
+        }
+    }
+
+    /// resolve_log with tampered log data should fail validation.
+    #[tokio::test]
+    async fn resolve_log_tampered_data_fails() {
+        let (did, jsonl) = setup_resolve_log_data().await;
+
+        // Tamper with the JSONL by modifying a character in the proof/signature
+        // This should cause validation to fail
+        let tampered = jsonl.replacen("z", "y", 1);
+        if tampered == jsonl {
+            // If no 'z' was found, skip the test
+            return;
+        }
+
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve_log(&did, &tampered, None).await;
+        assert!(
+            result.is_err(),
+            "resolve_log should fail with tampered data"
+        );
     }
 }
