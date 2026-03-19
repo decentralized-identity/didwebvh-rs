@@ -7,6 +7,8 @@
 //! `resolve_state` is an internal function that will validate the DID and return
 //! the resolved result
 
+#[cfg(feature = "network")]
+use crate::url::URLType;
 use crate::{
     DIDWebVHError, DIDWebVHState,
     log_entry::{LogEntry, LogEntryMethods, MetaData},
@@ -15,8 +17,6 @@ use crate::{
     url::WebVHURL,
     witness::proofs::WitnessProofCollection,
 };
-#[cfg(feature = "network")]
-use crate::url::URLType;
 use chrono::DateTime;
 #[cfg(feature = "network")]
 use chrono::Utc;
@@ -277,9 +277,7 @@ impl DIDWebVHState {
         log_entries: &str,
         witness_proofs: Option<&str>,
     ) -> Result<(LogEntry, MetaData), DIDWebVHError> {
-        let (entry, metadata) = self
-            .resolve_log(did, log_entries, witness_proofs)
-            .await?;
+        let (entry, metadata) = self.resolve_log(did, log_entries, witness_proofs).await?;
         Ok((entry.clone(), metadata))
     }
 }
@@ -888,7 +886,10 @@ mod tests {
         let (log_entry, _) = webvh_log.resolve_log(&did, &jsonl, None).await.unwrap();
         let log_doc = log_entry.get_did_document().unwrap();
 
-        assert_eq!(net_doc, log_doc, "Documents from network and log resolution should match");
+        assert_eq!(
+            net_doc, log_doc,
+            "Documents from network and log resolution should match"
+        );
     }
 
     /// resolve_log_owned returns owned values without borrowing self.
