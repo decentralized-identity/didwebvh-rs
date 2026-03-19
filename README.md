@@ -38,6 +38,7 @@ site
 - [x] Cache serialization: `save_state()` / `load_state()` for offline caching
 - [x] `async_trait` re-exported so `Signer` implementors don't need a separate dependency
 - [x] Feature flags: `network` (default), `rustls`, `native-tls` for TLS backend selection
+- [x] In-memory log verification via `resolve_log()` — verify DID documents without filesystem or network access
 
 ## Usage
 
@@ -45,7 +46,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.3.0"
+didwebvh-rs = "0.3.1"
 ```
 
 Then:

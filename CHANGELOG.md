@@ -1,5 +1,21 @@
 # didwebvh-rs Changelog history
 
+## 19th March 2026
+
+### Release 0.3.1
+
+#### New
+
+- **`resolve_log()` / `resolve_log_owned()`** — Accept raw JSONL log data and
+  optional witness proofs as strings, enabling client-side cryptographic
+  verification without filesystem or network access. Supports architectures
+  where a cache server resolves DIDs and forwards the raw log alongside the
+  document, allowing clients to independently verify the DID document has not
+  been tampered with.
+- **Public parsing helpers** — `parse_log_entries()`, `parse_witness_proofs()`,
+  and `needs_witness_proofs()` are now public and available without the
+  `network` feature, since they operate on in-memory data only.
+
 ## 14th March 2026
 
 ### Release 0.3.0
