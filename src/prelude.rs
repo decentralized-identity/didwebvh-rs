@@ -15,3 +15,5 @@ pub use crate::log_entry::LogEntryMethods;
 pub use crate::parameters::Parameters;
 pub use crate::witness::Witnesses;
 pub use crate::witness::proofs::WitnessProofCollection;
+#[cfg(feature = "network")]
+pub use crate::resolve::ResolveOptions;

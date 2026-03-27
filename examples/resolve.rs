@@ -1,18 +1,39 @@
 use chrono::{TimeDelta, Utc};
+use clap::Parser;
 use console::style;
 use didwebvh_rs::prelude::*;
-use std::env;
+use didwebvh_rs::resolve::{DEFAULT_MAX_RESPONSE_BYTES, ResolveOptions};
 use tracing_subscriber::filter;
+
+#[derive(Parser, Debug)]
+#[command(
+    version,
+    about = "Resolve a did:webvh DID",
+    long_about = "Resolve a did:webvh DID by fetching and verifying its log entries over HTTP(S).\n\n\
+        The resolver downloads the DID's did.jsonl (and optionally did-witness.json),\n\
+        validates all log entry signatures and parameter transitions, and displays\n\
+        the resolved DID Document along with WebVH metadata.\n\n\
+        Examples:\n  \
+          resolve did:webvh:<scid>:example.com\n  \
+          resolve did:webvh:<scid>:example.com%3A8080\n  \
+          resolve did:webvh:<scid>:example.com:custom:path\n  \
+          resolve did:webvh:<scid>:example.com --max-size-kb 500\n  \
+          resolve \"did:webvh:<scid>:example.com?versionId=2-Qm...\"",
+)]
+struct Args {
+    /// The DID to resolve (e.g. "did:webvh:<scid>:example.com")
+    did: String,
+
+    /// Maximum HTTP response size in KB. Responses larger than this limit are
+    /// rejected to prevent memory exhaustion. Applies independently to each
+    /// downloaded file (did.jsonl, did-witness.json).
+    #[arg(short = 'l', long, default_value_t = DEFAULT_MAX_RESPONSE_BYTES / 1024)]
+    max_size_kb: u64,
+}
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    // First argument is the command executed, second is the DID to parse
-    if args.len() != 2 {
-        eprintln!("Usage: {} <did:webvh>", args[0]);
-        std::process::exit(1);
-    }
+    let args = Args::parse();
 
     // construct a subscriber that prints formatted traces to stdout
     let subscriber = tracing_subscriber::fmt()
@@ -22,7 +43,12 @@ async fn main() {
     // use that subscriber to process traces emitted after this point
     tracing::subscriber::set_global_default(subscriber).expect("Logging failed, exiting...");
 
-    let elapsed = resolve(&args[1]).await;
+    let options = ResolveOptions {
+        max_response_bytes: args.max_size_kb * 1024,
+        ..ResolveOptions::default()
+    };
+
+    let elapsed = resolve(&args.did, options).await;
     println!();
     println!(
         "{}{}{}",
@@ -32,10 +58,17 @@ async fn main() {
     );
 }
 
-async fn resolve(did: &str) -> TimeDelta {
+async fn resolve(did: &str, options: ResolveOptions) -> TimeDelta {
+    let max_kb = options.max_response_bytes / 1024;
+    println!(
+        "{}{}",
+        style("Max response size: ").color256(69),
+        style(format!("{max_kb} KB")).color256(141),
+    );
+
     let mut webvh = DIDWebVHState::default();
     let start = Utc::now();
-    let (log_entry, meta) = match webvh.resolve(did, None, false).await {
+    let (log_entry, meta) = match webvh.resolve(did, options).await {
         Ok(res) => res,
         Err(e) => {
             panic!("Error: {e:?}");

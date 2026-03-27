@@ -1,5 +1,52 @@
 # didwebvh-rs Changelog history
 
+## 27th March 2026
+
+### Release 0.4.0
+
+#### Breaking Changes
+
+- **`resolve()` / `resolve_owned()` signature change** — The `timeout` and
+  `eager_witness_download` parameters have been replaced with a single
+  `ResolveOptions` struct. Callers should migrate from
+  `resolve(did, None, false)` to `resolve(did, ResolveOptions::default())`.
+  Custom timeout or eager witness download can be set via struct fields:
+  ```rust
+  ResolveOptions {
+      timeout: Some(Duration::from_secs(5)),
+      eager_witness_download: true,
+      ..ResolveOptions::default()
+  }
+  ```
+
+#### New
+
+- **HTTP response size limits** — `download_file()` now enforces a maximum
+  response body size to prevent memory exhaustion from malicious or
+  misconfigured servers.
+  - `Content-Length` header is checked first for early rejection before any
+    body data is read.
+  - Body is read in chunks via `response.chunk()` with a running byte counter,
+    catching oversized responses even when `Content-Length` is absent or
+    inaccurate (e.g. chunked transfer encoding).
+  - Default limit: 200 KB (`DEFAULT_MAX_RESPONSE_BYTES`), configurable
+    per-request via `ResolveOptions::max_response_bytes`.
+- **`ResolveOptions` struct** — Bundles network resolution options (`timeout`,
+  `eager_witness_download`, `max_response_bytes`) into a single configuration
+  type with sensible defaults via `Default` trait. Re-exported from `prelude`
+  behind the `network` feature gate.
+- **`ResponseTooLarge` error variant** — New `DIDWebVHError::ResponseTooLarge`
+  carries the offending URL and the configured byte limit, making it easy for
+  consumers to distinguish size-limit rejections from other network errors.
+- **`generate_large_did` example** — Generates a valid 1 MB+ `did.jsonl` file
+  with backdated timestamps for benchmarking and testing. Accepts a URL via
+  `--url` (properly parsed into WebVH DID format via `WebVHURL::parse_url()`),
+  configurable target size (`--target-kb`), and includes generation, write, load,
+  and validation timing.
+- **`resolve` example CLI improvements** — Now uses `clap` for argument parsing
+  with a `--max-size-kb` (`-l`) flag to set the response size limit from the
+  command line.
+
 ## 19th March 2026
 
 ### Release 0.3.1
