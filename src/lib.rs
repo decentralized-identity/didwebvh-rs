@@ -130,7 +130,6 @@ pub enum DIDWebVHError {
     /// from transport-level failures (where `status_code` is `None`).
     #[error("NetworkError: {message} (url: {url})")]
     NetworkError {
-
         /// The URL that was being fetched.
         url: String,
         /// HTTP status code, if the server responded.
@@ -142,7 +141,9 @@ pub enum DIDWebVHError {
     #[error("DID Query NotFound: {0}")]
     NotFound(String),
     /// The HTTP response body exceeds the maximum allowed size.
-    #[error("ResponseTooLarge: response from {url} exceeds maximum allowed size of {max_bytes} bytes")]
+    #[error(
+        "ResponseTooLarge: response from {url} exceeds maximum allowed size of {max_bytes} bytes"
+    )]
     ResponseTooLarge {
         /// The URL that was being fetched.
         url: String,

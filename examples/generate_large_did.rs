@@ -18,12 +18,7 @@ use clap::Parser;
 use console::style;
 use didwebvh_rs::{DIDWebVHState, Multibase, parameters::Parameters, url::WebVHURL};
 use serde_json::json;
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    sync::Arc,
-    time::SystemTime,
-};
+use std::{fs::OpenOptions, io::Write, sync::Arc, time::SystemTime};
 use tracing_subscriber::filter;
 
 #[derive(Parser, Debug)]
@@ -54,8 +49,8 @@ pub async fn main() -> Result<()> {
     let target_bytes = args.target_kb * 1024;
 
     // Parse the URL into a WebVHURL to properly derive the DID template
-    let parsed_url = url::Url::parse(&args.url)
-        .map_err(|e| anyhow!("Invalid URL '{}': {e}", args.url))?;
+    let parsed_url =
+        url::Url::parse(&args.url).map_err(|e| anyhow!("Invalid URL '{}': {e}", args.url))?;
     let webvh_url = WebVHURL::parse_url(&parsed_url)
         .map_err(|e| anyhow!("Cannot convert URL to WebVH DID: {e}"))?;
     // to_did_base() produces "did:webvh:{SCID}:domain%3Aport:path" with proper encoding
@@ -125,17 +120,16 @@ pub async fn main() -> Result<()> {
         entry_count += 1;
         let version_time = base_time + ChronoDuration::seconds(entry_count as i64);
 
-        let (new_next_keys, _) =
-            create_update_entry(
-                &mut didwebvh,
-                &mut secrets,
-                &previous_keys,
-                &did_id,
-                args.services,
-                entry_count,
-                version_time,
-            )
-            .await?;
+        let (new_next_keys, _) = create_update_entry(
+            &mut didwebvh,
+            &mut secrets,
+            &previous_keys,
+            &did_id,
+            args.services,
+            entry_count,
+            version_time,
+        )
+        .await?;
 
         previous_keys = new_next_keys;
         current_size = estimate_current_size(&didwebvh);
@@ -207,10 +201,7 @@ pub async fn main() -> Result<()> {
 
     // === Verify by loading and validating ===
     println!();
-    println!(
-        "{}",
-        style("=== Verification ===").color256(214),
-    );
+    println!("{}", style("=== Verification ===").color256(214),);
 
     let mut verify_state = DIDWebVHState::default();
 
@@ -227,7 +218,10 @@ pub async fn main() -> Result<()> {
     let validate_start = SystemTime::now();
     verify_state.validate()?;
     let validate_end = SystemTime::now();
-    let validate_ms = validate_end.duration_since(validate_start).unwrap().as_millis();
+    let validate_ms = validate_end
+        .duration_since(validate_start)
+        .unwrap()
+        .as_millis();
     println!(
         "\t{}{}",
         style("Validation: ").color256(34),
@@ -258,9 +252,7 @@ pub async fn main() -> Result<()> {
 }
 
 /// Generate a signing key and two next-rotation keys
-async fn generate_keys(
-    secrets: &mut SimpleSecretsResolver,
-) -> Result<(Secret, Vec<Secret>)> {
+async fn generate_keys(secrets: &mut SimpleSecretsResolver) -> Result<(Secret, Vec<Secret>)> {
     let signing_key = DID::generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(signing_key.clone()).await;
 

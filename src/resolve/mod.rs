@@ -120,13 +120,15 @@ impl DIDWebVH {
         // Read body in chunks, enforcing the size limit as data arrives
         let mut body = Vec::new();
         let mut total_bytes: u64 = 0;
-        while let Some(chunk) = response.chunk().await.map_err(|e| {
-            DIDWebVHError::NetworkError {
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| DIDWebVHError::NetworkError {
                 url: url_str.clone(),
                 status_code: Some(200),
                 message: format!("Failed to read response body: {e}"),
-            }
-        })? {
+            })?
+        {
             total_bytes += chunk.len() as u64;
             if total_bytes > max_bytes {
                 return Err(DIDWebVHError::ResponseTooLarge {
@@ -673,7 +675,15 @@ mod tests {
             .await;
 
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, ResolveOptions { eager_witness_download: true, ..ResolveOptions::default() }).await;
+        let result = webvh
+            .resolve(
+                &did,
+                ResolveOptions {
+                    eager_witness_download: true,
+                    ..ResolveOptions::default()
+                },
+            )
+            .await;
         assert!(result.is_ok(), "eager resolve failed: {result:?}");
     }
 
@@ -686,13 +696,18 @@ mod tests {
 
         // First resolve to get the versionId
         let mut webvh = DIDWebVHState::default();
-        let (entry, _) = webvh.resolve(&did, ResolveOptions::default()).await.unwrap();
+        let (entry, _) = webvh
+            .resolve(&did, ResolveOptions::default())
+            .await
+            .unwrap();
         let version_id = entry.get_version_id().to_string();
 
         // Resolve again with ?versionId=...
         let mut webvh2 = DIDWebVHState::default();
         let did_with_version = format!("{did}?versionId={version_id}");
-        let result = webvh2.resolve(&did_with_version, ResolveOptions::default()).await;
+        let result = webvh2
+            .resolve(&did_with_version, ResolveOptions::default())
+            .await;
         assert!(result.is_ok(), "versionId resolve failed: {result:?}");
     }
 
@@ -705,13 +720,18 @@ mod tests {
 
         // Resolve to get a valid versionTime
         let mut webvh = DIDWebVHState::default();
-        let (entry, _) = webvh.resolve(&did, ResolveOptions::default()).await.unwrap();
+        let (entry, _) = webvh
+            .resolve(&did, ResolveOptions::default())
+            .await
+            .unwrap();
         let version_time = entry.get_version_time_string();
 
         // Resolve again with ?versionTime=...
         let mut webvh2 = DIDWebVHState::default();
         let did_with_time = format!("{did}?versionTime={version_time}");
-        let result = webvh2.resolve(&did_with_time, ResolveOptions::default()).await;
+        let result = webvh2
+            .resolve(&did_with_time, ResolveOptions::default())
+            .await;
         assert!(result.is_ok(), "versionTime resolve failed: {result:?}");
     }
 
@@ -962,7 +982,10 @@ mod tests {
 
         // Resolve via network
         let mut webvh_net = DIDWebVHState::default();
-        let (net_entry, _) = webvh_net.resolve(&did, ResolveOptions::default()).await.unwrap();
+        let (net_entry, _) = webvh_net
+            .resolve(&did, ResolveOptions::default())
+            .await
+            .unwrap();
         let net_doc = net_entry.get_did_document().unwrap();
 
         // Get the raw log from the network-resolved state

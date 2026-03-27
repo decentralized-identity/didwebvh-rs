@@ -18,7 +18,7 @@ use tracing_subscriber::filter;
           resolve did:webvh:<scid>:example.com%3A8080\n  \
           resolve did:webvh:<scid>:example.com:custom:path\n  \
           resolve did:webvh:<scid>:example.com --max-size-kb 500\n  \
-          resolve \"did:webvh:<scid>:example.com?versionId=2-Qm...\"",
+          resolve \"did:webvh:<scid>:example.com?versionId=2-Qm...\""
 )]
 struct Args {
     /// The DID to resolve (e.g. "did:webvh:<scid>:example.com")
