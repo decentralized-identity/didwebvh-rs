@@ -6,7 +6,11 @@
 *   If you want greater control and caching then please use the DIDWebVHState.resolve() method directly
 */
 
-use crate::{DIDWebVHError, DIDWebVHState, log_entry::LogEntryMethods, resolve::DIDWebVH};
+use crate::{
+    DIDWebVHError, DIDWebVHState,
+    log_entry::LogEntryMethods,
+    resolve::{DIDWebVH, ResolveOptions},
+};
 use ssi::dids::{
     DIDMethod, DIDMethodResolver, Document,
     document::{
@@ -35,7 +39,10 @@ impl DIDMethodResolver for DIDWebVH {
         );
         async move {
             let mut state = DIDWebVHState::default();
-            match state.resolve(method_specific_id, None, false).await {
+            match state
+                .resolve(method_specific_id, ResolveOptions::default())
+                .await
+            {
                 Ok((log_entry, _)) => {
                     let document: Document = serde_json::from_value(log_entry.get_state().clone())
                         .map_err(|e| {

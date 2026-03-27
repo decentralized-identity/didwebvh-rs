@@ -38,16 +38,55 @@ pub mod ssi_resolve;
 
 pub mod implicit; // WebVH specification implies specific Services for a DID Document
 
+/// Default maximum HTTP response size: 200 KB.
+#[cfg(feature = "network")]
+pub const DEFAULT_MAX_RESPONSE_BYTES: u64 = 200 * 1024;
+
+/// Options for network-based DID resolution.
+#[cfg(feature = "network")]
+#[derive(Debug, Clone)]
+pub struct ResolveOptions {
+    /// Network timeout (default: 10 seconds).
+    pub timeout: Option<Duration>,
+    /// Download witnesses concurrently with log entries (default: false).
+    pub eager_witness_download: bool,
+    /// Maximum allowed HTTP response body size in bytes (default: 200 KB).
+    /// Applies independently to each downloaded file (did.jsonl, did-witness.json).
+    pub max_response_bytes: u64,
+}
+
+#[cfg(feature = "network")]
+impl Default for ResolveOptions {
+    fn default() -> Self {
+        Self {
+            timeout: None,
+            eager_witness_download: false,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+        }
+    }
+}
+
 /// HTTP client helpers for fetching DID log entries and witness proofs.
 #[cfg(feature = "network")]
 pub struct DIDWebVH;
 
 #[cfg(feature = "network")]
 impl DIDWebVH {
-    // Handles the fetching of the file from a given URL
-    async fn download_file(client: Client, url: Url) -> Result<String, DIDWebVHError> {
+    /// Fetches a file from the given URL, enforcing a maximum response body size.
+    ///
+    /// The size limit is checked in two ways:
+    /// 1. If the server provides a `Content-Length` header, the response is rejected
+    ///    immediately when the advertised size exceeds `max_bytes`.
+    /// 2. The body is read in chunks, and the cumulative size is checked against
+    ///    `max_bytes` as data arrives. This catches cases where `Content-Length` is
+    ///    absent or inaccurate (e.g. chunked transfer encoding).
+    async fn download_file(
+        client: Client,
+        url: Url,
+        max_bytes: u64,
+    ) -> Result<String, DIDWebVHError> {
         let url_str = url.to_string();
-        let response =
+        let mut response =
             client
                 .get(url.clone())
                 .send()
@@ -58,28 +97,61 @@ impl DIDWebVH {
                     message: format!("Request failed: {e}"),
                 })?;
 
-        if response.status() == StatusCode::OK {
-            response
-                .text()
-                .await
-                .map_err(|e| DIDWebVHError::NetworkError {
-                    url: url_str,
-                    status_code: Some(200),
-                    message: format!("Failed to read response body: {e}"),
-                })
-        } else {
+        if response.status() != StatusCode::OK {
             let status = response.status().as_u16();
             warn!("url ({url_str}): HTTP Status code = {status}");
-            Err(DIDWebVHError::NetworkError {
+            return Err(DIDWebVHError::NetworkError {
                 url: url_str,
                 status_code: Some(status),
                 message: format!("HTTP {status}"),
-            })
+            });
         }
+
+        // Early rejection based on Content-Length header
+        if let Some(content_length) = response.content_length()
+            && content_length > max_bytes
+        {
+            return Err(DIDWebVHError::ResponseTooLarge {
+                url: url_str,
+                max_bytes,
+            });
+        }
+
+        // Read body in chunks, enforcing the size limit as data arrives
+        let mut body = Vec::new();
+        let mut total_bytes: u64 = 0;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| DIDWebVHError::NetworkError {
+                url: url_str.clone(),
+                status_code: Some(200),
+                message: format!("Failed to read response body: {e}"),
+            })?
+        {
+            total_bytes += chunk.len() as u64;
+            if total_bytes > max_bytes {
+                return Err(DIDWebVHError::ResponseTooLarge {
+                    url: url_str,
+                    max_bytes,
+                });
+            }
+            body.extend_from_slice(&chunk);
+        }
+
+        String::from_utf8(body).map_err(|e| DIDWebVHError::NetworkError {
+            url: url_str,
+            status_code: Some(200),
+            message: format!("Response body is not valid UTF-8: {e}"),
+        })
     }
 
     /// Handles all processing and fetching for LogEntry file
-    async fn get_log_entries(url: WebVHURL, client: Client) -> Result<String, DIDWebVHError> {
+    async fn get_log_entries(
+        url: WebVHURL,
+        client: Client,
+        max_bytes: u64,
+    ) -> Result<String, DIDWebVHError> {
         let log_entries_url = match url.get_http_url(Some("did.jsonl")) {
             Ok(url) => url,
             Err(e) => {
@@ -90,11 +162,15 @@ impl DIDWebVH {
             }
         };
 
-        Self::download_file(client, log_entries_url).await
+        Self::download_file(client, log_entries_url, max_bytes).await
     }
 
     /// Handles all processing and fetching for witness proofs
-    async fn get_witness_proofs(url: WebVHURL, client: Client) -> Result<String, DIDWebVHError> {
+    async fn get_witness_proofs(
+        url: WebVHURL,
+        client: Client,
+        max_bytes: u64,
+    ) -> Result<String, DIDWebVHError> {
         let witness_url = match url.get_http_url(Some("did-witness.json")) {
             Ok(url) => url,
             Err(e) => {
@@ -105,7 +181,7 @@ impl DIDWebVH {
             }
         };
 
-        Self::download_file(client, witness_url).await
+        Self::download_file(client, witness_url, max_bytes).await
     }
 }
 
@@ -313,16 +389,12 @@ impl DIDWebVHState {
     ///
     /// # Arguments
     /// * `did` — The DID to resolve (may include query parameters like `?versionId=...`).
-    /// * `timeout` — Network timeout (default: 10 seconds).
-    /// * `eager_witness_download` — If `true`, download `did.jsonl` and `did-witness.json`
-    ///   concurrently (faster when witnesses are expected). If `false` (recommended default),
-    ///   download `did.jsonl` first, then only fetch `did-witness.json` when the log entries
-    ///   actually configure witnesses.
+    /// * `options` — Network options (timeout, eager witness download, max response size).
+    ///   Use [`ResolveOptions::default()`] for sensible defaults (10 s timeout, 200 KB limit).
     pub async fn resolve(
         &mut self,
         did: &str,
-        timeout: Option<Duration>,
-        eager_witness_download: bool,
+        options: ResolveOptions,
     ) -> Result<(&LogEntry, MetaData), DIDWebVHError> {
         let _span = span!(Level::DEBUG, "resolve", DID = did);
         async move {
@@ -335,22 +407,24 @@ impl DIDWebVHState {
             }
 
             if !self.validated || self.expires < Utc::now() {
+                let max_bytes = options.max_response_bytes;
+
                 // If building for WASM then don't use tokio::spawn
                 // This means sequential retrieval of files
                 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
                 let (log_entries, witness_proofs) = {
-                    trace!("timeout is not available in WASM builds! {timeout:#?}");
+                    trace!("timeout is not available in WASM builds! {:#?}", options.timeout);
                     let client = reqwest::Client::new();
 
                     let raw_entries =
-                        DIDWebVH::get_log_entries(parsed_did_url.clone(), client.clone()).await?;
+                        DIDWebVH::get_log_entries(parsed_did_url.clone(), client.clone(), max_bytes).await?;
                     let log_entries = Self::parse_log_entries(&raw_entries)?;
                     Self::validate_log_entries(&log_entries, did)?;
 
                     let needs_witnesses = Self::needs_witness_proofs(&log_entries);
-                    let witness_proofs = if eager_witness_download || needs_witnesses {
+                    let witness_proofs = if options.eager_witness_download || needs_witnesses {
                         let raw_result =
-                            DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone())
+                            DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone(), max_bytes)
                                 .await;
                         Self::resolve_witness_proofs(raw_result, needs_witnesses)?
                     } else {
@@ -364,7 +438,7 @@ impl DIDWebVHState {
                 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
                 let (log_entries, witness_proofs) = {
                     // Set network timeout values. Will default to 10 seconds for any reasons
-                    let network_timeout = timeout.unwrap_or(Duration::from_secs(10));
+                    let network_timeout = options.timeout.unwrap_or(Duration::from_secs(10));
 
                     let client = reqwest::ClientBuilder::new()
                         .timeout(network_timeout)
@@ -375,15 +449,17 @@ impl DIDWebVHState {
                             message: format!("Failed to build HTTP client: {e}"),
                         })?;
 
-                    if eager_witness_download {
+                    if options.eager_witness_download {
                         // Eager path: download both files concurrently
                         let r1 = tokio::spawn(DIDWebVH::get_log_entries(
                             parsed_did_url.clone(),
                             client.clone(),
+                            max_bytes,
                         ));
                         let r2 = tokio::spawn(DIDWebVH::get_witness_proofs(
                             parsed_did_url.clone(),
                             client.clone(),
+                            max_bytes,
                         ));
 
                         let raw_entries = r1.await.map_err(|e| {
@@ -411,6 +487,7 @@ impl DIDWebVHState {
                         let raw_entries = tokio::spawn(DIDWebVH::get_log_entries(
                             parsed_did_url.clone(),
                             client.clone(),
+                            max_bytes,
                         ))
                         .await
                         .map_err(|e| DIDWebVHError::NetworkError {
@@ -426,6 +503,7 @@ impl DIDWebVHState {
                             let raw_result = DIDWebVH::get_witness_proofs(
                                 parsed_did_url.clone(),
                                 client.clone(),
+                                max_bytes,
                             )
                             .await;
                             Self::resolve_witness_proofs(raw_result, true)?
@@ -455,10 +533,9 @@ impl DIDWebVHState {
     pub async fn resolve_owned(
         &mut self,
         did: &str,
-        timeout: Option<Duration>,
-        eager_witness_download: bool,
+        options: ResolveOptions,
     ) -> Result<(LogEntry, MetaData), DIDWebVHError> {
-        let (entry, metadata) = self.resolve(did, timeout, eager_witness_download).await?;
+        let (entry, metadata) = self.resolve(did, options).await?;
         Ok((entry.clone(), metadata))
     }
 }
@@ -532,6 +609,7 @@ impl DIDWebVHState {
 
 #[cfg(all(test, feature = "network"))]
 mod tests {
+    use super::ResolveOptions;
     use crate::{DIDWebVHError, DIDWebVHState};
 
     // ===== Mock-based resolve tests =====
@@ -581,7 +659,7 @@ mod tests {
         let (_server, did) = setup_mock_resolve().await;
 
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, None, false).await;
+        let result = webvh.resolve(&did, ResolveOptions::default()).await;
         assert!(result.is_ok(), "resolve failed: {result:?}");
     }
 
@@ -597,7 +675,15 @@ mod tests {
             .await;
 
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, None, true).await;
+        let result = webvh
+            .resolve(
+                &did,
+                ResolveOptions {
+                    eager_witness_download: true,
+                    ..ResolveOptions::default()
+                },
+            )
+            .await;
         assert!(result.is_ok(), "eager resolve failed: {result:?}");
     }
 
@@ -610,13 +696,18 @@ mod tests {
 
         // First resolve to get the versionId
         let mut webvh = DIDWebVHState::default();
-        let (entry, _) = webvh.resolve(&did, None, false).await.unwrap();
+        let (entry, _) = webvh
+            .resolve(&did, ResolveOptions::default())
+            .await
+            .unwrap();
         let version_id = entry.get_version_id().to_string();
 
         // Resolve again with ?versionId=...
         let mut webvh2 = DIDWebVHState::default();
         let did_with_version = format!("{did}?versionId={version_id}");
-        let result = webvh2.resolve(&did_with_version, None, false).await;
+        let result = webvh2
+            .resolve(&did_with_version, ResolveOptions::default())
+            .await;
         assert!(result.is_ok(), "versionId resolve failed: {result:?}");
     }
 
@@ -629,13 +720,18 @@ mod tests {
 
         // Resolve to get a valid versionTime
         let mut webvh = DIDWebVHState::default();
-        let (entry, _) = webvh.resolve(&did, None, false).await.unwrap();
+        let (entry, _) = webvh
+            .resolve(&did, ResolveOptions::default())
+            .await
+            .unwrap();
         let version_time = entry.get_version_time_string();
 
         // Resolve again with ?versionTime=...
         let mut webvh2 = DIDWebVHState::default();
         let did_with_time = format!("{did}?versionTime={version_time}");
-        let result = webvh2.resolve(&did_with_time, None, false).await;
+        let result = webvh2
+            .resolve(&did_with_time, ResolveOptions::default())
+            .await;
         assert!(result.is_ok(), "versionTime resolve failed: {result:?}");
     }
 
@@ -663,7 +759,7 @@ mod tests {
 
         let did = mock_did(&server, "testscid404");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, None, false).await;
+        let result = webvh.resolve(&did, ResolveOptions::default()).await;
 
         match result {
             Err(DIDWebVHError::NetworkError {
@@ -686,7 +782,7 @@ mod tests {
 
         let did = mock_did(&server, "testscid500");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, None, false).await;
+        let result = webvh.resolve(&did, ResolveOptions::default()).await;
 
         match result {
             Err(DIDWebVHError::NetworkError {
@@ -709,7 +805,7 @@ mod tests {
 
         let did = mock_did(&server, "testscidbad");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, None, false).await;
+        let result = webvh.resolve(&did, ResolveOptions::default()).await;
 
         match result {
             Err(DIDWebVHError::LogEntryError(_)) => {} // expected: invalid JSON
@@ -729,7 +825,7 @@ mod tests {
 
         let did = mock_did(&server, "testscidempty");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, None, false).await;
+        let result = webvh.resolve(&did, ResolveOptions::default()).await;
 
         match result {
             Err(DIDWebVHError::NotFound(msg)) => {
@@ -756,7 +852,13 @@ mod tests {
         let did = mock_did(&server, "testscidtimeout");
         let mut webvh = DIDWebVHState::default();
         let result = webvh
-            .resolve(&did, Some(Duration::from_secs(1)), false)
+            .resolve(
+                &did,
+                ResolveOptions {
+                    timeout: Some(Duration::from_secs(1)),
+                    ..ResolveOptions::default()
+                },
+            )
             .await;
 
         match result {
@@ -775,7 +877,13 @@ mod tests {
         let did = "did:webvh:testscidrefused:localhost%3A1";
         let mut webvh = DIDWebVHState::default();
         let result = webvh
-            .resolve(did, Some(std::time::Duration::from_secs(2)), false)
+            .resolve(
+                did,
+                ResolveOptions {
+                    timeout: Some(std::time::Duration::from_secs(2)),
+                    ..ResolveOptions::default()
+                },
+            )
             .await;
 
         match result {
@@ -800,7 +908,7 @@ mod tests {
 
         let did = mock_did(&server, "testscidfields");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, None, false).await;
+        let result = webvh.resolve(&did, ResolveOptions::default()).await;
 
         match result {
             Err(DIDWebVHError::NetworkError {
@@ -874,7 +982,10 @@ mod tests {
 
         // Resolve via network
         let mut webvh_net = DIDWebVHState::default();
-        let (net_entry, _) = webvh_net.resolve(&did, None, false).await.unwrap();
+        let (net_entry, _) = webvh_net
+            .resolve(&did, ResolveOptions::default())
+            .await
+            .unwrap();
         let net_doc = net_entry.get_did_document().unwrap();
 
         // Get the raw log from the network-resolved state
@@ -953,6 +1064,69 @@ mod tests {
         assert!(
             result.is_err(),
             "resolve_log should fail with tampered data"
+        );
+    }
+
+    // ===== Response size limit tests =====
+
+    /// Tests that a response with a body exceeding the limit is rejected.
+    #[tokio::test]
+    async fn resolve_rejects_large_response_body() {
+        let server = MockServer::start().await;
+        // Create a body larger than DEFAULT_MAX_RESPONSE_BYTES (200 KB)
+        let large_body = "x".repeat(210 * 1024);
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_string(&large_body))
+            .mount(&server)
+            .await;
+
+        let did = mock_did(&server, "testscidlarge");
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+
+        match result {
+            Err(DIDWebVHError::ResponseTooLarge { max_bytes, .. }) => {
+                assert_eq!(max_bytes, super::DEFAULT_MAX_RESPONSE_BYTES);
+            }
+            other => panic!("Expected ResponseTooLarge, got: {other:?}"),
+        }
+    }
+
+    /// Tests that a custom max_response_bytes limit is enforced.
+    #[tokio::test]
+    async fn resolve_custom_size_limit() {
+        let (_server, did) = setup_mock_resolve().await;
+
+        // Use an extremely small limit that the valid response will exceed
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh
+            .resolve(
+                &did,
+                ResolveOptions {
+                    max_response_bytes: 10, // 10 bytes — too small for any DID log
+                    ..ResolveOptions::default()
+                },
+            )
+            .await;
+
+        match result {
+            Err(DIDWebVHError::ResponseTooLarge { max_bytes, .. }) => {
+                assert_eq!(max_bytes, 10);
+            }
+            other => panic!("Expected ResponseTooLarge, got: {other:?}"),
+        }
+    }
+
+    /// Tests that normal-sized responses pass the default size limit.
+    #[tokio::test]
+    async fn resolve_normal_response_passes_size_check() {
+        let (_server, did) = setup_mock_resolve().await;
+
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+        assert!(
+            result.is_ok(),
+            "Normal response should pass size check: {result:?}"
         );
     }
 }

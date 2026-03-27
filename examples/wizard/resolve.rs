@@ -1,7 +1,7 @@
 use chrono::Utc;
 use console::style;
 use dialoguer::{Input, theme::ColorfulTheme};
-use didwebvh_rs::{DIDWebVHState, log_entry::LogEntryMethods};
+use didwebvh_rs::{DIDWebVHState, log_entry::LogEntryMethods, resolve::ResolveOptions};
 
 pub async fn resolve() {
     let did: String = Input::with_theme(&ColorfulTheme::default())
@@ -28,7 +28,7 @@ pub async fn resolve() {
     );
 
     let start = Utc::now();
-    match webvh.resolve(&did, None, false).await {
+    match webvh.resolve(&did, ResolveOptions::default()).await {
         Ok((log_entry, metadata)) => {
             let end = Utc::now();
             println!(

@@ -13,5 +13,7 @@ pub use crate::async_trait;
 pub use crate::create::{CreateDIDConfig, create_did};
 pub use crate::log_entry::LogEntryMethods;
 pub use crate::parameters::Parameters;
+#[cfg(feature = "network")]
+pub use crate::resolve::ResolveOptions;
 pub use crate::witness::Witnesses;
 pub use crate::witness::proofs::WitnessProofCollection;
