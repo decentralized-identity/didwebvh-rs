@@ -175,6 +175,7 @@ pub struct VerificationMethodInput {
 ///     .also_known_as_scid(false)
 ///     .build();
 /// ```
+#[derive(Default)]
 pub struct InteractiveCreateConfig {
     /// Pre-set address (URL or DID format). `None` = prompt.
     pub(crate) address: Option<String>,
@@ -205,27 +206,6 @@ pub struct InteractiveCreateConfig {
     pub(crate) also_known_as_web: Option<bool>,
     /// `None` = prompt, `Some(bool)` = use this.
     pub(crate) also_known_as_scid: Option<bool>,
-}
-
-impl Default for InteractiveCreateConfig {
-    fn default() -> Self {
-        Self {
-            address: None,
-            authorization_keys: Vec::new(),
-            verification_methods: Vec::new(),
-            services: None,
-            controller: None,
-            also_known_as: None,
-            portable: None,
-            next_keys: None,
-            witnesses: None,
-            witness_secrets: HashMap::default(),
-            watchers: None,
-            ttl: None,
-            also_known_as_web: None,
-            also_known_as_scid: None,
-        }
-    }
 }
 
 impl InteractiveCreateConfig {
@@ -1040,7 +1020,7 @@ fn prompt_verification_methods(
         ];
         let purpose = MultiSelect::with_theme(&theme)
             .with_prompt("What are the relationships of this Verification Method?")
-            .items(&relationships)
+            .items(relationships)
             .defaults(&[true, true, true, false, false])
             .interact()
             .map_err(map_io)?;
@@ -1123,7 +1103,7 @@ fn prompt_services(webvh_did: &str) -> Result<Vec<Value>, DIDWebVHError> {
 
         let service = match Select::with_theme(&theme)
             .with_prompt("Service type?")
-            .items(&service_choice)
+            .items(service_choice)
             .default(0)
             .interact()
             .map_err(map_io)?

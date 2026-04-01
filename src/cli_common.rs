@@ -98,9 +98,7 @@ pub(crate) fn prompt_keys() -> Result<Vec<Secret>, DIDWebVHError> {
                 .map_err(map_io)?;
 
             if Confirm::with_theme(&theme)
-                .with_prompt(format!(
-                    "Use public({public}) and private({private}) as an authorized key?"
-                ))
+                .with_prompt(format!("Use public({public}) as an authorized key?"))
                 .interact()
                 .map_err(map_io)?
             {

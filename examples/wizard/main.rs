@@ -301,10 +301,9 @@ async fn update_existing_did() -> Result<()> {
                 .with_prompt("Export latest state to a did:web document?")
                 .default(true)
                 .interact()?
+                && let Some(entry) = result.state().log_entries().last()
             {
-                if let Some(entry) = result.state().log_entries().last() {
-                    save_did_web(entry)?;
-                }
+                save_did_web(entry)?;
             }
         }
     }

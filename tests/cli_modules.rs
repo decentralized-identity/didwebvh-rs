@@ -163,7 +163,7 @@ mod cli_tests {
         assert!(result.witness_secrets().is_empty());
 
         // VM secret key should have resolved DID in its ID (no {SCID})
-        for (id, _) in result.verification_method_secrets() {
+        for id in result.verification_method_secrets().keys() {
             assert!(!id.contains("{SCID}"));
             assert!(!id.contains("{DID}"));
             assert!(id.contains("#key-0"));

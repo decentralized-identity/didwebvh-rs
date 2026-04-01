@@ -166,6 +166,7 @@ impl UpdateSecrets {
 ///     .build();
 /// let result = interactive_update_did(config).await?;
 /// ```
+#[derive(Default)]
 pub struct InteractiveUpdateConfig {
     /// Pre-loaded DID WebVH state. If `None`, prompts for a `.jsonl` file path.
     pub(crate) state: Option<DIDWebVHState>,
@@ -177,18 +178,6 @@ pub struct InteractiveUpdateConfig {
     pub(crate) new_document: Option<Option<Value>>,
     /// For Migrate: pre-set the new URL. `None` = prompt.
     pub(crate) new_url: Option<String>,
-}
-
-impl Default for InteractiveUpdateConfig {
-    fn default() -> Self {
-        Self {
-            state: None,
-            secrets: None,
-            operation: None,
-            new_document: None,
-            new_url: None,
-        }
-    }
 }
 
 impl InteractiveUpdateConfig {
@@ -1048,39 +1037,39 @@ fn prompt_modify_witness_params(
         return Ok(());
     }
 
-    if let Some(witnesses) = &old_witness {
-        if matches!(&**witnesses, Witnesses::Value { .. }) {
-            if prompt_confirm("Disable Witnessing for this DID?", false)? {
-                new_params.witness = Some(Arc::new(Witnesses::Empty {}));
-                return Ok(());
-            }
-
-            let (threshold, witness_nodes) = match &**witnesses {
-                Witnesses::Value {
-                    threshold,
-                    witnesses,
-                } => (*threshold, witnesses),
-                _ => {
-                    return Err(DIDWebVHError::ParametersError(
-                        "Invalid witness state".to_string(),
-                    ));
-                }
-            };
-
-            let new_threshold: u32 = Input::with_theme(&theme)
-                .with_prompt("Witness Threshold Count?")
-                .default(threshold)
-                .interact()
-                .map_err(map_io)?;
-
-            let new_witnesses = prompt_modify_witness_nodes(witness_nodes, new_threshold, secrets)?;
-
-            new_params.witness = Some(Arc::new(Witnesses::Value {
-                threshold: new_threshold,
-                witnesses: new_witnesses,
-            }));
+    if let Some(witnesses) = &old_witness
+        && matches!(&**witnesses, Witnesses::Value { .. })
+    {
+        if prompt_confirm("Disable Witnessing for this DID?", false)? {
+            new_params.witness = Some(Arc::new(Witnesses::Empty {}));
             return Ok(());
         }
+
+        let (threshold, witness_nodes) = match &**witnesses {
+            Witnesses::Value {
+                threshold,
+                witnesses,
+            } => (*threshold, witnesses),
+            _ => {
+                return Err(DIDWebVHError::ParametersError(
+                    "Invalid witness state".to_string(),
+                ));
+            }
+        };
+
+        let new_threshold: u32 = Input::with_theme(&theme)
+            .with_prompt("Witness Threshold Count?")
+            .default(threshold)
+            .interact()
+            .map_err(map_io)?;
+
+        let new_witnesses = prompt_modify_witness_nodes(witness_nodes, new_threshold, secrets)?;
+
+        new_params.witness = Some(Arc::new(Witnesses::Value {
+            threshold: new_threshold,
+            witnesses: new_witnesses,
+        }));
+        return Ok(());
     }
 
     // No existing witnesses, create new ones
