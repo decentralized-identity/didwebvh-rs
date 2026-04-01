@@ -213,7 +213,7 @@ To run this wizard, you need to have [Rust](https://www.rust-lang.org/)
 installed on your machine.
 
 ```Bash
-cargo run --example wizard -- --help
+cargo run --example wizard --features cli
 ```
 
 > **_WARNING:_** _This wizard will generate secrets locally on your machine, and

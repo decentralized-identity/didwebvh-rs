@@ -23,7 +23,7 @@
     watchers, TTL, portability, pre-rotation)
   - **Migrate**: Move DID to a new domain (rewrites identifiers, adds previous
     DID to `alsoKnownAs`)
-  - **Revoke**: Permanently deactivate the DID (handles pre-rotation teardown)
+  - **Deactivate**: Permanently deactivate the DID (handles pre-rotation teardown)
   - Returns the updated state, new log entry, and updated secrets
 - **`UpdateSecrets`** — Secret management type with hash-based and public-key-based
   lookups, used for DID update operations. Compatible with the wizard's
@@ -34,6 +34,21 @@
 
 #### Improvements
 
+- **Inline concept explanations** — All interactive prompts now explain key
+  DID concepts in context: what witnesses and watchers do, how pre-rotation
+  works, what verification relationships mean (authentication, assertionMethod,
+  keyAgreement, etc.), what controllers are for, and what portability implies.
+- **Key type guidance** — The verification method key selection now describes
+  each algorithm (Ed25519 recommended, X25519 for encryption, P-256/P-384 for
+  enterprise, secp256k1 for blockchain).
+- **TTL and threshold recommendations** — Default TTL of 3600 seconds suggested,
+  witness threshold explained with concrete example (e.g. "threshold=2 with 3
+  witnesses means any 2 of 3 must sign").
+- **Consistent terminology** — Standardized on "deactivate" (not "revoke"),
+  "authorization keys" (not "updateKeys"), and consistent prompt phrasing
+  throughout all CLI flows.
+- **Format hints** — Input prompts now include format examples (e.g. multibase
+  encoding `z6Mk...`, DID format `did:key:z6Mk...`, watcher URLs).
 - **Wizard example refactored** — The `wizard` example now uses the library's
   `interactive_create_did()` and `interactive_update_did()` flows instead of its
   own standalone implementation. This reduced the wizard from ~1800 lines across
