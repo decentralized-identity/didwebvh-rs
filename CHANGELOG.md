@@ -1,5 +1,41 @@
 # didwebvh-rs Changelog history
 
+## 1st April 2026
+
+### Release 0.4.1
+
+#### New
+
+- **`cli` feature flag** — Embeddable interactive CLI flows for 3rd-party
+  applications. Adds `dialoguer`, `console`, and `affinidi-tdk` as optional
+  dependencies. Not included in WASM builds.
+- **`interactive_create_did()`** (`cli_create` module) — Interactive DID creation
+  flow with the same guided experience as the built-in wizard. Third-party apps
+  can embed this in their own CLIs. Supports:
+  - Full interactivity (all values prompted) via `InteractiveCreateConfig::default()`
+  - Partial pre-configuration via the builder (skip specific prompts)
+  - Full pre-configuration (no prompts) for automated use
+  - `{DID}` placeholder rewriting in pre-configured services and VM IDs
+  - Returns the created DID, signed log entry, witness proofs, and all secrets
+- **`interactive_update_did()`** (`cli_update` module) — Interactive DID update
+  flow supporting three operations:
+  - **Modify**: Edit DID document and/or parameters (auth keys, witnesses,
+    watchers, TTL, portability, pre-rotation)
+  - **Migrate**: Move DID to a new domain (rewrites identifiers, adds previous
+    DID to `alsoKnownAs`)
+  - **Revoke**: Permanently deactivate the DID (handles pre-rotation teardown)
+  - Returns the updated state, new log entry, and updated secrets
+- **`UpdateSecrets`** — Secret management type with hash-based and public-key-based
+  lookups, used for DID update operations. Compatible with the wizard's
+  `ConfigInfo` JSON format for loading secrets from existing files.
+- **Shared CLI utilities** (`cli_common` module, internal) — Common prompt
+  helpers, key generation, witness setup, and next-key-hash generation shared
+  between create and update flows.
+
+#### Maintenance
+
+- Version bump: 0.4.0 → 0.4.1
+
 ## 27th March 2026
 
 ### Release 0.4.0

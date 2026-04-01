@@ -19,6 +19,15 @@ use std::{fmt, sync::Arc};
 use thiserror::Error;
 use tracing::debug;
 
+/// Shared utilities for CLI interactive flows, gated behind the `cli` feature.
+#[cfg(feature = "cli")]
+pub(crate) mod cli_common;
+/// Interactive CLI flow for creating a new DID, gated behind the `cli` feature.
+#[cfg(feature = "cli")]
+pub mod cli_create;
+/// Interactive CLI flow for updating an existing DID, gated behind the `cli` feature.
+#[cfg(feature = "cli")]
+pub mod cli_update;
 pub mod create;
 pub mod did_web;
 pub mod log_entry;
