@@ -534,13 +534,20 @@ async fn do_migrate(
 
     println!(
         "\n{}",
-        style("** DANGER ** : You are about to migrate this DID to a new URL!")
-            .color256(9)
-            .blink()
+        style("WARNING: You are about to migrate this DID to a new domain.").color256(9)
     );
     println!(
-        "{} {}",
-        style("Current DID URL:").color256(69),
+        "\t{}",
+        style(
+            "The DID's SCID will remain the same, and the previous URL will be \
+             added to alsoKnownAs. All references in the DID document will be \
+             rewritten to the new domain."
+        )
+        .color256(69)
+    );
+    println!(
+        "\n{} {}",
+        style("Current URL:").color256(69),
         style(did_url.get_http_url(None)?).color256(45)
     );
 
@@ -549,7 +556,7 @@ async fn do_migrate(
         Some(url) => url,
         None => {
             let input: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("New URL")
+                .with_prompt("New URL (e.g. https://new-domain.example.com/)")
                 .with_initial_text(did_url.get_http_url(None)?)
                 .interact_text()
                 .map_err(map_io)?;
@@ -641,24 +648,34 @@ async fn do_revoke(
         .to_string();
 
     println!(
-        "{}",
-        style("** DANGER ** : You are about to revoke a DID!")
-            .color256(9)
-            .blink()
+        "\n{}\n",
+        style("WARNING: You are about to permanently deactivate this DID.").color256(9)
+    );
+    println!(
+        "\t{}",
+        style(
+            "Deactivation is irreversible. The DID will no longer be valid for \
+             authentication, credential issuance, or any other purpose. Existing \
+             credentials issued by this DID will fail verification."
+        )
+        .color256(69)
     );
 
-    if !prompt_confirm(
-        &format!("Are you sure you want to deactivate the DID({did})?"),
-        false,
-    )? {
-        return Err(DIDWebVHError::DIDError("Revocation cancelled".to_string()));
+    if !prompt_confirm(&format!("Permanently deactivate DID ({did})?"), false)? {
+        return Err(DIDWebVHError::DIDError(
+            "Deactivation cancelled".to_string(),
+        ));
     }
 
     // If pre-rotation is active, must disable it first
     if last_entry.validated_parameters.pre_rotation_active {
         println!(
             "{}",
-            style("Key pre-rotation is active, must disable first! Disabling...").color256(214)
+            style(
+                "Pre-rotation is active — creating an intermediate log entry to \
+                 disable it before deactivation..."
+            )
+            .color256(214)
         );
         deactivate_pre_rotation(webvh_state, secrets).await?;
 
@@ -679,18 +696,18 @@ async fn do_revoke(
 
         println!(
             "{}",
-            style("Key Pre-rotation has been disabled").color256(34)
+            style("Pre-rotation disabled successfully.").color256(34)
         );
     }
 
-    // Create final revocation entry
+    // Create final deactivation entry
     revoke_entry(webvh_state, secrets).await?;
 
     println!(
-        "{}{}{}",
-        style("DID (").color256(9),
+        "\n{} {} {}",
+        style("DID").color256(9),
         style(&did).color256(141),
-        style(") has been revoked!").color256(9)
+        style("has been permanently deactivated.").color256(9)
     );
 
     Ok(())
@@ -835,7 +852,19 @@ fn prompt_update_authorization_keys(
 
     if old_params.pre_rotation_active {
         // Pre-rotation mode
-        if prompt_confirm("Disable pre-rotation mode?", false)? {
+        println!(
+            "{}",
+            style("Pre-rotation is currently enabled for this DID.").color256(69)
+        );
+        println!(
+            "\t{}",
+            style(
+                "You must select one of your pre-committed keys to authorize this update. \
+                 You can also choose to disable pre-rotation going forward."
+            )
+            .color256(69)
+        );
+        if prompt_confirm("Disable pre-rotation after this update?", false)? {
             new_params.pre_rotation_active = false;
             new_params.next_key_hashes = Some(Arc::new(Vec::new()));
             let update_keys =
@@ -881,7 +910,10 @@ fn prompt_update_authorization_keys(
         new_params.active_update_keys = old_params.active_update_keys.clone();
         new_params.pre_rotation_active = false;
 
-        if prompt_confirm("Enable pre-rotation mode?", false)? {
+        if prompt_confirm(
+            "Enable pre-rotation? (Commit to future key hashes for added security)",
+            false,
+        )? {
             let next_hashes = prompt_create_next_key_hashes_for_update(secrets)?;
             if next_hashes.is_empty() {
                 return Err(DIDWebVHError::ParametersError(
@@ -891,10 +923,7 @@ fn prompt_update_authorization_keys(
             new_params.next_key_hashes = Some(Arc::new(next_hashes));
         } else {
             // Optionally modify update keys
-            if prompt_confirm(
-                "Do you want to change authorization keys going forward from this update?",
-                false,
-            )? {
+            if prompt_confirm("Change authorization keys for future updates?", false)? {
                 if old_params.active_update_keys.is_empty() {
                     return Err(DIDWebVHError::ParametersError(
                         "No active update keys found in previous LogEntry".to_string(),
@@ -1112,7 +1141,7 @@ fn prompt_modify_witness_nodes(
             style(threshold).color256(34)
         );
 
-        if prompt_confirm("Generate witness DIDs for you?", true)? {
+        if prompt_confirm("Auto-generate witness key pairs?", true)? {
             let count = if new_witnesses.len() as u32 > threshold {
                 break;
             } else {
@@ -1255,27 +1284,30 @@ fn prompt_modify_watcher_params(
 }
 
 fn prompt_modify_ttl(ttl: &Option<u32>, params: &mut Parameters) -> Result<(), DIDWebVHError> {
-    print!("{}", style("Existing TTL: ").color256(69));
+    print!("{}", style("Current TTL: ").color256(69));
     let current_ttl = if let Some(ttl) = ttl {
-        println!("{}", style(ttl).color256(34));
+        println!(
+            "{} {}",
+            style(ttl).color256(34),
+            style("seconds").color256(69)
+        );
         *ttl
     } else {
-        println!("{}", style("NOT SET").color256(214));
-        0_u32
+        println!(
+            "{}",
+            style("not set (resolver decides caching)").color256(214)
+        );
+        3600_u32
     };
 
     if prompt_confirm("Change the TTL?", false)? {
         let new_ttl: u32 = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt("New TTL (0 = Disable TTL)?")
+            .with_prompt("New TTL in seconds (e.g. 3600 = 1 hour)")
             .default(current_ttl)
             .interact()
             .map_err(map_io)?;
 
-        if new_ttl == 0 {
-            params.ttl = Some(3600);
-        } else {
-            params.ttl = Some(new_ttl);
-        }
+        params.ttl = Some(new_ttl);
     } else {
         params.ttl = *ttl;
     }
@@ -1407,13 +1439,13 @@ fn load_secrets_from_file(path: &str) -> Result<UpdateSecrets, DIDWebVHError> {
 
 fn prompt_operation() -> Result<UpdateOperation, DIDWebVHError> {
     let menu = vec![
-        "Create a new Log Entry (Modify DID Document or Parameters)?",
-        "Move to a new domain (portability)?",
-        "Revoke this DID?",
+        "Modify  - Update the DID document and/or parameters",
+        "Migrate - Move this DID to a new domain (requires portability)",
+        "Deactivate - Permanently deactivate this DID (irreversible)",
     ];
 
     let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Action")
+        .with_prompt("What would you like to do?")
         .items(&menu)
         .default(0)
         .interact()

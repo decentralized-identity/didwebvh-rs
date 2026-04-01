@@ -64,7 +64,7 @@ pub(crate) fn prompt_keys() -> Result<Vec<Secret>, DIDWebVHError> {
 
     loop {
         if !keys.is_empty() {
-            println!("{}", style("Authorizing Keys:").color256(69));
+            println!("{}", style("Authorization keys so far:").color256(69));
             for k in &keys {
                 println!(
                     "\t{}",
@@ -72,7 +72,7 @@ pub(crate) fn prompt_keys() -> Result<Vec<Secret>, DIDWebVHError> {
                 );
             }
             if !Confirm::with_theme(&theme)
-                .with_prompt("Do you want to add another key?")
+                .with_prompt("Add another authorization key?")
                 .default(false)
                 .interact()
                 .map_err(map_io)?
@@ -82,23 +82,29 @@ pub(crate) fn prompt_keys() -> Result<Vec<Secret>, DIDWebVHError> {
         }
 
         if Confirm::with_theme(&theme)
-            .with_prompt("Do you already have a key to use?")
+            .with_prompt("Do you already have a key to import? (No = generate a new one)")
             .default(false)
             .interact()
             .map_err(map_io)?
         {
+            println!(
+                "\t{}",
+                style("Enter the key in multibase encoding (e.g. z6Mk...)").color256(69)
+            );
             let public: String = Input::with_theme(&theme)
-                .with_prompt("publicKeyMultibase")
+                .with_prompt("Public key (multibase)")
                 .interact()
                 .map_err(map_io)?;
 
             let private: String = Input::with_theme(&theme)
-                .with_prompt("privateKeyMultibase")
+                .with_prompt("Private key (multibase)")
                 .interact()
                 .map_err(map_io)?;
 
             if Confirm::with_theme(&theme)
-                .with_prompt(format!("Use public({public}) as an authorized key?"))
+                .with_prompt(format!(
+                    "Use public key ({public}) as an authorization key?"
+                ))
                 .interact()
                 .map_err(map_io)?
             {
@@ -109,7 +115,7 @@ pub(crate) fn prompt_keys() -> Result<Vec<Secret>, DIDWebVHError> {
                 .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
             println!(
                 "{} {}",
-                style("DID:").color256(69),
+                style("Generated DID:").color256(69),
                 style(&did).color256(141)
             );
             println!(
@@ -128,6 +134,41 @@ pub(crate) fn prompt_keys() -> Result<Vec<Secret>, DIDWebVHError> {
 
 /// Prompt the user to select a key type and generate a single key for a verification method.
 pub(crate) fn prompt_create_key(id: &str) -> Result<Secret, DIDWebVHError> {
+    println!(
+        "{}",
+        style("Select a key type for this verification method:").color256(69)
+    );
+    println!(
+        "\t{} {} {}",
+        style("Ed25519").color256(141),
+        style("-").color256(69),
+        style("Fast, compact signatures. Recommended for most use cases.").color256(69)
+    );
+    println!(
+        "\t{} {} {}",
+        style("X25519").color256(141),
+        style("-").color256(69),
+        style("Key agreement / encryption (derived from Ed25519).").color256(69)
+    );
+    println!(
+        "\t{} {} {}",
+        style("P-256").color256(141),
+        style("-").color256(69),
+        style("NIST curve. Common in enterprise and government systems.").color256(69)
+    );
+    println!(
+        "\t{} {} {}",
+        style("secp256k1").color256(141),
+        style("-").color256(69),
+        style("Used in Bitcoin/Ethereum ecosystems.").color256(69)
+    );
+    println!(
+        "\t{} {} {}",
+        style("P-384").color256(141),
+        style("-").color256(69),
+        style("NIST curve. Higher security margin than P-256.").color256(69)
+    );
+
     let items = vec![
         KeyType::Ed25519.to_string(),
         "X25519".to_string(),
@@ -137,7 +178,7 @@ pub(crate) fn prompt_create_key(id: &str) -> Result<Secret, DIDWebVHError> {
     ];
 
     let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("What key type?")
+        .with_prompt("Key type")
         .items(&items)
         .default(0)
         .interact()
@@ -166,21 +207,26 @@ pub(crate) fn prompt_create_key(id: &str) -> Result<Secret, DIDWebVHError> {
 
 /// Prompt the user to set up witness nodes from scratch.
 ///
-/// Returns the witness configuration and a map of witness DID → Secret.
+/// Returns the witness configuration and a map of witness DID -> Secret.
 pub(crate) fn prompt_witnesses() -> Result<(Witnesses, HashMap<String, Secret>), DIDWebVHError> {
     let theme = ColorfulTheme::default();
 
     println!(
         "{}",
+        style("Witnesses are independent nodes that co-sign DID updates.").color256(69)
+    );
+    println!(
+        "\t{}",
         style(
-            "To protect against compromised controller authorization keys, \
-             use witness nodes which can offer additional protection!"
+            "They protect against unauthorized changes by requiring multiple parties \
+             to approve each update. Even if an attacker compromises your authorization \
+             keys, they cannot modify the DID without also compromising enough witnesses."
         )
         .color256(69)
     );
 
     if !Confirm::with_theme(&theme)
-        .with_prompt("Do you want to use witnesses?")
+        .with_prompt("Enable witnesses for this DID?")
         .default(true)
         .interact()
         .map_err(map_io)?
@@ -190,20 +236,21 @@ pub(crate) fn prompt_witnesses() -> Result<(Witnesses, HashMap<String, Secret>),
 
     println!(
         "{}",
-        style("What is the minimum number (threshold) of witnesses required to witness a change?")
-            .color256(69)
-    );
-    println!(
-        "\t{}",
         style(
-            "Number of witnesses should be higher than threshold \
-             to handle failure of a witness node(s)"
+            "The threshold is the minimum number of witness signatures required to \
+             approve an update. Set this lower than your total witness count so the \
+             DID remains updatable even if some witness nodes go offline."
         )
         .color256(69)
     );
+    println!(
+        "\t{}{}",
+        style("Example: ").color256(214),
+        style("threshold=2 with 3 witnesses means any 2 of 3 must sign.").color256(69)
+    );
 
     let threshold: u32 = Input::with_theme(&theme)
-        .with_prompt("Witness Threshold Count?")
+        .with_prompt("Witness threshold (minimum signatures required)")
         .interact()
         .map_err(map_io)?;
 
@@ -229,7 +276,7 @@ pub(crate) fn prompt_generate_witness_nodes(
     let mut secrets = HashMap::default();
 
     if Confirm::with_theme(&theme)
-        .with_prompt("Generate witness DIDs for you?")
+        .with_prompt("Auto-generate witness key pairs? (No = enter existing witness DIDs)")
         .default(true)
         .interact()
         .map_err(map_io)?
@@ -255,9 +302,13 @@ pub(crate) fn prompt_generate_witness_nodes(
             secrets.insert(did, key);
         }
     } else {
+        println!(
+            "\t{}",
+            style("Enter each witness as a did:key identifier (e.g. did:key:z6Mk...)").color256(69)
+        );
         loop {
             let did: String = Input::with_theme(&theme)
-                .with_prompt(format!("Witness #{:02} DID?", witness_nodes.len()))
+                .with_prompt(format!("Witness #{:02} DID", witness_nodes.len()))
                 .interact()
                 .map_err(map_io)?;
 
@@ -267,8 +318,9 @@ pub(crate) fn prompt_generate_witness_nodes(
 
             if !Confirm::with_theme(&theme)
                 .with_prompt(format!(
-                    "Add another witness: current:({:02}) threshold:({threshold:02})?",
+                    "Add another witness? (current: {}, threshold: {})",
                     witness_nodes.len(),
+                    threshold,
                 ))
                 .default(true)
                 .interact()
@@ -291,17 +343,18 @@ pub(crate) fn prompt_next_key_hashes() -> Result<(Vec<Multibase>, Vec<Secret>), 
     println!(
         "{}",
         style(
-            "Best practice to set pre-rotated authorization key(s), \
-             protects against an attacker switching to new authorization keys"
+            "Pre-rotation protects against authorization key compromise. You commit \
+             to the hash of your next key(s) now, so an attacker who steals your \
+             current key cannot substitute their own — the next update must use a key \
+             matching the pre-committed hash."
         )
         .color256(69)
     );
     println!(
-        "{}{}{}{}",
-        style("NOTE: ").bold().color256(214),
-        style("This will loop until you decide you have enough key hashes. Select").color256(69),
-        style(" <no> ").color256(214),
-        style("to stop generating key hashes").color256(69)
+        "{}{}",
+        style("Recommendation: ").bold().color256(214),
+        style("Generate at least one pre-rotated key. You can add more for redundancy.")
+            .color256(69)
     );
 
     let mut hashes: Vec<Multibase> = Vec::new();
@@ -310,7 +363,7 @@ pub(crate) fn prompt_next_key_hashes() -> Result<(Vec<Multibase>, Vec<Secret>), 
     loop {
         if Confirm::with_theme(&ColorfulTheme::default())
             .with_prompt(format!(
-                "Existing hashes ({}): Generate a new pre-rotated key?",
+                "Generate a pre-rotated key? ({} created so far)",
                 hashes.len()
             ))
             .default(true)
@@ -325,7 +378,7 @@ pub(crate) fn prompt_next_key_hashes() -> Result<(Vec<Multibase>, Vec<Secret>), 
                 style(key.get_public_keymultibase().map_err(map_key_err)?).color256(34),
                 style("privateKeyMultibase:").color256(69),
                 style(key.get_private_keymultibase().map_err(map_key_err)?).color256(214),
-                style("key hash:").color256(69),
+                style("key hash (published):").color256(69),
                 style(key.get_public_keymultibase_hash().map_err(map_key_err)?).color256(214)
             );
             hashes.push(Multibase::new(
@@ -347,12 +400,21 @@ pub(crate) fn prompt_watchers() -> Result<Vec<String>, DIDWebVHError> {
     let theme = ColorfulTheme::default();
     println!(
         "{}",
-        style("For reliability and durability, you should nominate watchers for this DID")
+        style("Watchers are external nodes that monitor your DID for unauthorized changes.")
             .color256(69)
+    );
+    println!(
+        "\t{}",
+        style(
+            "They provide an independent audit trail and can alert you if your DID \
+             is modified unexpectedly. Adding watchers improves the reliability and \
+             trustworthiness of your DID."
+        )
+        .color256(69)
     );
 
     if !Confirm::with_theme(&theme)
-        .with_prompt("Do you want to add watchers?")
+        .with_prompt("Add watchers for this DID?")
         .default(true)
         .interact()
         .map_err(map_io)?
@@ -363,7 +425,7 @@ pub(crate) fn prompt_watchers() -> Result<Vec<String>, DIDWebVHError> {
     let mut watchers = Vec::new();
     loop {
         let url: String = Input::with_theme(&theme)
-            .with_prompt("Watcher URL?")
+            .with_prompt("Watcher URL (e.g. https://watcher.example.com)")
             .interact()
             .map_err(map_io)?;
 
@@ -371,7 +433,7 @@ pub(crate) fn prompt_watchers() -> Result<Vec<String>, DIDWebVHError> {
 
         if !Confirm::with_theme(&theme)
             .with_prompt("Add another watcher?")
-            .default(true)
+            .default(false)
             .interact()
             .map_err(map_io)?
         {

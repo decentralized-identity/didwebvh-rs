@@ -789,37 +789,35 @@ fn prompt_address() -> Result<String, DIDWebVHError> {
     let theme = ColorfulTheme::default();
 
     println!(
-        "{} {} {}",
-        style("What is the address where the").color256(69),
-        style("webvh").color256(141),
-        style("files can be found?").color256(69)
+        "{}",
+        style("Where will this DID's log file (did.jsonl) be hosted?").color256(69)
     );
     println!(
+        "\t{}",
+        style(
+            "Enter either a URL or a DID identifier. The SCID (Self-Certifying Identifier) \
+             will be generated automatically during creation."
+        )
+        .color256(69)
+    );
+    println!();
+    println!(
         "{} {} {} {}",
-        style("Default Location:").color256(69),
+        style("URL example:").color256(69),
         style("https://example.com/.well-known/did.jsonl").color256(45),
-        style("would refer to").color256(69),
+        style("->").color256(69),
         style("did:webvh:{SCID}:example.com").color256(141),
     );
     println!(
         "{} {} {} {}",
-        style("Example:").color256(69),
+        style("URL example:").color256(69),
         style("https://affinidi.com:8000/path/dids/did.jsonl").color256(45),
-        style("converts to").color256(69),
-        style(" did:webvh:{SCID}:affinidi.com%3A8000:path:dids").color256(141)
+        style("->").color256(69),
+        style("did:webvh:{SCID}:affinidi.com%3A8000:path:dids").color256(141)
     );
 
     let mut initial_text = String::new();
     loop {
-        println!(
-            "{} {} {} {} {}",
-            style("Enter the address (can be").color256(69),
-            style("URL").color256(45),
-            style("or").color256(69),
-            style("DID").color256(141),
-            style(")").color256(69),
-        );
-
         let mut input = Input::with_theme(&theme).with_prompt("Address");
         if initial_text.is_empty() {
             input = input.default("http://localhost:8000/".to_string());
@@ -905,22 +903,26 @@ fn prompt_address() -> Result<String, DIDWebVHError> {
 
 fn prompt_authorization_keys(webvh_did: &str) -> Result<Vec<Secret>, DIDWebVHError> {
     println!(
-        "{} {} {}",
-        style("A set of keys are required to manage").color256(69),
-        style("webvh").color256(141),
-        style("dids.").color256(69)
-    );
-    println!(
         "{}",
-        style("At least one key is required, though you can have more than one!").color256(69),
+        style("Authorization keys control who can update this DID.").color256(69)
     );
     println!(
-        "{} {} {}{}{}",
-        style("These will become the published").color256(69),
-        style("updateKeys").color256(141),
-        style("for this DID (").color256(69),
+        "\t{}",
+        style(
+            "These keys are published as the DID's updateKeys. Anyone with a valid \
+             authorization key can create new log entries (updates) for this DID."
+        )
+        .color256(69)
+    );
+    println!(
+        "\t{} {}",
+        style("At least one key is required.").color256(214),
+        style("Multiple keys allow shared management.").color256(69)
+    );
+    println!(
+        "\t{} {}",
+        style("DID:").color256(69),
         style(webvh_did).color256(141),
-        style(")").color256(69)
     );
 
     prompt_keys()
@@ -928,15 +930,23 @@ fn prompt_authorization_keys(webvh_did: &str) -> Result<Vec<Secret>, DIDWebVHErr
 
 fn prompt_controller() -> Result<Option<String>, DIDWebVHError> {
     let theme = ColorfulTheme::default();
+    println!(
+        "{}",
+        style(
+            "A controller is another DID that has authority over this DID. \
+             This is optional — most DIDs are self-controlled."
+        )
+        .color256(69)
+    );
     loop {
         if Confirm::with_theme(&theme)
-            .with_prompt("Does this DID have a controller?")
+            .with_prompt("Set a controller for this DID?")
             .default(false)
             .interact()
             .map_err(map_io)?
         {
             let input: String = Input::with_theme(&theme)
-                .with_prompt("Controller")
+                .with_prompt("Controller DID (e.g. did:webvh:...)")
                 .interact()
                 .map_err(map_io)?;
             if Confirm::with_theme(&theme)
@@ -956,8 +966,17 @@ fn prompt_also_known_as() -> Result<Vec<String>, DIDWebVHError> {
     let mut others: Vec<String> = Vec::new();
     let theme = ColorfulTheme::default();
 
+    println!(
+        "{}",
+        style(
+            "You can add alternative identifiers (aliases) for this DID. \
+             These are listed in the alsoKnownAs field of the DID document. \
+             The did:web and did:scid:vh aliases are handled separately later."
+        )
+        .color256(69)
+    );
     if Confirm::with_theme(&theme)
-        .with_prompt("Is this DID also known as another DID?")
+        .with_prompt("Add any alsoKnownAs aliases?")
         .default(false)
         .interact()
         .map_err(map_io)?
@@ -996,9 +1015,54 @@ fn prompt_verification_methods(
     let mut success_count: u32 = 0;
     let theme = ColorfulTheme::default();
 
+    println!(
+        "{}",
+        style("Verification methods are cryptographic keys embedded in the DID document.")
+            .color256(69)
+    );
+    println!(
+        "\t{}",
+        style("Each method is assigned one or more relationships that define how it can be used:")
+            .color256(69)
+    );
+    println!(
+        "\t  {} {} {}",
+        style("authentication").color256(141),
+        style("-").color256(69),
+        style("Prove you control this DID (e.g. login, identity verification)").color256(69)
+    );
+    println!(
+        "\t  {} {} {}",
+        style("assertionMethod").color256(141),
+        style("-").color256(69),
+        style("Issue verifiable credentials and sign claims").color256(69)
+    );
+    println!(
+        "\t  {} {} {}",
+        style("keyAgreement").color256(141),
+        style("-").color256(69),
+        style("Establish encrypted communication channels").color256(69)
+    );
+    println!(
+        "\t  {} {} {}",
+        style("capabilityInvocation").color256(141),
+        style("-").color256(69),
+        style("Invoke capabilities (e.g. access control)").color256(69)
+    );
+    println!(
+        "\t  {} {} {}",
+        style("capabilityDelegation").color256(141),
+        style("-").color256(69),
+        style("Delegate capabilities to other parties").color256(69)
+    );
+    println!(
+        "\t{}",
+        style("At least one verification method is required.").color256(214)
+    );
+
     loop {
         let vm_id: String = Input::with_theme(&theme)
-            .with_prompt("Verification Method ID")
+            .with_prompt("Verification method ID")
             .default(format!("{webvh_did}#key-{key_id}"))
             .interact()
             .map_err(map_io)?;
@@ -1019,7 +1083,7 @@ fn prompt_verification_methods(
             "capabilityDelegation",
         ];
         let purpose = MultiSelect::with_theme(&theme)
-            .with_prompt("What are the relationships of this Verification Method?")
+            .with_prompt("Select relationships for this verification method (space to toggle)")
             .items(relationships)
             .defaults(&[true, true, true, false, false])
             .interact()
@@ -1072,9 +1136,17 @@ fn prompt_verification_methods(
 }
 
 fn prompt_services(webvh_did: &str) -> Result<Vec<Value>, DIDWebVHError> {
+    println!(
+        "{}",
+        style(
+            "Services describe how to interact with this DID (e.g. messaging endpoints, \
+             APIs, linked domains). Each service has an ID, a type, and an endpoint."
+        )
+        .color256(69)
+    );
     let mut services: Vec<Value> = Vec::new();
     let theme = ColorfulTheme::default();
-    let service_choice = ["Simple", "Complex"];
+    let service_choice = ["Simple (ID + type + endpoint)", "Complex (JSON editor)"];
     let mut service_id: u32 = 0;
 
     let default_service_map = r#"{
@@ -1178,38 +1250,52 @@ fn prompt_services(webvh_did: &str) -> Result<Vec<Value>, DIDWebVHError> {
 fn prompt_portable() -> Result<bool, DIDWebVHError> {
     println!(
         "{}",
-        style("A webvh DID can be portable, allowing for it to move to another web address.")
-            .color256(69)
+        style(
+            "Portability allows this DID to be migrated to a different web domain in the future."
+        )
+        .color256(69)
     );
     println!(
         "\t{}",
-        style("Portability can only be enabled on the initial creation of the DID!").color256(214)
+        style(
+            "If enabled, the DID's SCID remains the same when moved, and the old DID \
+             is added as an alias. If disabled, the DID is permanently bound to this domain."
+        )
+        .color256(69)
     );
-    prompt_confirm("Is this DID portable?", true)
+    println!(
+        "\t{}",
+        style("This setting can only be enabled at creation time — it cannot be added later.")
+            .color256(214)
+    );
+    prompt_confirm("Enable portability for this DID?", true)
 }
 
 fn prompt_ttl() -> Result<Option<u32>, DIDWebVHError> {
     println!(
         "{}",
-        style("Setting a Time To Live (TTL) in seconds can help resolvers cache a resolved webvh DID correctly.")
+        style("TTL (Time To Live) tells resolvers how long to cache this DID before re-fetching.")
             .color256(69)
     );
     println!(
-        "\t{}",
+        "\t{}{}",
+        style("Recommendation: ").color256(214),
         style(
-            "Not setting a TTL leaves it up to the DID resolver to determine how long to cache for."
+            "3600 (1 hour) for most DIDs. Lower for frequently updated DIDs, \
+             higher for stable ones. Not setting a TTL lets the resolver decide."
         )
         .color256(69)
     );
 
     if Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt("Do you want to use a TTL?")
+        .with_prompt("Set a TTL?")
         .default(true)
         .interact()
         .map_err(map_io)?
     {
         let ttl: u32 = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt("TTL in Seconds?")
+            .with_prompt("TTL in seconds (e.g. 3600 = 1 hour)")
+            .default(3600_u32)
             .interact()
             .map_err(map_io)?;
         Ok(Some(ttl))
