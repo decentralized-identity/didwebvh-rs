@@ -74,7 +74,7 @@ required-features = ["network"]
 
 [[example]]
 name = "wizard"
-required-features = ["network"]
+required-features = ["network", "cli"]
 
 [[example]]
 name = "generate_history"

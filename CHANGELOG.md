@@ -32,6 +32,14 @@
   helpers, key generation, witness setup, and next-key-hash generation shared
   between create and update flows.
 
+#### Improvements
+
+- **Wizard example refactored** — The `wizard` example now uses the library's
+  `interactive_create_did()` and `interactive_update_did()` flows instead of its
+  own standalone implementation. This reduced the wizard from ~1800 lines across
+  9 files to ~280 lines across 3 files (`main.rs`, `did_web.rs`, `resolve.rs`).
+  The wizard now requires the `cli` feature (`cargo run --example wizard --features cli`).
+
 #### Maintenance
 
 - Version bump: 0.4.0 → 0.4.1
