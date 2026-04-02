@@ -266,3 +266,90 @@ async fn multiple_sequential_updates() {
     let result = update_did(config).await.unwrap();
     assert_eq!(result.state().log_entries().len(), 4);
 }
+
+#[tokio::test]
+async fn combined_document_and_parameter_update() {
+    let (state, key, did) = create_test_did(false).await;
+
+    let mut new_doc = state.log_entries().last().unwrap().get_state().clone();
+    new_doc.as_object_mut().unwrap().insert(
+        "service".to_string(),
+        json!([{
+            "id": format!("{did}#svc"),
+            "type": "TestService",
+            "serviceEndpoint": "https://example.com/svc"
+        }]),
+    );
+
+    let new_key = generate_signing_key();
+    let new_pk = new_key.get_public_keymultibase().unwrap();
+
+    // Document + key rotation + TTL in one update
+    let config = UpdateDIDConfig::builder()
+        .state(state)
+        .signing_key(key)
+        .document(new_doc)
+        .update_keys(vec![Multibase::new(new_pk)])
+        .ttl(1800)
+        .build()
+        .unwrap();
+
+    let result = update_did(config).await.unwrap();
+    assert_eq!(result.state().log_entries().len(), 2);
+    let log_json = serde_json::to_string(result.log_entry()).unwrap();
+    assert!(log_json.contains("TestService"));
+}
+
+#[tokio::test]
+async fn disable_portability() {
+    let (state, key, _) = create_test_did(true).await; // portable
+
+    let config = UpdateDIDConfig::builder()
+        .state(state)
+        .signing_key(key)
+        .disable_portability()
+        .build()
+        .unwrap();
+
+    let result = update_did(config).await.unwrap();
+    assert_eq!(result.state().log_entries().len(), 2);
+}
+
+#[tokio::test]
+async fn update_watchers() {
+    let (state, key, _) = create_test_did(false).await;
+
+    let config = UpdateDIDConfig::builder()
+        .state(state)
+        .signing_key(key)
+        .watchers(vec!["https://watcher.example.com".to_string()])
+        .build()
+        .unwrap();
+
+    let result = update_did(config).await.unwrap();
+    assert_eq!(result.state().log_entries().len(), 2);
+}
+
+#[tokio::test]
+async fn disable_watchers() {
+    let (state, key, _) = create_test_did(false).await;
+
+    // First add watchers
+    let config = UpdateDIDConfig::builder()
+        .state(state)
+        .signing_key(key.clone())
+        .watchers(vec!["https://watcher.example.com".to_string()])
+        .build()
+        .unwrap();
+    let result = update_did(config).await.unwrap();
+
+    // Then disable them with empty vec
+    let config = UpdateDIDConfig::builder()
+        .state(result.into_state())
+        .signing_key(key)
+        .watchers(vec![])
+        .build()
+        .unwrap();
+    let result = update_did(config).await.unwrap();
+    assert_eq!(result.state().log_entries().len(), 3);
+}

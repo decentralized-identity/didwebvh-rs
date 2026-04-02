@@ -1104,7 +1104,7 @@ fn prompt_verification_methods(
                 );
                 let selected = MultiSelect::with_theme(&theme)
                     .with_prompt("Select signing relationships for this key (space to toggle)")
-                    .items(&items)
+                    .items(items)
                     .defaults(&[true, true, false, false])
                     .interact()
                     .map_err(map_io)?;
@@ -1123,7 +1123,7 @@ fn prompt_verification_methods(
                     .with_prompt(
                         "Select relationships for this verification method (space to toggle)",
                     )
-                    .items(&items)
+                    .items(items)
                     .defaults(&[true, true, true, false, false])
                     .interact()
                     .map_err(map_io)?;

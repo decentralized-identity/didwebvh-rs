@@ -269,19 +269,14 @@ impl InteractiveUpdateResult {
         &self.state
     }
 
-    /// Consume the result and take ownership of the state.
-    pub fn into_state(self) -> DIDWebVHState {
-        self.state
-    }
-
     /// All secrets (potentially updated with newly generated keys).
     pub fn secrets(&self) -> &UpdateSecrets {
         &self.secrets
     }
 
-    /// Consume the result and take ownership of secrets.
-    pub fn into_secrets(self) -> UpdateSecrets {
-        self.secrets
+    /// Consume the result and take ownership of both the state and secrets.
+    pub fn into_parts(self) -> (DIDWebVHState, UpdateSecrets) {
+        (self.state, self.secrets)
     }
 }
 
