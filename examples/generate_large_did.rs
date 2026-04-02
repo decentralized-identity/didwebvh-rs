@@ -103,7 +103,7 @@ pub async fn main() -> Result<()> {
 
     // Get the actual DID (with SCID resolved) for subsequent documents
     let scid = didwebvh.scid();
-    let did_id = did_template.replace("{SCID}", &scid);
+    let did_id = did_template.replace("{SCID}", scid);
 
     println!(
         "\t{}{}",
@@ -134,7 +134,7 @@ pub async fn main() -> Result<()> {
         previous_keys = new_next_keys;
         current_size = estimate_current_size(&didwebvh);
 
-        if entry_count % 100 == 0 {
+        if entry_count.is_multiple_of(100) {
             let size = Byte::from_u64(current_size).get_appropriate_unit(UnitType::Decimal);
             println!(
                 "\t{}{}{}{:#.2}",
