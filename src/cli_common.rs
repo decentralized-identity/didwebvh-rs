@@ -132,8 +132,23 @@ pub(crate) fn prompt_keys() -> Result<Vec<Secret>, DIDWebVHError> {
     Ok(keys)
 }
 
+/// Describes what a key type can be used for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KeyCapability {
+    /// Signing only (Ed25519) — authentication, assertionMethod, capabilityInvocation/Delegation.
+    SigningOnly,
+    /// Encryption only (X25519) — keyAgreement.
+    EncryptionOnly,
+    /// General purpose (P-256, secp256k1, P-384) — can be used for any relationship.
+    General,
+}
+
 /// Prompt the user to select a key type and generate a single key for a verification method.
-pub(crate) fn prompt_create_key(id: &str) -> Result<Secret, DIDWebVHError> {
+///
+/// Returns the generated secret and the key's capability (signing-only, encryption-only,
+/// or general-purpose), so the caller can determine which verification relationships
+/// are valid for this key.
+pub(crate) fn prompt_create_key(id: &str) -> Result<(Secret, KeyCapability), DIDWebVHError> {
     println!(
         "{}",
         style("Select a key type for this verification method:").color256(69)
@@ -142,31 +157,34 @@ pub(crate) fn prompt_create_key(id: &str) -> Result<Secret, DIDWebVHError> {
         "\t{} {} {}",
         style("Ed25519").color256(141),
         style("-").color256(69),
-        style("Fast, compact signatures. Recommended for most use cases.").color256(69)
+        style("Signing only. Fast, compact signatures. Recommended for most use cases.")
+            .color256(69)
     );
     println!(
         "\t{} {} {}",
         style("X25519").color256(141),
         style("-").color256(69),
-        style("Key agreement / encryption (derived from Ed25519).").color256(69)
+        style("Encryption only. Key agreement for encrypted communication (derived from Ed25519).")
+            .color256(69)
     );
     println!(
         "\t{} {} {}",
         style("P-256").color256(141),
         style("-").color256(69),
-        style("NIST curve. Common in enterprise and government systems.").color256(69)
+        style("Signing + encryption. NIST curve, common in enterprise and government systems.")
+            .color256(69)
     );
     println!(
         "\t{} {} {}",
         style("secp256k1").color256(141),
         style("-").color256(69),
-        style("Used in Bitcoin/Ethereum ecosystems.").color256(69)
+        style("Signing + encryption. Used in Bitcoin/Ethereum ecosystems.").color256(69)
     );
     println!(
         "\t{} {} {}",
         style("P-384").color256(141),
         style("-").color256(69),
-        style("NIST curve. Higher security margin than P-256.").color256(69)
+        style("Signing + encryption. NIST curve, higher security margin than P-256.").color256(69)
     );
 
     let items = vec![
@@ -184,23 +202,30 @@ pub(crate) fn prompt_create_key(id: &str) -> Result<Secret, DIDWebVHError> {
         .interact()
         .map_err(map_io)?;
 
-    let mut secret = if selection == 1 {
-        // X25519 - generate Ed25519 and convert
+    let (mut secret, capability) = if selection == 0 {
+        // Ed25519 — signing only
         let (_, secret) = DID::generate_did_key(KeyType::Ed25519)
             .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
-        secret
+        (secret, KeyCapability::SigningOnly)
+    } else if selection == 1 {
+        // X25519 — encryption only
+        let (_, secret) = DID::generate_did_key(KeyType::Ed25519)
+            .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
+        let secret = secret
             .to_x25519()
-            .map_err(|e| DIDWebVHError::DIDError(format!("X25519 conversion failed: {e}")))?
+            .map_err(|e| DIDWebVHError::DIDError(format!("X25519 conversion failed: {e}")))?;
+        (secret, KeyCapability::EncryptionOnly)
     } else {
+        // P-256, secp256k1, P-384 — general purpose
         let key_type = KeyType::try_from(items[selection].as_str())
             .map_err(|e| DIDWebVHError::DIDError(format!("Invalid key type: {e}")))?;
-        DID::generate_did_key(key_type)
-            .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?
-            .1
+        let (_, secret) = DID::generate_did_key(key_type)
+            .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
+        (secret, KeyCapability::General)
     };
 
     secret.id = id.to_string();
-    Ok(secret)
+    Ok((secret, capability))
 }
 
 // ─────────────────────── Witness creation ───────────────────────

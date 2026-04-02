@@ -1039,7 +1039,7 @@ fn prompt_verification_methods(
     );
     println!(
         "\t  {} {} {}",
-        style("keyAgreement").color256(141),
+        style("keyAgreement (encryption)").color256(141),
         style("-").color256(69),
         style("Establish encrypted communication channels").color256(69)
     );
@@ -1067,7 +1067,7 @@ fn prompt_verification_methods(
             .interact()
             .map_err(map_io)?;
 
-        let secret = prompt_create_key(&vm_id)?;
+        let (secret, capability) = prompt_create_key(&vm_id)?;
         let vm = json!({
             "id": vm_id.clone(),
             "type": "Multikey",
@@ -1075,19 +1075,74 @@ fn prompt_verification_methods(
             "controller": webvh_did
         });
 
-        let relationships = [
-            "authentication",
-            "assertionMethod",
-            "keyAgreement",
-            "capabilityInvocation",
-            "capabilityDelegation",
-        ];
-        let purpose = MultiSelect::with_theme(&theme)
-            .with_prompt("Select relationships for this verification method (space to toggle)")
-            .items(relationships)
-            .defaults(&[true, true, true, false, false])
-            .interact()
-            .map_err(map_io)?;
+        // Determine relationships based on key capability
+        use crate::cli_common::KeyCapability;
+        let (relationship_names, purpose) = match capability {
+            KeyCapability::EncryptionOnly => {
+                // X25519 can only do key agreement — auto-assign
+                println!(
+                    "\t{}",
+                    style("X25519 is an encryption key — automatically assigned to keyAgreement.")
+                        .color256(69)
+                );
+                (
+                    vec!["keyAgreement"],
+                    vec![0_usize], // index into relationship_names
+                )
+            }
+            KeyCapability::SigningOnly => {
+                // Ed25519 can only sign — offer signing relationships, no keyAgreement
+                let items = [
+                    "authentication",
+                    "assertionMethod",
+                    "capabilityInvocation",
+                    "capabilityDelegation",
+                ];
+                println!(
+                    "\t{}",
+                    style("Ed25519 is a signing key — keyAgreement is not available.").color256(69)
+                );
+                let selected = MultiSelect::with_theme(&theme)
+                    .with_prompt("Select signing relationships for this key (space to toggle)")
+                    .items(&items)
+                    .defaults(&[true, true, false, false])
+                    .interact()
+                    .map_err(map_io)?;
+                (items.to_vec(), selected)
+            }
+            KeyCapability::General => {
+                // P-256, secp256k1, P-384 — can do both signing and encryption
+                let items = [
+                    "authentication",
+                    "assertionMethod",
+                    "keyAgreement (encryption)",
+                    "capabilityInvocation",
+                    "capabilityDelegation",
+                ];
+                let selected = MultiSelect::with_theme(&theme)
+                    .with_prompt(
+                        "Select relationships for this verification method (space to toggle)",
+                    )
+                    .items(&items)
+                    .defaults(&[true, true, true, false, false])
+                    .interact()
+                    .map_err(map_io)?;
+                (items.to_vec(), selected)
+            }
+        };
+
+        // Map display names back to DID document field names
+        let doc_field_names: Vec<&str> = purpose
+            .iter()
+            .map(|&i| {
+                let name = relationship_names[i];
+                if name.starts_with("keyAgreement") {
+                    "keyAgreement"
+                } else {
+                    name
+                }
+            })
+            .collect();
 
         println!(
             "{}\n{}",
@@ -1095,8 +1150,8 @@ fn prompt_verification_methods(
             style(serde_json::to_string_pretty(&vm).unwrap()).color256(141)
         );
         print!("{} ", style("Relationships:").color256(69));
-        for r in &purpose {
-            print!("{} ", style(relationships[*r]).color256(141));
+        for name in &doc_field_names {
+            print!("{} ", style(name).color256(141));
         }
         println!();
 
@@ -1113,8 +1168,8 @@ fn prompt_verification_methods(
                 .as_array_mut()
                 .unwrap()
                 .push(vm.clone());
-            for r in purpose {
-                doc[relationships[r]]
+            for name in doc_field_names {
+                doc[name]
                     .as_array_mut()
                     .unwrap()
                     .push(Value::String(vm_id.clone()));
