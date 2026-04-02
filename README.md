@@ -155,6 +155,22 @@ Multiple changes can be combined in a single update (e.g. document + TTL + watch
 For deactivation with active pre-rotation, the function automatically creates an
 intermediate log entry to disable pre-rotation first.
 
+## Examples
+
+The `examples/` directory contains runnable demonstrations of the library's API:
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `create` | `cargo run --example create` | Create a new DID with `create_did()`, `{DID}` placeholders, and aliases |
+| `update_did` | `cargo run --example update_did` | Update a DID document (add a service endpoint) using `update_did()` |
+| `rotate_keys` | `cargo run --example rotate_keys` | Rotate authorization keys using `update_did()` |
+| `deactivate_did` | `cargo run --example deactivate_did` | Permanently deactivate a DID using `update_did()` |
+| `custom_signer` | `cargo run --example custom_signer` | Implement the `Signer` trait for HSM/KMS integration |
+| `resolve` | `cargo run --example resolve -- <DID>` | Resolve a did:webvh DID over HTTP(S) and display the document |
+| `wizard` | `cargo run --example wizard --features cli` | Interactive CLI wizard for DID creation, updates, and resolution |
+| `generate_history` | `cargo run --release --example generate_history -- -c 200` | Generate large DID histories for performance testing |
+| `generate_large_did` | `cargo run --release --example generate_large_did` | Generate a 1 MB+ DID file for benchmarking |
+
 ## WitnessesBuilder
 
 Build witness configurations ergonomically:

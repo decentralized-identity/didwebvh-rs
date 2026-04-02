@@ -1,3 +1,10 @@
+//! Example: Create a new DID using `create_did()`.
+//!
+//! Demonstrates the high-level programmatic API for DID creation with
+//! `{DID}` placeholders, `also_known_as` aliases, and portability.
+//!
+//! Run with: `cargo run --example create`
+
 use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::prelude::*;
 use serde_json::json;
@@ -5,10 +12,10 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
-    // Generate or load a signing key
+    // Generate a signing key with the required did:key ID format
     let signing_key = Secret::generate_ed25519(None, None);
 
-    // Build parameters with the signing key as an update key
+    // Build parameters — update_keys controls who can modify the DID
     let parameters = Parameters {
         update_keys: Some(Arc::new(vec![Multibase::new(
             signing_key.get_public_keymultibase().unwrap(),
@@ -17,8 +24,8 @@ async fn main() {
         ..Default::default()
     };
 
-    // Build the DID document
-    // "{DID}" can be used a placeholder that will be replaced by the builder with the final value
+    // Build the DID document — use "{DID}" as a placeholder for the final DID identifier.
+    // It will be replaced with the actual DID (including SCID) during creation.
     let did_document = json!({
         "id": "{DID}",
         "@context": ["https://www.w3.org/ns/did/v1"],

@@ -1,4 +1,9 @@
 //! Example: Create a DID and then permanently deactivate it using `update_did()`.
+//!
+//! Demonstrates irreversible DID deactivation. After deactivation, the DID
+//! can no longer be updated or used for authentication or credential issuance.
+//!
+//! Run with: `cargo run --example deactivate_did`
 
 use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::prelude::*;

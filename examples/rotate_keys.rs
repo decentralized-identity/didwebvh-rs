@@ -1,4 +1,9 @@
 //! Example: Create a DID and then rotate its authorization keys using `update_did()`.
+//!
+//! Demonstrates replacing the DID's authorization keys so that future
+//! updates must be signed with the new key.
+//!
+//! Run with: `cargo run --example rotate_keys`
 
 use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::prelude::*;

@@ -1,4 +1,9 @@
 //! Example: Create a DID and then update its document using `update_did()`.
+//!
+//! Demonstrates adding a service endpoint to an existing DID document
+//! using the high-level programmatic update API.
+//!
+//! Run with: `cargo run --example update_did`
 
 use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::prelude::*;
