@@ -50,11 +50,8 @@ impl WitnessProofCollection {
         // For each witness, check if there is a proof available
         let mut valid_proofs = 0;
         for w in witness_nodes {
-            let key = w.id.as_str().split_at(8);
-            let Some((_, oldest_id, proof)) = self
-                .witness_version
-                .get(&[w.id.as_str(), "#", key.1].concat())
-            else {
+            let did_key_vm = w.as_did_key();
+            let Some((_, oldest_id, proof)) = self.witness_version.get(&did_key_vm) else {
                 // No proof available for this witness, threshold will catch if too few proofs
                 debug!("No Witness proofs exist for witness ({})", w.id);
                 continue;
@@ -281,8 +278,9 @@ mod tests {
     fn test_witness_proof_from_future_skipped() {
         use crate::test_utils::make_test_proof;
         let mut proofs = WitnessProofCollection::default();
-        let witness_id = "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6";
-        let vm = format!("{}#{}", witness_id, &witness_id[8..]);
+        let raw_key = "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6";
+        let witness_id = format!("did:key:{raw_key}");
+        let vm = format!("{witness_id}#{raw_key}");
         let proof = make_test_proof(&vm);
         // Add proof for version 5 (future relative to highest_version_number=1)
         proofs.add_proof("5-future", &proof, false).unwrap();
@@ -290,7 +288,7 @@ mod tests {
         let witnesses = Witnesses::Value {
             threshold: 1,
             witnesses: vec![Witness {
-                id: Multibase::new(witness_id),
+                id: Multibase::new(&witness_id),
             }],
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
@@ -315,8 +313,9 @@ mod tests {
     fn test_witness_proof_older_than_current_counts() {
         use crate::test_utils::make_test_proof;
         let mut proofs = WitnessProofCollection::default();
-        let witness_id = "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6";
-        let vm = format!("{}#{}", witness_id, &witness_id[8..]);
+        let raw_key = "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6";
+        let witness_id = format!("did:key:{raw_key}");
+        let vm = format!("{witness_id}#{raw_key}");
         let proof = make_test_proof(&vm);
         // Add proof for version 3 — version_number is 1, oldest_id (3) > version_number (1)
         // But oldest_id (3) <= highest_version_number (5) → still counts as valid
@@ -325,7 +324,7 @@ mod tests {
         let witnesses = Witnesses::Value {
             threshold: 1,
             witnesses: vec![Witness {
-                id: Multibase::new(witness_id),
+                id: Multibase::new(&witness_id),
             }],
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);

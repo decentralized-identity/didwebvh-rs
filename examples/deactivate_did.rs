@@ -1,4 +1,9 @@
-//! Example: Create a DID and then deactivate it using `deactivate()`.
+//! Example: Create a DID and then permanently deactivate it using `update_did()`.
+//!
+//! Demonstrates irreversible DID deactivation. After deactivation, the DID
+//! can no longer be updated or used for authentication or credential issuance.
+//!
+//! Run with: `cargo run --example deactivate_did`
 
 use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::prelude::*;
@@ -12,38 +17,64 @@ async fn main() {
     let pk = signing_key.get_public_keymultibase().unwrap();
     signing_key.id = format!("did:key:{pk}#{pk}");
 
-    let parameters = Parameters {
-        update_keys: Some(Arc::new(vec![Multibase::new(pk.clone())])),
-        portable: Some(false),
-        ..Default::default()
-    };
+    // Create the DID
+    let create_config = CreateDIDConfig::builder()
+        .address("https://example.com/")
+        .authorization_key(signing_key.clone())
+        .did_document(json!({
+            "id": "{DID}",
+            "@context": ["https://www.w3.org/ns/did/v1"],
+            "verificationMethod": [{
+                "id": "{DID}#key-0",
+                "type": "Multikey",
+                "publicKeyMultibase": pk,
+                "controller": "{DID}"
+            }],
+            "authentication": ["{DID}#key-0"],
+            "assertionMethod": ["{DID}#key-0"],
+        }))
+        .parameters(Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(pk)])),
+            ..Default::default()
+        })
+        .build()
+        .expect("Failed to build create config");
 
-    let did_document = json!({
-        "id": "did:webvh:{SCID}:example.com",
-        "@context": ["https://www.w3.org/ns/did/v1"],
-        "verificationMethod": [{
-            "id": "did:webvh:{SCID}:example.com#key-0",
-            "type": "Multikey",
-            "publicKeyMultibase": pk,
-            "controller": "did:webvh:{SCID}:example.com"
-        }],
-        "authentication": ["did:webvh:{SCID}:example.com#key-0"],
-        "assertionMethod": ["did:webvh:{SCID}:example.com#key-0"],
-    });
-
-    // Create the initial log entry
-    let mut state = DIDWebVHState::default();
-    let entry = state
-        .create_log_entry(None, &did_document, &parameters, &signing_key)
+    let create_result = create_did(create_config)
         .await
-        .expect("Failed to create first log entry");
-    println!("Created DID, version: {}", entry.get_version_id());
+        .expect("Failed to create DID");
+    println!("Created DID: {}", create_result.did());
 
-    // Deactivate using the convenience API
-    let entry = state
-        .deactivate(&signing_key)
+    // Rebuild state from the created log entry
+    let mut state = DIDWebVHState::default();
+    state
+        .create_log_entry(
+            None,
+            create_result.log_entry().get_state(),
+            &Parameters {
+                update_keys: Some(Arc::new(vec![Multibase::new(
+                    signing_key.get_public_keymultibase().unwrap(),
+                )])),
+                ..Default::default()
+            },
+            &signing_key,
+        )
+        .await
+        .expect("Failed to rebuild state");
+
+    // Deactivate using update_did()
+    let update_config = UpdateDIDConfig::builder()
+        .state(state)
+        .signing_key(signing_key)
+        .deactivate(true)
+        .build()
+        .expect("Failed to build update config");
+
+    let result = update_did(update_config)
         .await
         .expect("Failed to deactivate DID");
-    println!("Deactivated DID, version: {}", entry.get_version_id());
+
+    println!("Deactivated DID: {}", result.did());
     println!("DID is now permanently deactivated.");
+    println!("Total log entries: {}", result.state().log_entries().len());
 }

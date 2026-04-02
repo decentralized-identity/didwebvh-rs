@@ -1,5 +1,70 @@
 # didwebvh-rs Changelog history
 
+## 1st April 2026
+
+### Release 0.4.1
+
+#### New
+
+- **`cli` feature flag** — Embeddable interactive CLI flows for 3rd-party
+  applications. Adds `dialoguer`, `console`, and `affinidi-tdk` as optional
+  dependencies. Not included in WASM builds.
+- **`interactive_create_did()`** (`cli_create` module) — Interactive DID creation
+  flow with the same guided experience as the built-in wizard. Third-party apps
+  can embed this in their own CLIs. Supports:
+  - Full interactivity (all values prompted) via `InteractiveCreateConfig::default()`
+  - Partial pre-configuration via the builder (skip specific prompts)
+  - Full pre-configuration (no prompts) for automated use
+  - `{DID}` placeholder rewriting in pre-configured services and VM IDs
+  - Returns the created DID, signed log entry, witness proofs, and all secrets
+- **`interactive_update_did()`** (`cli_update` module) — Interactive DID update
+  flow supporting three operations:
+  - **Modify**: Edit DID document and/or parameters (auth keys, witnesses,
+    watchers, TTL, portability, pre-rotation)
+  - **Migrate**: Move DID to a new domain (rewrites identifiers, adds previous
+    DID to `alsoKnownAs`)
+  - **Deactivate**: Permanently deactivate the DID (handles pre-rotation teardown)
+  - Returns the updated state, new log entry, and updated secrets
+- **`UpdateSecrets`** — Secret management type with hash-based and public-key-based
+  lookups, used for DID update operations. Compatible with the wizard's
+  `ConfigInfo` JSON format for loading secrets from existing files.
+- **`update_did()`** (`update` module) — Programmatic DID update API,
+  complementing `create_did()`. Supports document changes, key rotation,
+  parameter updates (witnesses, watchers, TTL, pre-rotation, portability),
+  domain migration (with identifier rewriting), and deactivation (with
+  automatic pre-rotation teardown). Handles witness proof signing. Uses the
+  same builder pattern as `CreateDIDConfig`.
+- **Shared CLI utilities** (`cli_common` module, internal) — Common prompt
+  helpers, key generation, witness setup, and next-key-hash generation shared
+  between create and update flows.
+
+#### Improvements
+
+- **Inline concept explanations** — All interactive prompts now explain key
+  DID concepts in context: what witnesses and watchers do, how pre-rotation
+  works, what verification relationships mean (authentication, assertionMethod,
+  keyAgreement, etc.), what controllers are for, and what portability implies.
+- **Key type guidance** — The verification method key selection now describes
+  each algorithm (Ed25519 recommended, X25519 for encryption, P-256/P-384 for
+  enterprise, secp256k1 for blockchain).
+- **TTL and threshold recommendations** — Default TTL of 3600 seconds suggested,
+  witness threshold explained with concrete example (e.g. "threshold=2 with 3
+  witnesses means any 2 of 3 must sign").
+- **Consistent terminology** — Standardized on "deactivate" (not "revoke"),
+  "authorization keys" (not "updateKeys"), and consistent prompt phrasing
+  throughout all CLI flows.
+- **Format hints** — Input prompts now include format examples (e.g. multibase
+  encoding `z6Mk...`, DID format `did:key:z6Mk...`, watcher URLs).
+- **Wizard example refactored** — The `wizard` example now uses the library's
+  `interactive_create_did()` and `interactive_update_did()` flows instead of its
+  own standalone implementation. This reduced the wizard from ~1800 lines across
+  9 files to ~280 lines across 3 files (`main.rs`, `did_web.rs`, `resolve.rs`).
+  The wizard now requires the `cli` feature (`cargo run --example wizard --features cli`).
+
+#### Maintenance
+
+- Version bump: 0.4.0 → 0.4.1
+
 ## 27th March 2026
 
 ### Release 0.4.0

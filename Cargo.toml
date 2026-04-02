@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.4.0"
+version = "0.4.1"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -19,6 +19,7 @@ ssi = ["dep:ssi", "network"]
 network = ["dep:reqwest"]
 rustls = ["network", "reqwest/rustls"]
 native-tls = ["network", "reqwest/native-tls"]
+cli = ["dep:dialoguer", "dep:console", "dep:affinidi-tdk"]
 
 [dependencies]
 affinidi-data-integrity = { version = "0.5" }
@@ -41,6 +42,11 @@ tokio = { version = "1.50" }
 tracing = { version = "0.1" }
 url = "2.5"
 getrandom = { version = "0.4", features = ["wasm_js"] }
+
+# Optional dependencies for `cli` feature (interactive DID creation flow)
+affinidi-tdk = { version = "0.6", optional = true }
+console = { version = "0.16", optional = true }
+dialoguer = { version = "0.12", optional = true }
 
 [dev-dependencies]
 affinidi-tdk = "0.6"
@@ -68,7 +74,7 @@ required-features = ["network"]
 
 [[example]]
 name = "wizard"
-required-features = ["network"]
+required-features = ["network", "cli"]
 
 [[example]]
 name = "generate_history"

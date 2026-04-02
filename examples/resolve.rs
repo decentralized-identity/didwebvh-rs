@@ -1,3 +1,10 @@
+//! Example: Resolve a did:webvh DID over HTTP(S) and display the document.
+//!
+//! Fetches the DID's log file, validates all signatures and parameter
+//! transitions, and displays the resolved DID Document and metadata.
+//!
+//! Run with: `cargo run --example resolve -- did:webvh:<scid>:example.com`
+
 use chrono::{TimeDelta, Utc};
 use clap::Parser;
 use console::style;

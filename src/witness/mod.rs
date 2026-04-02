@@ -110,16 +110,26 @@ impl Display for Witness {
 }
 
 impl Witness {
-    /// Returns the witness ID as a did:key
-    /// Use [`Self::as_did_key`] if you want the DID#Key value
+    /// Returns the witness ID as a `did:key:` DID.
+    ///
+    /// Handles both formats: if the stored ID already starts with `did:key:`,
+    /// it is returned as-is; otherwise the prefix is prepended.
     pub fn as_did(&self) -> String {
-        ["did:key:", self.id.as_str()].concat()
+        let id = self.id.as_str();
+        if id.starts_with("did:key:") {
+            id.to_string()
+        } else {
+            ["did:key:", id].concat()
+        }
     }
 
-    /// Returns the witness ID as a did:key:z6...#z6...
-    /// Use [`Self::as_did`] if you want just the base DID
+    /// Returns the witness ID as a `did:key:z6...#z6...` verification method reference.
+    ///
+    /// The fragment is the raw multibase key (without the `did:key:` prefix).
     pub fn as_did_key(&self) -> String {
-        [&self.as_did(), "#", self.id.as_str()].concat()
+        let did = self.as_did();
+        let raw_key = did.strip_prefix("did:key:").unwrap_or(did.as_str());
+        [&did, "#", raw_key].concat()
     }
 }
 
@@ -260,30 +270,38 @@ mod tests {
         assert_eq!(value.threshold(), Some(2));
     }
 
-    /// Tests that `as_did()` correctly formats a witness ID as a `did:key:` DID.
-    ///
-    /// Witness nodes are identified by their public key multibase encoding. The
-    /// `as_did()` method prepends the `did:key:` prefix to produce a valid DID
-    /// identifier. This is used when referencing witnesses in DID WebVH log entries
-    /// and during proof verification.
+    /// Tests `as_did()` with a raw multibase key (prepends `did:key:` prefix).
     #[test]
-    fn test_witness_as_did() {
+    fn test_witness_as_did_from_raw_key() {
         let w = Witness {
             id: Multibase::new("z6Mktest"),
         };
         assert_eq!(w.as_did(), "did:key:z6Mktest");
     }
 
-    /// Tests that `as_did_key()` formats a witness ID as a full `did:key:` DID with fragment.
-    ///
-    /// The full DID key format (`did:key:z6...#z6...`) is required when referencing
-    /// specific verification methods in DID documents. Witness proof verification uses
-    /// this format to identify the exact key that produced a signature, linking the
-    /// proof back to the correct witness node.
+    /// Tests `as_did()` with a full `did:key:` DID (returns as-is, no double prefix).
     #[test]
-    fn test_witness_as_did_key() {
+    fn test_witness_as_did_from_full_did() {
+        let w = Witness {
+            id: Multibase::new("did:key:z6Mktest"),
+        };
+        assert_eq!(w.as_did(), "did:key:z6Mktest");
+    }
+
+    /// Tests `as_did_key()` with a raw multibase key.
+    #[test]
+    fn test_witness_as_did_key_from_raw_key() {
         let w = Witness {
             id: Multibase::new("z6Mktest"),
+        };
+        assert_eq!(w.as_did_key(), "did:key:z6Mktest#z6Mktest");
+    }
+
+    /// Tests `as_did_key()` with a full `did:key:` DID (extracts raw key for fragment).
+    #[test]
+    fn test_witness_as_did_key_from_full_did() {
+        let w = Witness {
+            id: Multibase::new("did:key:z6Mktest"),
         };
         assert_eq!(w.as_did_key(), "did:key:z6Mktest#z6Mktest");
     }

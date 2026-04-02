@@ -1,27 +1,8 @@
 use console::style;
-use dialoguer::{Confirm, theme::ColorfulTheme};
-use didwebvh_rs::{DIDWebVHError, DIDWebVHState, log_entry_state::LogEntryState};
-use serde_json::Value;
+use didwebvh_rs::{DIDWebVHError, log_entry_state::LogEntryState};
 use std::{fs::OpenOptions, io::Write};
 
-// Checks to see if the did:web needs to be added to alsoKnownAs
-pub fn insert_web_also_known_as(did_document: &mut Value, did: &str) -> Result<(), DIDWebVHError> {
-    let did_web_id = DIDWebVHState::convert_webvh_id_to_web_id(did);
-
-    if Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt(format!(
-            "Add ({did_web_id}) to alsoKnownAs for the did:webvh document?"
-        ))
-        .default(true)
-        .interact()
-        .unwrap()
-    {
-        didwebvh_rs::create::add_web_also_known_as(did_document, did)?;
-    }
-    Ok(())
-}
-
-// Save a did:web document (did.json)
+/// Save a did:web document (did.json) from a log entry state.
 pub fn save_did_web(log_entry: &LogEntryState) -> Result<(), DIDWebVHError> {
     let did_web = log_entry.to_web_did()?;
 

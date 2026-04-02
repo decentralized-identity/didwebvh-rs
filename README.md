@@ -27,8 +27,9 @@ site
 - [x] Export WebVH to a did:web document
 - [x] Generate did:scid:vh alsoKnownAs alias from did:webvh DIDs
 - [x] URL validation rejects IP addresses per spec (domain names required)
-- [x] WASM friendly for inclusion in other projects
+- [x] WASM friendly for inclusion in other projects (resolution only — `cli` feature excluded)
 - [x] WebVH DID Create routines to make it easier to create DIDs programmatically
+- [x] Embeddable interactive CLI flows for 3rd-party applications (`cli` feature)
 - [x] Pluggable signing via the `Signer` trait — use HSMs, KMS, or any external
   signing service without exposing secret key material to the library
 - [x] Structured error types for programmatic error handling (e.g. `NetworkError`
@@ -46,7 +47,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.3.1"
+didwebvh-rs = "0.4.1"
 ```
 
 Then:
@@ -73,6 +74,7 @@ The `prelude` module re-exports the most commonly needed types:
 | `ssi` | no | Enables integration with the [ssi](https://crates.io/crates/ssi) crate (implies `network`). |
 | `rustls` | no | Use `rustls` TLS backend (implies `network`). |
 | `native-tls` | no | Use platform-native TLS backend (implies `network`). |
+| `cli` | no | Interactive CLI flows for DID creation and updates. Adds `dialoguer`, `console`, and `affinidi-tdk`. Not included in WASM builds. |
 
 To use the library without network support (e.g. for local file validation only):
 
@@ -98,6 +100,76 @@ state.deactivate(&signing_key).await?;
 
 See the `examples/update_did.rs`, `examples/rotate_keys.rs`, and
 `examples/deactivate_did.rs` examples for full usage.
+
+## Updating a DID Programmatically
+
+The `update` module provides [`update_did()`] for programmatic DID updates,
+complementing `create_did()`. It handles document changes, key rotation,
+parameter updates, domain migration, deactivation, and witness signing:
+
+```rust
+use didwebvh_rs::prelude::*;
+
+// Update the DID document
+let result = update_did(
+    UpdateDIDConfig::builder()
+        .state(webvh_state)
+        .signing_key(key)
+        .document(new_doc)
+        .build()?
+).await?;
+
+// Rotate authorization keys
+let result = update_did(
+    UpdateDIDConfig::builder()
+        .state(webvh_state)
+        .signing_key(current_key)
+        .update_keys(vec![new_key_multibase])
+        .build()?
+).await?;
+
+// Migrate to a new domain (requires portable=true)
+let result = update_did(
+    UpdateDIDConfig::builder()
+        .state(webvh_state)
+        .signing_key(key)
+        .migrate_to("https://new-domain.example.com/")
+        .build()?
+).await?;
+
+// Deactivate permanently
+let result = update_did(
+    UpdateDIDConfig::builder()
+        .state(webvh_state)
+        .signing_key(key)
+        .deactivate(true)
+        .build()?
+).await?;
+
+// Access results
+result.log_entry().save_to_file("did.jsonl")?;
+result.state().witness_proofs().save_to_file("did-witness.json")?;
+```
+
+Multiple changes can be combined in a single update (e.g. document + TTL + watchers).
+For deactivation with active pre-rotation, the function automatically creates an
+intermediate log entry to disable pre-rotation first.
+
+## Examples
+
+The `examples/` directory contains runnable demonstrations of the library's API:
+
+| Example | Command | Description |
+|---------|---------|-------------|
+| `create` | `cargo run --example create` | Create a new DID with `create_did()`, `{DID}` placeholders, and aliases |
+| `update_did` | `cargo run --example update_did` | Update a DID document (add a service endpoint) using `update_did()` |
+| `rotate_keys` | `cargo run --example rotate_keys` | Rotate authorization keys using `update_did()` |
+| `deactivate_did` | `cargo run --example deactivate_did` | Permanently deactivate a DID using `update_did()` |
+| `custom_signer` | `cargo run --example custom_signer` | Implement the `Signer` trait for HSM/KMS integration |
+| `resolve` | `cargo run --example resolve -- <DID>` | Resolve a did:webvh DID over HTTP(S) and display the document |
+| `wizard` | `cargo run --example wizard --features cli` | Interactive CLI wizard for DID creation, updates, and resolution |
+| `generate_history` | `cargo run --release --example generate_history -- -c 200` | Generate large DID histories for performance testing |
+| `generate_large_did` | `cargo run --release --example generate_large_did` | Generate a 1 MB+ DID file for benchmarking |
 
 ## WitnessesBuilder
 
@@ -129,6 +201,77 @@ let state = DIDWebVHState::load_state("cache.json")?;
 (`active_update_keys`, `active_witness`) use `#[serde(skip)]` and will be
 at their defaults after deserialization.
 
+## Embedding Interactive CLI Flows in Your Application
+
+The `cli` feature provides interactive terminal flows that 3rd-party applications
+can embed directly in their own CLIs. These give your users the same guided
+DID creation and management experience as the built-in wizard.
+
+```toml
+[dependencies]
+didwebvh-rs = { version = "0.4.1", features = ["cli"] }
+```
+
+### Interactive DID Creation
+
+Run the full interactive DID creation flow, or pre-configure parts of it:
+
+```rust
+use didwebvh_rs::prelude::*;
+use serde_json::json;
+
+// Fully interactive — prompts for everything
+let result = interactive_create_did(InteractiveCreateConfig::default()).await?;
+
+// Or pre-configure services and address, prompt for the rest
+let config = InteractiveCreateConfig::builder()
+    .address("https://example.com/")
+    .service(json!({
+        "id": "{DID}#messaging",
+        "type": "DIDCommMessaging",
+        "serviceEndpoint": "https://example.com/didcomm"
+    }))
+    .portable(true)
+    .also_known_as_web(true)
+    .build();
+let result = interactive_create_did(config).await?;
+
+// Access results
+println!("Created DID: {}", result.did());
+result.log_entry().save_to_file("did.jsonl")?;
+result.witness_proofs().save_to_file("did-witness.json")?;
+```
+
+Use `{DID}` as a placeholder in pre-configured services and verification method IDs —
+it is automatically replaced with the actual DID identifier (including SCID) during creation.
+
+### Interactive DID Updates
+
+Update an existing DID with the same guided flow. Supports three operations:
+modifying the document/parameters, migrating to a new domain, or revoking the DID.
+
+```rust
+use didwebvh_rs::prelude::*;
+
+// Fully interactive — loads state from files, prompts for operation
+let result = interactive_update_did(InteractiveUpdateConfig::default()).await?;
+
+// Or pre-load state and choose the operation
+let config = InteractiveUpdateConfig::builder()
+    .state(webvh_state)
+    .secrets(update_secrets)
+    .operation(UpdateOperation::Modify)
+    .build();
+let result = interactive_update_did(config).await?;
+
+// Save updated state
+result.log_entry().save_to_file("did.jsonl")?;
+result.state().witness_proofs().save_to_file("did-witness.json")?;
+```
+
+> **Note:** The `cli` feature is intentionally excluded from WASM builds.
+> WASM targets should use the core library API (`create_did`, `resolve`, etc.) directly.
+
 ## Everyone likes a wizard
 
 Getting started with webvh at first can be daunting given the complexity of the
@@ -140,7 +283,7 @@ To run this wizard, you need to have [Rust](https://www.rust-lang.org/)
 installed on your machine.
 
 ```Bash
-cargo run --example wizard -- --help
+cargo run --example wizard --features cli
 ```
 
 > **_WARNING:_** _This wizard will generate secrets locally on your machine, and
