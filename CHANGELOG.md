@@ -28,6 +28,12 @@
 - **`UpdateSecrets`** — Secret management type with hash-based and public-key-based
   lookups, used for DID update operations. Compatible with the wizard's
   `ConfigInfo` JSON format for loading secrets from existing files.
+- **`update_did()`** (`update` module) — Programmatic DID update API,
+  complementing `create_did()`. Supports document changes, key rotation,
+  parameter updates (witnesses, watchers, TTL, pre-rotation, portability),
+  domain migration (with identifier rewriting), and deactivation (with
+  automatic pre-rotation teardown). Handles witness proof signing. Uses the
+  same builder pattern as `CreateDIDConfig`.
 - **Shared CLI utilities** (`cli_common` module, internal) — Common prompt
   helpers, key generation, witness setup, and next-key-hash generation shared
   between create and update flows.

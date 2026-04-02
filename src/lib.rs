@@ -37,6 +37,7 @@ pub mod multibase_type;
 pub mod parameters;
 pub mod prelude;
 pub mod resolve;
+pub mod update;
 /// Parsing and conversion of `did:webvh` URLs and HTTP URLs.
 pub mod url;
 pub mod validate;

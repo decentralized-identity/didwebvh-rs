@@ -101,6 +101,60 @@ state.deactivate(&signing_key).await?;
 See the `examples/update_did.rs`, `examples/rotate_keys.rs`, and
 `examples/deactivate_did.rs` examples for full usage.
 
+## Updating a DID Programmatically
+
+The `update` module provides [`update_did()`] for programmatic DID updates,
+complementing `create_did()`. It handles document changes, key rotation,
+parameter updates, domain migration, deactivation, and witness signing:
+
+```rust
+use didwebvh_rs::prelude::*;
+
+// Update the DID document
+let result = update_did(
+    UpdateDIDConfig::builder()
+        .state(webvh_state)
+        .signing_key(key)
+        .document(new_doc)
+        .build()?
+).await?;
+
+// Rotate authorization keys
+let result = update_did(
+    UpdateDIDConfig::builder()
+        .state(webvh_state)
+        .signing_key(current_key)
+        .update_keys(vec![new_key_multibase])
+        .build()?
+).await?;
+
+// Migrate to a new domain (requires portable=true)
+let result = update_did(
+    UpdateDIDConfig::builder()
+        .state(webvh_state)
+        .signing_key(key)
+        .migrate_to("https://new-domain.example.com/")
+        .build()?
+).await?;
+
+// Deactivate permanently
+let result = update_did(
+    UpdateDIDConfig::builder()
+        .state(webvh_state)
+        .signing_key(key)
+        .deactivate(true)
+        .build()?
+).await?;
+
+// Access results
+result.log_entry().save_to_file("did.jsonl")?;
+result.state().witness_proofs().save_to_file("did-witness.json")?;
+```
+
+Multiple changes can be combined in a single update (e.g. document + TTL + watchers).
+For deactivation with active pre-rotation, the function automatically creates an
+intermediate log entry to disable pre-rotation first.
+
 ## WitnessesBuilder
 
 Build witness configurations ergonomically:
