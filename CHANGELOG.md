@@ -1,5 +1,18 @@
 # didwebvh-rs Changelog history
 
+## 15th April 2026
+
+### Release 0.4.2
+
+#### Removed
+
+- **Removed `multihash` dependency** — The `multihash` crate (and its transitive
+  `core2` dependency) has been replaced with an inline SHA-256 multihash encoder.
+  The `core2` crate has been yanked from crates.io, making `multihash 0.19`
+  uninstallable for new users. The library only used multihash for a simple
+  2-byte prefix encoding, so this is now handled directly without any external
+  dependency. No public API changes.
+
 ## 1st April 2026
 
 ### Release 0.4.1

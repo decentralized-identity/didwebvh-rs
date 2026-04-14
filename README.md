@@ -47,7 +47,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.4.1"
+didwebvh-rs = "0.4.2"
 ```
 
 Then:

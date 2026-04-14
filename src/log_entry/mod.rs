@@ -13,7 +13,6 @@ use affinidi_data_integrity::{
 use affinidi_secrets_resolver::secrets::Secret;
 use base58::ToBase58;
 use chrono::{DateTime, FixedOffset};
-use multihash::Multihash;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use serde_json_canonicalizer::to_string;
@@ -24,6 +23,17 @@ use tracing::debug;
 pub mod read;
 pub mod spec_1_0;
 pub mod spec_1_0_pre;
+
+/// Encodes a SHA-256 digest as a multihash byte array.
+/// Multihash format: [hash_function_code, digest_length, ...digest_bytes]
+/// SHA-256 code = 0x12, digest length = 0x20 (32 bytes)
+pub(crate) fn encode_sha256_multihash(digest: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(2 + digest.len());
+    buf.push(0x12); // SHA-256 hash function code
+    buf.push(0x20); // 32 bytes digest length
+    buf.extend_from_slice(digest);
+    buf
+}
 
 /// Resolved Document MetaData
 /// Returned as resolved Document MetaData on a successful resolve
@@ -174,14 +184,9 @@ macro_rules! impl_log_entry_common {
                 })?;
                 tracing::debug!("JCS for LogEntry hash: {}", jcs);
 
-                let hash_encoded =
-                    multihash::Multihash::<32>::wrap(0x12, <sha2::Sha256 as sha2::Digest>::digest(jcs.as_bytes()).as_slice())
-                        .map_err(|e| {
-                            DIDWebVHError::SCIDError(format!(
-                                "Couldn't create multihash encoding for LogEntry. Reason: {e}",
-                            ))
-                        })?;
-                Ok(base58::ToBase58::to_base58(hash_encoded.to_bytes().as_slice()))
+                let digest = <sha2::Sha256 as sha2::Digest>::digest(jcs.as_bytes());
+                let multihash_bytes = crate::log_entry::encode_sha256_multihash(digest.as_slice());
+                Ok(base58::ToBase58::to_base58(multihash_bytes.as_slice()))
             }
 
             /// Verifies a witness data integrity proof against this log entry's versionId.
@@ -457,14 +462,9 @@ impl LogEntry {
         })?;
         debug!("JCS for LogEntry hash: {}", jcs);
 
-        // SHA_256 code = 0x12, length of SHA256 is 32 bytes
-        let hash_encoded = Multihash::<32>::wrap(0x12, Sha256::digest(jcs.as_bytes()).as_slice())
-            .map_err(|e| {
-            DIDWebVHError::SCIDError(format!(
-                "Couldn't create multihash encoding for LogEntry. Reason: {e}",
-            ))
-        })?;
-        Ok(hash_encoded.to_bytes().to_base58())
+        let digest = Sha256::digest(jcs.as_bytes());
+        let multihash_bytes = encode_sha256_multihash(digest.as_slice());
+        Ok(multihash_bytes.to_base58())
     }
 
     /// Validates a witness proof against the log entry

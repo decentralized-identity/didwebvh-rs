@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.4.1"
+version = "0.4.2"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -29,7 +29,6 @@ ahash = { version = "0.8", features = ["serde"] }
 async-trait = "0.1"
 base58 = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
-multihash = "0.19"
 reqwest = { version = "0.13", optional = true }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
