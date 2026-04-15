@@ -17,6 +17,8 @@
 
 - **Updated `aws-lc-sys` to 0.39.1** — Fixes RUSTSEC-2026-0044 (X.509 Name
   Constraints Bypass via Wildcard/Unicode CN).
+- **Updated `rustls-webpki` to 0.103.12** — Fixes RUSTSEC-2026-0049 (CRLs not
+  considered authoritative by Distribution Point due to faulty matching logic).
 
 #### Maintenance
 
