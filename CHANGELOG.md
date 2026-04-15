@@ -1,5 +1,31 @@
 # didwebvh-rs Changelog history
 
+## 15th April 2026
+
+### Release 0.4.2
+
+#### Removed
+
+- **Removed `multihash` dependency** — The `multihash` crate (and its transitive
+  `core2` dependency) has been replaced with an inline SHA-256 multihash encoder.
+  The `core2` crate has been yanked from crates.io, making `multihash 0.19`
+  uninstallable for new users. The library only used multihash for a simple
+  2-byte prefix encoding, so this is now handled directly without any external
+  dependency. No public API changes.
+
+#### Security
+
+- **Updated `aws-lc-sys` to 0.39.1** — Fixes RUSTSEC-2026-0044 (X.509 Name
+  Constraints Bypass via Wildcard/Unicode CN).
+- **Updated `rustls-webpki` to 0.103.12** — Fixes RUSTSEC-2026-0049 (CRLs not
+  considered authoritative by Distribution Point due to faulty matching logic).
+
+#### Maintenance
+
+- **Committed `Cargo.lock`** — Pinning resolved dependency versions to prevent
+  CI and fresh builds from failing due to the yanked `core2` crate (transitive
+  dependency of the `ssi` crate via `ssi-ucan → libipld → multihash 0.16`).
+
 ## 1st April 2026
 
 ### Release 0.4.1
