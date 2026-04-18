@@ -8,7 +8,6 @@ use crate::{
     witness::Witnesses,
 };
 use affinidi_data_integrity::{DataIntegrityProof, VerifyOptions};
-use affinidi_secrets_resolver::secrets::Secret;
 use base58::ToBase58;
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
@@ -66,19 +65,21 @@ pub trait PublicKey {
 
 impl PublicKey for DataIntegrityProof {
     fn get_public_key_bytes(&self) -> Result<Vec<u8>, DIDWebVHError> {
-        // Create public key bytes from Verification Material
-        if !self.verification_method.starts_with("did:key:") {
-            return Err(DIDWebVHError::InvalidMethodIdentifier(
-                "Verification method must start with 'did:key:'".to_string(),
-            ));
-        }
-        let Some((_, public_key)) = self.verification_method.split_once('#') else {
-            return Err(DIDWebVHError::InvalidMethodIdentifier(
-                "Invalid verification method format".to_string(),
-            ));
-        };
-        Secret::decode_multikey(public_key)
-            .map_err(|e| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid public key: {e}")))
+        // Delegate to the upstream resolver: it knows every multicodec
+        // registered for public keys (Ed25519, secp256k1, P-256/384/521,
+        // and — with feature gates — the ML-DSA / SLH-DSA variants) and
+        // validates the decoded length. Centralising the logic upstream
+        // means new key types added in affinidi-data-integrity flow
+        // through here without a didwebvh-rs patch.
+        Ok(
+            affinidi_data_integrity::did_vm::resolve_did_key(&self.verification_method)
+                .map_err(|e| {
+                    DIDWebVHError::InvalidMethodIdentifier(format!(
+                        "could not resolve did:key verificationMethod: {e}"
+                    ))
+                })?
+                .public_key_bytes,
+        )
     }
 }
 
@@ -646,7 +647,12 @@ mod tests {
             verification_method: "did:key:z6MktestNoHash".to_string(),
         };
         let err = proof.get_public_key_bytes().unwrap_err();
-        assert!(err.to_string().contains("Invalid verification method"));
+        // resolve_did_key fails to decode the multibase body because
+        // "z6MktestNoHash" is not a valid base58btc multicodec payload.
+        assert!(
+            matches!(err, DIDWebVHError::InvalidMethodIdentifier(_)),
+            "expected InvalidMethodIdentifier, got {err:?}"
+        );
     }
 
     /// Tests that a well-formed did:key verification method with a valid ed25519
