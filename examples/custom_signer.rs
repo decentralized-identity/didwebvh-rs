@@ -4,9 +4,6 @@
 //! This example shows the trait contract using a simple in-memory ed25519 key.
 
 use affinidi_data_integrity::DataIntegrityError;
-use async_trait::async_trait;
-use didwebvh_rs::Signer;
-use didwebvh_rs::affinidi_secrets_resolver::secrets::{KeyType, Secret};
 use didwebvh_rs::prelude::*;
 use serde_json::json;
 use std::sync::Arc;

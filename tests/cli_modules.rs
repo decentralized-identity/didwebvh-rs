@@ -8,8 +8,8 @@
 
 #[cfg(feature = "cli")]
 mod cli_tests {
+    use affinidi_secrets_resolver::secrets::Secret;
     use didwebvh_rs::{
-        affinidi_secrets_resolver::secrets::Secret,
         cli_create::{InteractiveCreateConfig, VerificationMethodInput, VerificationRelationship},
         cli_update::{UpdateOperation, UpdateSecrets},
     };

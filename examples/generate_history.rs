@@ -21,7 +21,7 @@ use didwebvh_rs::{
     parameters::Parameters,
     witness::{Witness, Witnesses},
 };
-use didwebvh_rs::{KeyType, did_key::generate_did_key};
+use didwebvh_rs::{did_key::generate_did_key, prelude::KeyType};
 use format_num::format_num;
 use rand::{RngExt, distr::Alphabetic};
 use serde_json::json;

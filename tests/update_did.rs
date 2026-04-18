@@ -5,9 +5,9 @@
  * then exercise the update API for various operations.
  */
 
+use affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::{
     DIDWebVHState, Multibase,
-    affinidi_secrets_resolver::secrets::Secret,
     parameters::Parameters,
     update::{UpdateDIDConfig, update_did},
     witness::Witnesses,

@@ -30,7 +30,7 @@
  */
 
 use crate::{
-    DIDWebVHError, DIDWebVHState, KeyType, Multibase, Secret,
+    DIDWebVHError, DIDWebVHState, KeyType, Multibase, Secret, ValidationReport,
     cli_common::{
         map_io, map_key_err, prompt_confirm, prompt_edit_document, prompt_keys,
         prompt_next_key_hashes, prompt_witnesses,
@@ -348,9 +348,12 @@ pub async fn interactive_update_did(
     };
 
     // ── Step 2: Validate state ──
-    webvh_state.validate().map_err(|e| {
-        DIDWebVHError::ValidationError(format!("Failed to validate DID WebVH state: {e}"))
-    })?;
+    webvh_state
+        .validate()
+        .and_then(ValidationReport::assert_complete)
+        .map_err(|e| {
+            DIDWebVHError::ValidationError(format!("Failed to validate DID WebVH state: {e}"))
+        })?;
 
     println!(
         "{}",

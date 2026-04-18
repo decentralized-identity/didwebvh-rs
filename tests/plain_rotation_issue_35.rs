@@ -20,9 +20,9 @@
 
 use std::sync::Arc;
 
+use affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::{
     DIDWebVHState, Multibase,
-    affinidi_secrets_resolver::secrets::Secret,
     log_entry_state::LogEntryValidationStatus,
     parameters::Parameters,
     update::{UpdateDIDConfig, update_did},

@@ -11,7 +11,6 @@ use crate::{
     witness::proofs::WitnessProofCollection,
 };
 use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
-use affinidi_secrets_resolver::secrets::Secret;
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -46,25 +45,25 @@ pub mod validate;
 pub mod witness;
 
 pub use multibase_type::Multibase;
+pub use validate::{TruncationReason, ValidationReport};
 
 #[cfg(test)]
 pub(crate) mod test_utils;
 
-// Re-export Affinidi Secrets Resolver so others can create Secrets
-pub use affinidi_secrets_resolver;
-
-// Re-export Signer trait and KeyType so consumers can implement custom signing backends.
+// `pub(crate)` re-exports for items that are used widely across this crate's
+// internal modules but are NOT part of the stable top-level public API.
+// Downstream consumers should reach for `didwebvh_rs::prelude::*` (or depend
+// on the source crates directly) so they control their own version skew.
 //
 // # Security note for Signer implementors
 //
-// If your `Signer` implementation holds key material in memory (rather than
+// If your [`Signer`] implementation holds key material in memory (rather than
 // delegating to an HSM/KMS), consider zeroizing sensitive buffers on drop
 // (e.g. via the `zeroize` crate) to limit exposure of secrets in memory.
-pub use affinidi_data_integrity::signer::Signer;
-pub use affinidi_secrets_resolver::secrets::KeyType;
-
-// Re-export async_trait so consumers implementing `Signer` don't need a separate dependency.
-pub use async_trait::async_trait;
+pub(crate) use affinidi_data_integrity::signer::Signer;
+#[cfg(feature = "cli")]
+pub(crate) use affinidi_secrets_resolver::secrets::KeyType;
+pub(crate) use affinidi_secrets_resolver::secrets::Secret;
 
 /// WebVH Specification supports multiple LogEntry versions in the same DID
 #[non_exhaustive]

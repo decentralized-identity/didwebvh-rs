@@ -15,8 +15,10 @@ use byte_unit::{Byte, UnitType};
 use chrono::{Duration as ChronoDuration, FixedOffset, Utc};
 use clap::Parser;
 use console::style;
-use didwebvh_rs::{DIDWebVHState, Multibase, parameters::Parameters, url::WebVHURL};
-use didwebvh_rs::{KeyType, did_key::generate_did_key};
+use didwebvh_rs::{
+    DIDWebVHState, Multibase, did_key::generate_did_key, parameters::Parameters, prelude::KeyType,
+    url::WebVHURL,
+};
 use serde_json::json;
 use std::{fs::OpenOptions, io::Write, sync::Arc, time::SystemTime};
 use tracing_subscriber::filter;

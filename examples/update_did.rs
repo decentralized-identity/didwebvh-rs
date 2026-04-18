@@ -5,7 +5,7 @@
 //!
 //! Run with: `cargo run --example update_did`
 
-use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
+use affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::prelude::*;
 use serde_json::json;
 use std::sync::Arc;
