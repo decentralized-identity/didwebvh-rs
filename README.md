@@ -84,7 +84,7 @@ helper.
 | `rustls` | no | Use `rustls` TLS backend (implies `network`). |
 | `native-tls` | no | Use platform-native TLS backend (implies `network`). |
 | `cli` | no | Interactive CLI flows for DID creation and updates. Adds `dialoguer` and `console`. Not included in WASM builds. |
-| `experimental-pqc` | no | **Experimental.** Placeholder for post-quantum cryptosuites (ML-DSA-44, SLH-DSA-128). Currently a no-op stub blocked on an upstream compile error; see CHANGELOG + README "Experimental PQC support" below. |
+| `experimental-pqc` | no | **Experimental, off-spec.** Unlocks PQC cryptosuites (ML-DSA-{44,65,87}, SLH-DSA-SHA2-128s). Enable only for interop testing with other PQC-aware implementations — didwebvh 1.0 does not yet standardise these suites. See README "Experimental PQC support" below. |
 
 To use the library without network support (e.g. for local file validation only):
 
@@ -498,23 +498,33 @@ to sign witness proofs outside of the full DID creation flow.
 
 ## Experimental PQC support
 
-The `experimental-pqc` Cargo feature reserves a namespace for post-quantum
-cryptosuites (ML-DSA-44, SLH-DSA-128) that are **not yet part of the
-didwebvh 1.0 spec**. It is intended for interop testing with other
-PQC-aware implementations. As of v0.5.0 the feature is a **no-op stub**
-— it can be toggled, but the forward to
-`affinidi-data-integrity/post-quantum` is disabled because
-`affinidi-secrets-resolver@0.5.5` fails to compile with the `ml-dsa`
-feature (missing `ML_DSA_*` / `SLH_DSA_*_PUB` multicodec constants
-upstream). The stub lets downstream crates write `cfg(feature =
-"experimental-pqc")` today; the forward will flip on once upstream ships
-a fix.
+The `experimental-pqc` Cargo feature unlocks post-quantum cryptosuites
+(ML-DSA-{44,65,87}, SLH-DSA-SHA2-128s) for DID log entries and witness
+proofs. These suites are **not yet part of the didwebvh 1.0 spec** —
+enable only for interop testing with other PQC-aware implementations.
 
-### Runtime opt-in for PQC witness proofs
+```toml
+[dependencies]
+didwebvh-rs = { version = "0.5.0", features = ["experimental-pqc"] }
+```
 
-Independently of the compile-time feature, [`WitnessVerifyOptions`]
-carries a runtime `extra_allowed_suites` list. A resolver can accept
-PQC-signed witness proofs today without rebuilding:
+Key generation, signing, and verification flow through the same
+`generate_did_key` / `DataIntegrityProof::sign` / `proof.verify(...)` API
+as the classical suites — just pass a PQC `KeyType`:
+
+```rust
+use didwebvh_rs::{did_key::generate_did_key, prelude::KeyType};
+
+// Creates did:key:z6ML... with a 32-byte ML-DSA-44 private-key seed.
+let (did, key) = generate_did_key(KeyType::MlDsa44)?;
+```
+
+### Runtime opt-in for PQC witness proofs (independent of the feature)
+
+The didwebvh 1.0 spec (§"The Witness Proofs File") says witness
+cryptosuite MUST be `eddsa-jcs-2022`. `WitnessVerifyOptions` widens the
+accepted set at runtime so a resolver can accept PQC-signed witness
+proofs without rebuilding the crate:
 
 ```rust
 use didwebvh_rs::prelude::*;
@@ -527,10 +537,9 @@ let options = WitnessVerifyOptions::new()
 state.validate_with(&options)?.assert_complete()?;
 ```
 
-Note: accepting non-spec witness suites deliberately deviates from
-didwebvh 1.0. The spec (§"The Witness Proofs File") says witness
-cryptosuite MUST be `eddsa-jcs-2022`; the runtime override is an
-escape hatch for testing, not a production recommendation.
+Accepting non-spec witness suites is deliberate spec-deviation; it's an
+escape hatch for testing, not a production recommendation. Strict
+`state.validate()?` keeps the `eddsa-jcs-2022`-only default.
 
 ## License
 

@@ -57,6 +57,20 @@
   `tests/fixtures/plain-rotation/`.
 - **[lints.rust] + [lints.clippy]** section in Cargo.toml with pedantic
   group enabled and a curated allowlist.
+- **`experimental-pqc` Cargo feature** — forwards to
+  `affinidi-data-integrity/post-quantum` +
+  `affinidi-secrets-resolver/post-quantum` to unlock ML-DSA-{44,65,87}
+  and SLH-DSA-SHA2-128s cryptosuites. Off-spec for didwebvh 1.0; use for
+  interop testing with other PQC-aware implementations. The runtime
+  `WitnessVerifyOptions::extra_allowed_suites` escape hatch stays
+  available independently of the compile-time feature.
+
+#### Chores
+
+- **Bumped `ssi` requirement from 0.15 to 0.16** (optional feature). The
+  old pin carried a transitive `libipld 0.14 → core2 ^0.4` chain whose
+  sole `core2 0.4.0` version is yanked from crates.io, breaking
+  `cargo update`. 0.16 dropped that chain.
 
 #### Refactored
 
@@ -67,18 +81,6 @@
 
 #### Known issues
 
-- **`experimental-pqc` feature is declared but currently a no-op.** Blocked
-  on an upstream bug: `affinidi-secrets-resolver@0.5.5` with the `ml-dsa`
-  feature fails to compile because its own `multicodec` module doesn't
-  export the `ML_DSA_*`/`SLH_DSA_*_PUB` constants it tries to import. The
-  feature stub lets downstream code write `cfg(feature = "experimental-pqc")`
-  today; we'll wire the forward to `affinidi-data-integrity/post-quantum`
-  once upstream ships a fix. Runtime widening via
-  `WitnessVerifyOptions::extra_allowed_suites` already works today for
-  verification.
-- **`ssi` optional feature depends on a yanked transitive (`core2@0.4.0`).**
-  Pre-existing; avoid `--features ssi` until upstream `ssi` crate
-  updates past `libipld 0.14`.
 - **`didwebvh-ts` interop test ignored** — the reference TypeScript
   resolver uses the literal `"{SCID}"` placeholder (not the previous
   entry's versionId) when computing entryHashes for non-genesis entries,

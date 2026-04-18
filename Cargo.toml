@@ -20,17 +20,19 @@ network = ["dep:reqwest"]
 rustls = ["network", "reqwest/rustls"]
 native-tls = ["network", "reqwest/native-tls"]
 cli = ["dep:dialoguer", "dep:console"]
-# Experimental post-quantum cryptosuites (ML-DSA-44, SLH-DSA-128).
-# Not yet in the didwebvh 1.0 spec; meant for interop testing with other
-# PQC-aware implementations.
+# Experimental post-quantum cryptosuites (ML-DSA-{44,65,87}, SLH-DSA-128).
+# Not yet in the didwebvh 1.0 spec — enable only for interop testing with
+# other PQC-aware implementations. See README "Experimental PQC support"
+# for a worked example.
 #
-# TEMPORARILY DISABLED: affinidi-secrets-resolver@0.5.5 with the `ml-dsa`
-# feature fails to compile — it imports `ML_DSA_*` and `SLH_DSA_*_PUB`
-# constants from its own `multicodec` module that aren't exported there.
-# Re-enable the forward once upstream ships a fix. The runtime
-# `WitnessVerifyOptions::extra_allowed_suites` escape hatch (see task #15)
-# lets consumers opt into additional suites without needing this feature.
-experimental-pqc = []
+# Runtime companion: `WitnessVerifyOptions::extra_allowed_suites` widens
+# the accepted witness cryptosuite set at runtime without rebuilding,
+# useful when a consumer wants PQC on the resolve path but doesn't want
+# to ship a PQC-generating build.
+experimental-pqc = [
+    "affinidi-data-integrity/post-quantum",
+    "affinidi-secrets-resolver/post-quantum",
+]
 
 [dependencies]
 affinidi-data-integrity = { version = "0.5" }
@@ -47,7 +49,7 @@ serde_json = "1.0"
 serde_json_canonicalizer = "0.3"
 serde_with = "3.18"
 sha2 = "0.11"
-ssi = { version = "0.15", features = ["secp384r1"], optional = true }
+ssi = { version = "0.16", features = ["secp384r1"], optional = true }
 thiserror = "2.0"
 tokio = { version = "1.50" }
 tracing = { version = "0.1" }
