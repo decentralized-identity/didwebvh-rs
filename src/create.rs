@@ -1507,9 +1507,10 @@ mod tests {
 
         // Verify the proof can be validated by the log entry
         let witness_proof = proofs.get_proofs(&version_id).unwrap();
-        let validation = log_entry_state
-            .log_entry
-            .validate_witness_proof(witness_proof.proof.first().unwrap());
+        let validation = log_entry_state.log_entry.validate_witness_proof(
+            witness_proof.proof.first().unwrap(),
+            &crate::witness::WitnessVerifyOptions::new(),
+        );
         assert!(validation.is_ok());
     }
 

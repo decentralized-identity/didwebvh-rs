@@ -2,12 +2,56 @@
 *   Handling of witnessing changes to the log entries
 */
 
+use affinidi_data_integrity::crypto_suites::CryptoSuite;
+
 use crate::{DIDWebVHError, Multibase};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
 pub mod proofs;
 pub mod validate;
+
+/// Runtime options for verifying witness proofs.
+///
+/// didwebvh 1.0 §"The Witness Proofs File" mandates that witness Data
+/// Integrity proofs use the `eddsa-jcs-2022` cryptosuite with
+/// `proofPurpose` of `assertionMethod`. `WitnessVerifyOptions` lets a
+/// caller additively widen the accepted cryptosuite set (for example, to
+/// interop with a non-spec implementation that emits PQC-signed witness
+/// proofs) without forcing a feature-flag rebuild.
+///
+/// `#[non_exhaustive]` so future fields (e.g. expiry windows, allowed
+/// `proofPurpose` values) don't break callers.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct WitnessVerifyOptions {
+    /// Cryptosuites accepted for witness proofs in addition to the spec
+    /// default `eddsa-jcs-2022`. Empty by default — strict spec mode.
+    pub extra_allowed_suites: Vec<CryptoSuite>,
+}
+
+impl WitnessVerifyOptions {
+    /// Strict spec-compliant defaults (only `eddsa-jcs-2022`).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a cryptosuite to the accepted list.
+    #[must_use]
+    pub fn with_extra_allowed_suite(mut self, suite: CryptoSuite) -> Self {
+        self.extra_allowed_suites.push(suite);
+        self
+    }
+
+    /// Returns true if the supplied suite is accepted under these options.
+    ///
+    /// Checks the spec-mandated `eddsa-jcs-2022` first, then any additional
+    /// suites the caller opted into.
+    pub fn suite_is_allowed(&self, suite: CryptoSuite) -> bool {
+        suite == CryptoSuite::EddsaJcs2022 || self.extra_allowed_suites.contains(&suite)
+    }
+}
 
 /// Witness nodes
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

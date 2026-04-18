@@ -14,6 +14,7 @@ use tracing::{debug, error};
 use crate::{
     DIDWebVHError, DIDWebVHState,
     log_entry_state::{LogEntryState, LogEntryValidationStatus},
+    witness::WitnessVerifyOptions,
 };
 
 /// Why log-entry validation stopped before consuming every loaded entry.
@@ -94,6 +95,16 @@ impl DIDWebVHState {
     /// Returns an error only if the *first* entry is invalid (no fallback
     /// possible) or if witness-proof validation fails.
     pub fn validate(&mut self) -> Result<ValidationReport, DIDWebVHError> {
+        self.validate_with(&WitnessVerifyOptions::new())
+    }
+
+    /// Variant of [`Self::validate`] that accepts runtime [`WitnessVerifyOptions`]
+    /// — useful for consumers that need to widen the accepted witness cryptosuites
+    /// (e.g. post-quantum interop testing) without recompiling.
+    pub fn validate_with(
+        &mut self,
+        options: &WitnessVerifyOptions,
+    ) -> Result<ValidationReport, DIDWebVHError> {
         // Validate each LogEntry
         let mut previous_entry: Option<&LogEntryState> = None;
         let mut truncated: Option<TruncationReason> = None;
@@ -165,7 +176,7 @@ impl DIDWebVHState {
         for log_entry in self.log_entries.iter_mut() {
             debug!("Witness Proof Validating: {}", log_entry.get_version_id());
             self.witness_proofs
-                .validate_log_entry(log_entry, highest_version_number)?;
+                .validate_log_entry(log_entry, highest_version_number, options)?;
             log_entry.validation_status = LogEntryValidationStatus::Ok;
         }
 

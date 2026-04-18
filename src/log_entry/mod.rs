@@ -63,6 +63,36 @@ pub trait PublicKey {
     fn get_public_key_bytes(&self) -> Result<Vec<u8>, DIDWebVHError>;
 }
 
+/// Enforces the didwebvh 1.0 shape constraints on a witness proof before
+/// cryptographic verification: cryptosuite must be `eddsa-jcs-2022` (unless
+/// the caller widened the allowed set via [`WitnessVerifyOptions`]), and
+/// `proofPurpose` must be `assertionMethod`. Returns an error mentioning
+/// the exact violation — the spec is unambiguous here, so silent acceptance
+/// would hide real interop bugs.
+///
+/// [`WitnessVerifyOptions`]: crate::witness::WitnessVerifyOptions
+pub(crate) fn enforce_witness_proof_shape(
+    proof: &DataIntegrityProof,
+    options: &crate::witness::WitnessVerifyOptions,
+) -> Result<(), DIDWebVHError> {
+    if !options.suite_is_allowed(proof.cryptosuite) {
+        return Err(DIDWebVHError::WitnessProofError(format!(
+            "witness proof uses cryptosuite {:?}, but the didwebvh 1.0 spec \
+             requires eddsa-jcs-2022 (add to WitnessVerifyOptions::extra_allowed_suites \
+             to accept non-spec suites explicitly)",
+            proof.cryptosuite
+        )));
+    }
+    if proof.proof_purpose != "assertionMethod" {
+        return Err(DIDWebVHError::WitnessProofError(format!(
+            "witness proof has proofPurpose '{}', but the didwebvh 1.0 spec \
+             requires 'assertionMethod'",
+            proof.proof_purpose
+        )));
+    }
+    Ok(())
+}
+
 impl PublicKey for DataIntegrityProof {
     fn get_public_key_bytes(&self) -> Result<Vec<u8>, DIDWebVHError> {
         // Delegate to the upstream resolver: it knows every multicodec
@@ -192,8 +222,10 @@ macro_rules! impl_log_entry_common {
             pub fn validate_witness_proof(
                 &self,
                 witness_proof: &affinidi_data_integrity::DataIntegrityProof,
+                options: &crate::witness::WitnessVerifyOptions,
             ) -> Result<bool, DIDWebVHError> {
                 use crate::log_entry::PublicKey;
+                crate::log_entry::enforce_witness_proof_shape(witness_proof, options)?;
                 witness_proof
                     .verify_with_public_key(
                         &serde_json::json!({"versionId": &self.version_id}),
@@ -470,7 +502,9 @@ impl LogEntry {
     pub fn validate_witness_proof(
         &self,
         witness_proof: &DataIntegrityProof,
+        options: &crate::witness::WitnessVerifyOptions,
     ) -> Result<bool, DIDWebVHError> {
+        enforce_witness_proof_shape(witness_proof, options)?;
         // Verify the Data Integrity Proof against the Signing Document
         witness_proof
             .verify_with_public_key(

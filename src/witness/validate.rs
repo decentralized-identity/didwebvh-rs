@@ -20,18 +20,25 @@
 */
 
 use crate::{
-    DIDWebVHError, log_entry_state::LogEntryState, witness::proofs::WitnessProofCollection,
+    DIDWebVHError,
+    log_entry_state::LogEntryState,
+    witness::{WitnessVerifyOptions, proofs::WitnessProofCollection},
 };
 use tracing::{debug, warn};
 
 impl WitnessProofCollection {
     /// Validates if a LogEntry was correctly witnessed
     /// highest_version_number is required so we don't mistakenly use future witness proofs
-    /// for unpublished LogEntries
+    /// for unpublished LogEntries.
+    ///
+    /// `options` controls spec-strictness: the default [`WitnessVerifyOptions::new`]
+    /// accepts only `eddsa-jcs-2022` witness proofs (per didwebvh 1.0 spec).
+    /// Widen the allowed set via [`WitnessVerifyOptions::with_extra_allowed_suite`].
     pub fn validate_log_entry(
         &mut self,
         log_entry: &LogEntryState,
         highest_version_number: u32,
+        options: &WitnessVerifyOptions,
     ) -> Result<(), DIDWebVHError> {
         // Determine witnesses for this LogEntry
         let Some(witnesses) = &log_entry.validated_parameters.active_witness else {
@@ -91,7 +98,7 @@ impl WitnessProofCollection {
                 // Validate the LogEntry against the proof
                 log_entry
                     .log_entry
-                    .validate_witness_proof(proof)
+                    .validate_witness_proof(proof, options)
                     .map_err(|e| {
                         DIDWebVHError::WitnessProofError(format!(
                             "LogEntry ({}): Witness proof validation failed: {}",
@@ -148,7 +155,7 @@ mod tests {
         log_entry_state::{LogEntryState, LogEntryValidationStatus},
         parameters::{Parameters, spec_1_0::Parameters1_0},
         witness::proofs::WitnessProofCollection,
-        witness::{Witness, Witnesses},
+        witness::{Witness, WitnessVerifyOptions, Witnesses},
     };
 
     /// Tests that validation succeeds when `active_witness` is `None`.
@@ -181,7 +188,7 @@ mod tests {
         };
 
         proofs
-            .validate_log_entry(&log_entry, 1)
+            .validate_log_entry(&log_entry, 1, &WitnessVerifyOptions::new())
             .expect("Couldn't validate witness proofs");
     }
 
@@ -232,7 +239,7 @@ mod tests {
         let entry = make_witnessed_entry("1-abcd", Witnesses::Empty {});
         // Witnesses::Empty{} → witnesses() returns None → returns Ok
         proofs
-            .validate_log_entry(&entry, 1)
+            .validate_log_entry(&entry, 1, &WitnessVerifyOptions::new())
             .expect("Empty witnesses should return Ok");
     }
 
@@ -260,7 +267,9 @@ mod tests {
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
         // No proofs added — threshold is 1, so this should fail
-        let err = proofs.validate_log_entry(&entry, 1).unwrap_err();
+        let err = proofs
+            .validate_log_entry(&entry, 1, &WitnessVerifyOptions::new())
+            .unwrap_err();
         assert!(err.to_string().contains("threshold"));
     }
 
@@ -293,7 +302,9 @@ mod tests {
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
         // highest_version_number=1, proof is for version 5 → skipped → threshold not met
-        let err = proofs.validate_log_entry(&entry, 1).unwrap_err();
+        let err = proofs
+            .validate_log_entry(&entry, 1, &WitnessVerifyOptions::new())
+            .unwrap_err();
         assert!(err.to_string().contains("threshold"));
     }
 
@@ -331,7 +342,7 @@ mod tests {
         // highest_version_number=5, proof is for version 3
         // oldest_id(3) <= highest(5) but oldest_id(3) > version_number(1) → counts as valid
         proofs
-            .validate_log_entry(&entry, 5)
+            .validate_log_entry(&entry, 5, &WitnessVerifyOptions::new())
             .expect("Older proof should still count as valid");
     }
 
@@ -380,7 +391,7 @@ mod tests {
         let entry = make_witnessed_entry("1-abcd", witnesses);
 
         proofs
-            .validate_log_entry(&entry, 1)
+            .validate_log_entry(&entry, 1, &WitnessVerifyOptions::new())
             .expect("Threshold should be met");
     }
 
@@ -410,7 +421,9 @@ mod tests {
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
         // No proofs → 0 valid, threshold is 2
-        let err = proofs.validate_log_entry(&entry, 1).unwrap_err();
+        let err = proofs
+            .validate_log_entry(&entry, 1, &WitnessVerifyOptions::new())
+            .unwrap_err();
         assert!(err.to_string().contains("threshold"));
     }
 
@@ -441,7 +454,7 @@ mod tests {
         // But threshold() returns Some(0), not None, so the "no threshold" path isn't hit
         // We need to test that 0 valid proofs still pass with threshold 0
         proofs
-            .validate_log_entry(&entry, 1)
+            .validate_log_entry(&entry, 1, &WitnessVerifyOptions::new())
             .expect("0 threshold with 0 proofs should pass");
     }
 }
