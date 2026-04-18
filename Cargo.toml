@@ -20,6 +20,17 @@ network = ["dep:reqwest"]
 rustls = ["network", "reqwest/rustls"]
 native-tls = ["network", "reqwest/native-tls"]
 cli = ["dep:dialoguer", "dep:console"]
+# Experimental post-quantum cryptosuites (ML-DSA-44, SLH-DSA-128).
+# Not yet in the didwebvh 1.0 spec; meant for interop testing with other
+# PQC-aware implementations.
+#
+# TEMPORARILY DISABLED: affinidi-secrets-resolver@0.5.5 with the `ml-dsa`
+# feature fails to compile — it imports `ML_DSA_*` and `SLH_DSA_*_PUB`
+# constants from its own `multicodec` module that aren't exported there.
+# Re-enable the forward once upstream ships a fix. The runtime
+# `WitnessVerifyOptions::extra_allowed_suites` escape hatch (see task #15)
+# lets consumers opt into additional suites without needing this feature.
+experimental-pqc = []
 
 [dependencies]
 affinidi-data-integrity = { version = "0.5" }

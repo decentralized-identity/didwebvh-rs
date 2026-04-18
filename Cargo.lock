@@ -29,9 +29,9 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "affinidi-crypto"
-version = "0.1.1"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "911040bcabf668b1bb64aa04b6e6b60b48006a7159328177e617b549b805066e"
+checksum = "88df282b0eda89a678e35b1a2d1ac7ece496efc6dc28b913311cb0c80f063573"
 dependencies = [
  "affinidi-encoding",
  "base58",
@@ -42,7 +42,7 @@ dependencies = [
  "multibase 0.9.2",
  "p256",
  "p384",
- "rand 0.8.5",
+ "rand_core 0.6.4",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1264,7 +1264,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ab67060fc6b8ef687992d439ca0fa36e7ed17e9a0b16b25b601e8757df720de"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.117",
 ]
 
 [[package]]
