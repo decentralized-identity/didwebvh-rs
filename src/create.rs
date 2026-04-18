@@ -12,7 +12,7 @@ use crate::{
     url::WebVHURL,
     witness::{Witnesses, proofs::WitnessProofCollection},
 };
-use affinidi_data_integrity::DataIntegrityProof;
+use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
 use affinidi_secrets_resolver::secrets::Secret;
 use ahash::HashMap;
 use serde_json::{Value, json};
@@ -477,11 +477,10 @@ pub async fn sign_witness_proofs<W: Signer>(
         validate_did_key_vm(secret.verification_method())?;
 
         // Generate Signature
-        let proof = DataIntegrityProof::sign_jcs_data(
+        let proof = DataIntegrityProof::sign(
             &json!({"versionId": log_entry.get_version_id()}),
-            None,
             secret,
-            None,
+            SignOptions::new(),
         )
         .await
         .map_err(|e| {

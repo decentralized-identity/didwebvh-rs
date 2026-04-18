@@ -9,7 +9,7 @@
 //! 3. They swap a witness node once every 6 months (maintaining 3 threashold, 4 witnesses)
 //! 4. They swap a watcher node once every 6 months (maintaining 3 watchers)
 
-use affinidi_data_integrity::DataIntegrityProof;
+use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
 use affinidi_secrets_resolver::{SecretsResolver, SimpleSecretsResolver, secrets::Secret};
 use affinidi_tdk::dids::{DID, KeyType};
 use anyhow::{Result, anyhow, bail};
@@ -461,11 +461,10 @@ async fn witness_log_entry(
         };
 
         // Generate Signature
-        let proof = DataIntegrityProof::sign_jcs_data(
+        let proof = DataIntegrityProof::sign(
             &json!({"versionId": log_entry.get_version_id()}),
-            None,
             &secret,
-            None,
+            SignOptions::new(),
         )
         .await
         .map_err(|e| {

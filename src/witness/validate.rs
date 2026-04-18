@@ -138,7 +138,7 @@ impl WitnessProofCollection {
 mod tests {
     use std::sync::Arc;
 
-    use affinidi_data_integrity::DataIntegrityProof;
+    use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
     use chrono::Utc;
     use serde_json::json;
 
@@ -358,11 +358,10 @@ mod tests {
         let mut witness_secret = secret.clone();
         witness_secret.id = format!("did:key:{pk}#{pk}");
 
-        let signed_proof = DataIntegrityProof::sign_jcs_data(
+        let signed_proof = DataIntegrityProof::sign(
             &json!({"versionId": "1-abcd"}),
-            None,
             &witness_secret,
-            None,
+            SignOptions::new(),
         )
         .await
         .unwrap();

@@ -11,7 +11,7 @@ keywords = ["ssi", "did", "webvh", "verifiable"]
 publish = true
 license = "Apache-2.0"
 readme = "README.md"
-rust-version = "1.90.0"
+rust-version = "1.94.0"
 
 [features]
 default = ["network"]
@@ -23,6 +23,7 @@ cli = ["dep:dialoguer", "dep:console", "dep:affinidi-tdk"]
 
 [dependencies]
 affinidi-data-integrity = { version = "0.5" }
+affinidi-did-common = "0.3"
 affinidi-secrets-resolver = "0.5"
 
 ahash = { version = "0.8", features = ["serde"] }

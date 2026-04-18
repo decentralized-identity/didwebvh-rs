@@ -10,7 +10,7 @@ use crate::{
     parameters::Parameters,
     witness::proofs::WitnessProofCollection,
 };
-use affinidi_data_integrity::DataIntegrityProof;
+use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
 use affinidi_secrets_resolver::secrets::Secret;
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
@@ -478,7 +478,7 @@ impl DIDWebVHState {
         };
 
         // Generate the proof for the log entry
-        let proof = DataIntegrityProof::sign_jcs_data(&new_entry, None, signing_key, None)
+        let proof = DataIntegrityProof::sign(&new_entry, signing_key, SignOptions::new())
             .await
             .map_err(|e| {
                 DIDWebVHError::SCIDError(format!(
