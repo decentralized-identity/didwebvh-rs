@@ -94,15 +94,19 @@ async fn plain_rotation_chain_validates_after_fix() {
         entry.validation_status = LogEntryValidationStatus::NotValidated;
     }
 
-    state
+    let report = state
         .validate()
         .expect("plain-rotation chain must validate end-to-end");
+    assert!(
+        report.truncated.is_none(),
+        "issue #35 regression: truncation at {:?}",
+        report.truncated
+    );
 
     assert_eq!(
         state.log_entries().len(),
         3,
-        "all 3 entries must survive validation; truncation indicates issue #35 \
-         has regressed (no-pre-rotation auth check rejecting the previous-entry key)"
+        "all 3 entries must survive validation"
     );
     assert!(state.validated());
 }
@@ -121,7 +125,8 @@ fn ts_produced_plain_rotation_log_resolves() {
     state
         .load_log_entries_from_file("tests/test_vectors/plain_rotation_no_prerotation.jsonl")
         .expect("load fixture");
-    state.validate().expect("plain-rotation log must validate");
+    let report = state.validate().expect("plain-rotation log must validate");
+    assert!(report.truncated.is_none());
     assert_eq!(state.log_entries().len(), 3);
 }
 

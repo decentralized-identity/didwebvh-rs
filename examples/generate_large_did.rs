@@ -216,7 +216,7 @@ pub async fn main() -> Result<()> {
     );
 
     let validate_start = SystemTime::now();
-    verify_state.validate()?;
+    verify_state.validate()?.assert_complete()?;
     let validate_end = SystemTime::now();
     let validate_ms = validate_end
         .duration_since(validate_start)

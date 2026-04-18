@@ -290,7 +290,7 @@ pub async fn main() -> Result<()> {
     }
 
     let start3 = SystemTime::now();
-    verify_state.validate()?;
+    verify_state.validate()?.assert_complete()?;
     let end = SystemTime::now();
 
     println!();

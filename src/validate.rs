@@ -16,19 +16,87 @@ use crate::{
     log_entry_state::{LogEntryState, LogEntryValidationStatus},
 };
 
+/// Why log-entry validation stopped before consuming every loaded entry.
+///
+/// Returned inside [`ValidationReport::truncated`] when entries loaded into
+/// [`DIDWebVHState`] past `at_version_id` failed verification. The chain up to
+/// and including `at_version_id`'s predecessor is still usable (the last-known-good
+/// entries); everything at and after `at_version_id` has been dropped from
+/// [`DIDWebVHState::log_entries`].
+///
+/// The inner error is stringified rather than carried as [`DIDWebVHError`]
+/// because the latter is not `Clone` (it wraps non-cloneable `reqwest` and
+/// `serde_json` errors in some variants); surfacing the message preserves
+/// diagnostics without forcing a clone bound on the error type.
+#[derive(Debug, Clone)]
+pub struct TruncationReason {
+    /// `versionId` of the entry at which validation stopped.
+    pub at_version_id: String,
+    /// Rendered error message from the failing entry's verification.
+    pub error: String,
+}
+
+/// Summary of a call to [`DIDWebVHState::validate`].
+///
+/// Always carries the `versionId` of the last-known-good entry in `ok_until`.
+/// If `truncated` is `Some`, entries past that point failed verification and
+/// were dropped — callers MUST decide whether that is acceptable for their
+/// use case (a resolver should typically reject, a debugger may tolerate).
+///
+/// The `#[must_use]` attribute forces callers to acknowledge truncation
+/// rather than silently ignoring a partially-validated log — this replaces
+/// the pre-0.5.0 behaviour where `validate()` returned `Ok(())` after
+/// silently truncating.
+#[must_use = "a ValidationReport may contain a truncation that the caller must handle"]
+#[derive(Debug, Clone)]
+pub struct ValidationReport {
+    /// `versionId` of the last log entry that validated successfully.
+    pub ok_until: String,
+    /// `Some` if verification stopped before the loaded log ended.
+    pub truncated: Option<TruncationReason>,
+}
+
+impl ValidationReport {
+    /// Returns `Err` if the report indicates any truncation.
+    ///
+    /// Convenience for the common "strict resolver" case — a caller that
+    /// wants `Ok(())` only when every loaded entry validated can write
+    /// `state.validate()?.assert_complete()?`.
+    pub fn assert_complete(self) -> Result<(), DIDWebVHError> {
+        if let Some(reason) = &self.truncated {
+            let version = crate::log_entry::parse_version_id_fields(&reason.at_version_id)
+                .map(|(n, _)| n)
+                .unwrap_or(0);
+            return Err(DIDWebVHError::validation(
+                format!(
+                    "Log truncated at {}: {}. Last valid entry: {}.",
+                    reason.at_version_id, reason.error, self.ok_until
+                ),
+                version,
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl DIDWebVHState {
     /// Validates all LogEntries and their witness proofs.
     ///
     /// Walks the log entry chain in order, verifying each entry's signature and
-    /// parameter transitions. If a later entry fails, validation falls back to the
-    /// last known good entry. After log entry validation, witness proofs are verified
-    /// against the configured threshold for each entry.
+    /// parameter transitions. If a later entry fails, entries from that point on
+    /// are dropped from `self.log_entries` and the failure is reported via
+    /// [`ValidationReport::truncated`] — callers that want to reject partial
+    /// chains should call [`ValidationReport::assert_complete`]. After log
+    /// entry validation, witness proofs are verified against the configured
+    /// threshold for each surviving entry.
     ///
     /// Sets `self.validated = true` and computes `self.expires` on success.
-    /// Returns an error only if the *first* entry is invalid (no fallback possible).
-    pub fn validate(&mut self) -> Result<(), DIDWebVHError> {
+    /// Returns an error only if the *first* entry is invalid (no fallback
+    /// possible) or if witness-proof validation fails.
+    pub fn validate(&mut self) -> Result<ValidationReport, DIDWebVHError> {
         // Validate each LogEntry
         let mut previous_entry: Option<&LogEntryState> = None;
+        let mut truncated: Option<TruncationReason> = None;
 
         for entry in self.log_entries.iter_mut() {
             match entry.verify_log_entry(previous_entry) {
@@ -38,9 +106,12 @@ impl DIDWebVHState {
                         "There was an issue with LogEntry: {}! Reason: {e}",
                         entry.get_version_id()
                     );
-                    error!("Falling back to last known good LogEntry!");
                     if previous_entry.is_some() {
-                        // Return last known good LogEntry
+                        // Record truncation and fall back to last known good.
+                        truncated = Some(TruncationReason {
+                            at_version_id: entry.get_version_id().to_string(),
+                            error: e.to_string(),
+                        });
                         break;
                     }
                     return Err(DIDWebVHError::validation(
@@ -120,7 +191,11 @@ impl DIDWebVHState {
 
         self.expires = Utc::now().fixed_offset() + Duration::seconds(ttl as i64);
 
-        Ok(())
+        let ok_until = last_log_entry.get_version_id().to_string();
+        Ok(ValidationReport {
+            ok_until,
+            truncated,
+        })
     }
 }
 
@@ -175,7 +250,8 @@ mod tests {
     #[tokio::test]
     async fn test_validate_single_valid_entry() {
         let mut state = create_single_entry_state(None).await;
-        state.validate().expect("Validation should pass");
+        let report = state.validate().expect("Validation should pass");
+        assert!(report.truncated.is_none());
         assert!(state.validated);
         assert!(!state.scid.is_empty());
     }
@@ -229,7 +305,8 @@ mod tests {
             entry.validation_status = LogEntryValidationStatus::NotValidated;
         }
 
-        state.validate().unwrap();
+        let report = state.validate().unwrap();
+        assert!(report.truncated.is_none());
         assert!(state.deactivated);
         // Should still have 2 entries (both valid, but deactivated stops further processing)
         assert_eq!(state.log_entries.len(), 2);
@@ -269,7 +346,7 @@ mod tests {
     /// and asserting the expiration is within the expected range.
     async fn assert_ttl_produces_expiry(ttl: Option<u32>, expected_seconds: i64) {
         let mut state = create_single_entry_state(ttl).await;
-        state.validate().unwrap();
+        let _report = state.validate().unwrap();
         let now = Utc::now().fixed_offset();
         let diff = state.expires - now;
         assert!(
