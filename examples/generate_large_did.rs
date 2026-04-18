@@ -8,6 +8,11 @@
 //!   cargo run --example generate_large_did -- --url https://example.com
 //!   cargo run --example generate_large_did -- --url https://example.com:8080/custom/path
 //!   cargo run --example generate_large_did -- --url https://example.com --target-kb 2048
+//!   cargo run --example generate_large_did --features experimental-pqc -- \
+//!       --url https://example.com --key-type ml-dsa-44
+
+#[path = "common/suite.rs"]
+mod suite;
 
 use affinidi_secrets_resolver::{SecretsResolver, SimpleSecretsResolver, secrets::Secret};
 use anyhow::{Result, anyhow};
@@ -16,11 +21,11 @@ use chrono::{Duration as ChronoDuration, FixedOffset, Utc};
 use clap::Parser;
 use console::style;
 use didwebvh_rs::{
-    DIDWebVHState, Multibase, did_key::generate_did_key, parameters::Parameters, prelude::KeyType,
-    url::WebVHURL,
+    DIDWebVHState, Multibase, did_key::generate_did_key, parameters::Parameters, url::WebVHURL,
 };
 use serde_json::json;
 use std::{fs::OpenOptions, io::Write, sync::Arc, time::SystemTime};
+use suite::Suite;
 use tracing_subscriber::filter;
 
 #[derive(Parser, Debug)]
@@ -37,6 +42,11 @@ struct Args {
     /// Number of service endpoints per DID document (bulks up each entry)
     #[arg(short, long, default_value_t = 5)]
     services: usize,
+
+    /// Cryptographic suite used for all update keys.
+    /// PQC options are gated on the `experimental-pqc` Cargo feature.
+    #[arg(short = 'k', long, value_enum, default_value_t = Suite::default())]
+    key_type: Suite,
 }
 
 #[tokio::main]
@@ -85,7 +95,7 @@ pub async fn main() -> Result<()> {
     // === Generate initial DID ===
     let gen_start = SystemTime::now();
 
-    let (signing_key, next_keys) = generate_keys(&mut secrets).await?;
+    let (signing_key, next_keys) = generate_keys(&mut secrets, &args).await?;
 
     let did_document = build_did_document(&did_template, &signing_key, args.services)?;
 
@@ -129,6 +139,7 @@ pub async fn main() -> Result<()> {
             &did_id,
             args.services,
             entry_count,
+            &args,
             version_time,
         )
         .await?;
@@ -253,14 +264,18 @@ pub async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Generate a signing key and two next-rotation keys
-async fn generate_keys(secrets: &mut SimpleSecretsResolver) -> Result<(Secret, Vec<Secret>)> {
-    let signing_key = generate_did_key(KeyType::Ed25519)?.1;
+/// Generate a signing key and two next-rotation keys.
+async fn generate_keys(
+    secrets: &mut SimpleSecretsResolver,
+    args: &Args,
+) -> Result<(Secret, Vec<Secret>)> {
+    let kt = args.key_type.key_type();
+    let signing_key = generate_did_key(kt)?.1;
     secrets.insert(signing_key.clone()).await;
 
-    let next_key1 = generate_did_key(KeyType::Ed25519)?.1;
+    let next_key1 = generate_did_key(kt)?.1;
     secrets.insert(next_key1.clone()).await;
-    let next_key2 = generate_did_key(KeyType::Ed25519)?.1;
+    let next_key2 = generate_did_key(kt)?.1;
     secrets.insert(next_key2.clone()).await;
 
     Ok((signing_key, vec![next_key1, next_key2]))
@@ -302,7 +317,11 @@ fn build_did_document(
     }))
 }
 
-/// Create an update log entry with key rotation
+/// Create an update log entry with key rotation.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "example plumbs config + state between helpers"
+)]
 async fn create_update_entry(
     didwebvh: &mut DIDWebVHState,
     secrets: &mut SimpleSecretsResolver,
@@ -310,6 +329,7 @@ async fn create_update_entry(
     did_id: &str,
     num_services: usize,
     count: u32,
+    args: &Args,
     version_time: chrono::DateTime<FixedOffset>,
 ) -> Result<(Vec<Secret>, ())> {
     let old_entry = didwebvh
@@ -320,9 +340,10 @@ async fn create_update_entry(
     let mut new_params = old_entry.validated_parameters.clone();
 
     // Generate new next keys for pre-rotation
-    let next_key1 = generate_did_key(KeyType::Ed25519)?.1;
+    let kt = args.key_type.key_type();
+    let next_key1 = generate_did_key(kt)?.1;
     secrets.insert(next_key1.clone()).await;
-    let next_key2 = generate_did_key(KeyType::Ed25519)?.1;
+    let next_key2 = generate_did_key(kt)?.1;
     secrets.insert(next_key2.clone()).await;
 
     new_params.next_key_hashes = Some(Arc::new(vec![

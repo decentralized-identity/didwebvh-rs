@@ -4,18 +4,31 @@
 //! using the high-level programmatic update API.
 //!
 //! Run with: `cargo run --example update_did`
+//! Try PQC: `cargo run --example update_did --features experimental-pqc -- --key-type ml-dsa-44`
 
-use affinidi_secrets_resolver::secrets::Secret;
-use didwebvh_rs::prelude::*;
+#[path = "common/suite.rs"]
+mod suite;
+
+use clap::Parser;
+use didwebvh_rs::{did_key::generate_did_key, prelude::*};
 use serde_json::json;
 use std::sync::Arc;
 
+use suite::Suite;
+
+#[derive(Parser, Debug)]
+#[command(about = "Create a DID and add a service endpoint via update_did().")]
+struct Args {
+    #[arg(short = 'k', long, value_enum, default_value_t = Suite::default())]
+    key_type: Suite,
+}
+
 #[tokio::main]
 async fn main() {
-    // Generate a signing key with the required did:key ID format
-    let mut signing_key = Secret::generate_ed25519(None, None);
+    let args = Args::parse();
+
+    let (_did, signing_key) = generate_did_key(args.key_type.key_type()).unwrap();
     let pk = signing_key.get_public_keymultibase().unwrap();
-    signing_key.id = format!("did:key:{pk}#{pk}");
 
     // Create the DID using the high-level API
     let create_config = CreateDIDConfig::builder()

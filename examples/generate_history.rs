@@ -8,6 +8,12 @@
 //! 2. They rotate webVH keys every month (two keys per update)
 //! 3. They swap a witness node once every 6 months (maintaining 3 threashold, 4 witnesses)
 //! 4. They swap a watcher node once every 6 months (maintaining 3 watchers)
+//!
+//! Try PQC with `--features experimental-pqc -- --key-type ml-dsa-44` to
+//! benchmark post-quantum signatures on a realistic history.
+
+#[path = "common/suite.rs"]
+mod suite;
 
 use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
 use affinidi_secrets_resolver::{SecretsResolver, SimpleSecretsResolver, secrets::Secret};
@@ -18,10 +24,10 @@ use clap::Parser;
 use console::style;
 use didwebvh_rs::{
     DIDWebVHState, Multibase,
+    did_key::generate_did_key,
     parameters::Parameters,
     witness::{Witness, Witnesses},
 };
-use didwebvh_rs::{did_key::generate_did_key, prelude::KeyType};
 use format_num::format_num;
 use rand::{RngExt, distr::Alphabetic};
 use serde_json::json;
@@ -32,6 +38,7 @@ use std::{
     thread::sleep,
     time::{Duration, SystemTime},
 };
+use suite::Suite;
 use tracing_subscriber::filter;
 
 #[derive(Parser, Debug)]
@@ -48,6 +55,11 @@ struct Args {
     /// Enables Interactive mode (user presses enter to proceed to next step)
     #[arg(short, long)]
     interactive: bool,
+
+    /// Cryptographic suite used for update keys and witness signatures.
+    /// PQC options are gated on the `experimental-pqc` Cargo feature.
+    #[arg(short = 'k', long, value_enum, default_value_t = Suite::default())]
+    key_type: Suite,
 }
 
 #[tokio::main]
@@ -368,13 +380,13 @@ async fn generate_did(
     // ***** Generate Parameters *****
 
     // Generate updateKey for first log entry
-    let signing_did1_secret = generate_did_key(KeyType::Ed25519)?.1;
+    let signing_did1_secret = generate_did_key(args.key_type.key_type())?.1;
     secrets.insert(signing_did1_secret.clone()).await;
 
     // Generate next_key_hashes
-    let next_key1 = generate_did_key(KeyType::Ed25519)?.1;
+    let next_key1 = generate_did_key(args.key_type.key_type())?.1;
     secrets.insert(next_key1.clone()).await;
-    let next_key2 = generate_did_key(KeyType::Ed25519)?.1;
+    let next_key2 = generate_did_key(args.key_type.key_type())?.1;
     secrets.insert(next_key2.clone()).await;
 
     // Generate witnesses
@@ -382,7 +394,7 @@ async fn generate_did(
         let mut witness_nodes = Vec::new();
 
         for _ in 0..args.witnesses {
-            let (w_did, w_secret) = generate_did_key(KeyType::Ed25519)?;
+            let (w_did, w_secret) = generate_did_key(args.key_type.key_type())?;
             secrets.insert(w_secret.clone()).await;
             witness_nodes.push(Witness {
                 id: Multibase::new(w_did),
@@ -497,9 +509,9 @@ async fn create_log_entry(
     let mut new_params = old_log_entry.validated_parameters.clone();
 
     // Generate next_key_hashes
-    let next_key1 = generate_did_key(KeyType::Ed25519)?.1;
+    let next_key1 = generate_did_key(args.key_type.key_type())?.1;
     secrets.insert(next_key1.clone()).await;
-    let next_key2 = generate_did_key(KeyType::Ed25519)?.1;
+    let next_key2 = generate_did_key(args.key_type.key_type())?.1;
     secrets.insert(next_key2.clone()).await;
 
     new_params.next_key_hashes = Some(Arc::new(vec![
@@ -516,7 +528,7 @@ async fn create_log_entry(
 
     // Swap a witness node?
     if args.witnesses > 0 && count % 6 == 3 {
-        swap_witness(&mut new_params, secrets).await?;
+        swap_witness(&mut new_params, secrets, args).await?;
     }
 
     // Swap a watcher node?
@@ -541,7 +553,11 @@ async fn create_log_entry(
     Ok(vec![next_key1, next_key2])
 }
 
-async fn swap_witness(params: &mut Parameters, secrets: &mut SimpleSecretsResolver) -> Result<()> {
+async fn swap_witness(
+    params: &mut Parameters,
+    secrets: &mut SimpleSecretsResolver,
+    args: &Args,
+) -> Result<()> {
     // Pick a random witness and remove it
     let mut rng = rand::rng();
 
@@ -562,7 +578,7 @@ async fn swap_witness(params: &mut Parameters, secrets: &mut SimpleSecretsResolv
     // remove random witness
     new_witnesses.remove(rn);
 
-    let (new_witness_did, secret) = generate_did_key(KeyType::Ed25519)?;
+    let (new_witness_did, secret) = generate_did_key(args.key_type.key_type())?;
     secrets.insert(secret.clone()).await;
 
     new_witnesses.push(Witness {

@@ -4,16 +4,39 @@
 //! `{DID}` placeholders, `also_known_as` aliases, and portability.
 //!
 //! Run with: `cargo run --example create`
+//!
+//! Try a different cryptographic suite — classical always-on, PQC under
+//! the `experimental-pqc` feature:
+//!
+//! ```text
+//! cargo run --example create -- --key-type p-256
+//! cargo run --example create --features experimental-pqc -- --key-type ml-dsa-44
+//! ```
 
-use affinidi_secrets_resolver::secrets::Secret;
-use didwebvh_rs::prelude::*;
+#[path = "common/suite.rs"]
+mod suite;
+
+use clap::Parser;
+use didwebvh_rs::{did_key::generate_did_key, prelude::*};
 use serde_json::json;
 use std::sync::Arc;
 
+use suite::Suite;
+
+#[derive(Parser, Debug)]
+#[command(about = "Create a new did:webvh DID with a chosen cryptographic suite.")]
+struct Args {
+    /// Cryptographic suite for the initial update key.
+    #[arg(short = 'k', long, value_enum, default_value_t = Suite::default())]
+    key_type: Suite,
+}
+
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+
     // Generate a signing key with the required did:key ID format
-    let signing_key = Secret::generate_ed25519(None, None);
+    let (_did, signing_key) = generate_did_key(args.key_type.key_type()).unwrap();
 
     // Build parameters — update_keys controls who can modify the DID
     let parameters = Parameters {

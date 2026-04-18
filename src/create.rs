@@ -350,10 +350,8 @@ fn replace_did_placeholder(did_document: &mut Value, did: &str) {
                 replace_did_placeholder(value, did);
             }
         }
-        Value::String(s) => {
-            if s.contains("{DID}") {
-                *s = s.replace("{DID}", did);
-            }
+        Value::String(s) if s.contains("{DID}") => {
+            *s = s.replace("{DID}", did);
         }
         _ => {}
     }

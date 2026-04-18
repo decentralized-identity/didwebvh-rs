@@ -29,7 +29,9 @@ jobs:
           components: clippy
       - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -- -D warnings
+      # --tests + --examples covers the shipping code without tripping
+      # the nightly-only did_benchmarks_nightly bench (uses #![feature(test)]).
+      - run: cargo clippy --all-features --tests --examples -- -D warnings
 
   test:
     name: Test
@@ -42,15 +44,15 @@ jobs:
       - run: cargo test --all-features
 
   msrv:
-    name: MSRV (1.90.0)
+    name: MSRV (1.94.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.90.0"
+          toolchain: "1.94.0"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check
+      - run: cargo check --all-features
 
   audit:
     name: Security Audit
