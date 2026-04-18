@@ -51,6 +51,24 @@ impl WitnessVerifyOptions {
     pub fn suite_is_allowed(&self, suite: CryptoSuite) -> bool {
         suite == CryptoSuite::EddsaJcs2022 || self.extra_allowed_suites.contains(&suite)
     }
+
+    /// Enforce the structural constraints from didwebvh 1.0 §"The Witness
+    /// Proofs File" on a witness [`DataIntegrityProof`]: the cryptosuite
+    /// must be accepted (either the spec default `eddsa-jcs-2022` or a
+    /// caller-opted-in extra) and `proofPurpose` must be `assertionMethod`.
+    ///
+    /// Cryptographic signature verification is intentionally NOT performed
+    /// here — this is the cheap pre-check that runs before signature
+    /// verification inside [`crate::log_entry::LogEntry::validate_witness_proof`].
+    /// Expose it publicly so a caller doing its own witness plumbing can
+    /// enforce the same shape constraints without going through a full
+    /// `validate()` pass.
+    pub fn check_proof_shape(
+        &self,
+        proof: &affinidi_data_integrity::DataIntegrityProof,
+    ) -> Result<(), DIDWebVHError> {
+        crate::log_entry::enforce_witness_proof_shape(proof, self)
+    }
 }
 
 /// Witness nodes

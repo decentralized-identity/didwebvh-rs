@@ -9,6 +9,7 @@
 */
 
 use chrono::{Duration, Utc};
+use std::sync::Arc;
 use tracing::{debug, error};
 
 use crate::{
@@ -25,7 +26,10 @@ use crate::{
 /// - [`Self::VerificationFailed`]: a later entry failed signature or
 ///   parameter verification. The chain up to the failing entry's predecessor
 ///   is still usable; the failing entry *and everything after it* has been
-///   dropped from [`DIDWebVHState::log_entries`].
+///   dropped from [`DIDWebVHState::log_entries`]. The underlying
+///   [`DIDWebVHError`] is carried structurally in an [`Arc`] so callers can
+///   pattern-match on the specific error variant without this enum having
+///   to be `Clone`-incompatible.
 /// - [`Self::PostDeactivation`]: a valid deactivation entry was followed by
 ///   additional entries in the loaded log. Per spec a deactivated DID
 ///   cannot be updated, so those trailing entries are dropped. Surfacing
@@ -33,22 +37,23 @@ use crate::{
 ///   attacker-appended]` log would let an attacker hide tampered entries
 ///   behind a real deactivation.
 ///
-/// The inner `error` string (on `VerificationFailed`) is rendered rather
-/// than carried as a typed [`DIDWebVHError`] because the latter is not
-/// `Clone` (it wraps non-cloneable `reqwest` / `serde_json` errors in
-/// some variants). `#[non_exhaustive]` lets future variants land without
-/// breaking downstream matches.
+/// `#[non_exhaustive]` lets future variants land without breaking
+/// downstream matches.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum TruncationReason {
     /// A log entry failed verification (bad proof, parameter transition,
     /// hash chain, etc.). Contains the failing entry's `versionId` and the
-    /// rendered error message.
+    /// structural error.
     VerificationFailed {
         /// `versionId` of the entry at which verification stopped.
         at_version_id: String,
-        /// Rendered error message from the failing entry's verification.
-        error: String,
+        /// The underlying error. Wrapped in [`Arc`] because
+        /// [`DIDWebVHError`] is not `Clone` (some variants wrap non-cloneable
+        /// `reqwest` / `serde_json` sources). Callers that want the
+        /// variant should pattern-match on `&*error`; callers that just
+        /// want a string can `error.to_string()`.
+        error: Arc<DIDWebVHError>,
     },
     /// Entries past a valid deactivation entry were dropped. The controller
     /// cannot legitimately extend a deactivated log; a resolver that sees
@@ -138,7 +143,7 @@ impl ValidationReport {
                 error,
             } => format!(
                 "Log truncated at {at_version_id}: {error}. Last valid entry: {}.",
-                self.ok_until
+                self.ok_until,
             ),
             TruncationReason::PostDeactivation {
                 deactivated_at,
@@ -197,7 +202,7 @@ impl DIDWebVHState {
                         // Record truncation and fall back to last known good.
                         truncated = Some(TruncationReason::VerificationFailed {
                             at_version_id: entry.get_version_id().to_string(),
-                            error: e.to_string(),
+                            error: Arc::new(e),
                         });
                         break;
                     }

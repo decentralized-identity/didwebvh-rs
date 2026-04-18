@@ -519,6 +519,32 @@ use didwebvh_rs::{did_key::generate_did_key, prelude::KeyType};
 let (did, key) = generate_did_key(KeyType::MlDsa44)?;
 ```
 
+### Try it from the examples
+
+Every example under `examples/` takes a `--key-type` flag that maps onto
+the `Suite` enum (defined in `examples/common/suite.rs`). Classical
+suites are always available; PQC variants appear only when the feature
+is on:
+
+```bash
+# Create a DID with an ML-DSA-44 update key
+cargo run --features experimental-pqc --example create -- --key-type ml-dsa-44
+
+# Rotate keys across two ML-DSA-44 generations
+cargo run --features experimental-pqc --example rotate_keys -- --key-type ml-dsa-44
+
+# Benchmark a 120-entry history signed with ML-DSA-44
+cargo run --release --features experimental-pqc --example generate_history -- \
+    --key-type ml-dsa-44 -c 120
+
+# SLH-DSA-128s (hash-based, no JWK)
+cargo run --features experimental-pqc --example create -- --key-type slh-dsa-128
+```
+
+The interactive wizard (`--features cli,experimental-pqc`) adds ML-DSA
+and SLH-DSA entries to the key-type menu, clearly labelled
+*(experimental)*.
+
 ### Runtime opt-in for PQC witness proofs (independent of the feature)
 
 The didwebvh 1.0 spec (§"The Witness Proofs File") says witness

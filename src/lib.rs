@@ -50,6 +50,26 @@ pub use validate::{TruncationReason, ValidationReport};
 #[cfg(test)]
 pub(crate) mod test_utils;
 
+/// One-release-only deprecation shim for code that used to reach for
+/// `didwebvh_rs::affinidi_secrets_resolver::*`.
+///
+/// Removed in 0.6.0. The replacement is either:
+/// - `use didwebvh_rs::prelude::Secret;` (and friends), or
+/// - a direct `affinidi-secrets-resolver` dependency in your own `Cargo.toml`
+///   if you need the full surface.
+///
+/// Rationale for the re-exported whole crate being deprecated:
+/// tying `didwebvh_rs::affinidi_secrets_resolver` to whatever we pin made
+/// downstream version skew silent and painful. Depending on the upstream
+/// crate directly makes the version visible in your `Cargo.lock`.
+#[deprecated(
+    since = "0.5.0",
+    note = "use `didwebvh_rs::prelude::Secret` (and friends) or depend on \
+            `affinidi-secrets-resolver` directly; this re-export will be \
+            removed in 0.6.0"
+)]
+pub use affinidi_secrets_resolver;
+
 // `pub(crate)` re-exports for items that are used widely across this crate's
 // internal modules but are NOT part of the stable top-level public API.
 // Downstream consumers should reach for `didwebvh_rs::prelude::*` (or depend
