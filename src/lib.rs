@@ -29,6 +29,8 @@ pub mod cli_create;
 #[cfg(feature = "cli")]
 pub mod cli_update;
 pub mod create;
+/// `did:key` helpers used by tests, examples and the interactive CLI.
+pub mod did_key;
 pub mod did_web;
 pub mod log_entry;
 /// Manages per-entry validation state during DID log processing.

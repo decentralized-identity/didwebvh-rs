@@ -7,10 +7,10 @@
  */
 
 use crate::{
-    DIDWebVHError, Multibase, Secret,
+    DIDWebVHError, KeyType, Multibase, Secret,
+    did_key::generate_did_key,
     witness::{Witness, Witnesses},
 };
-use affinidi_tdk::dids::{DID, KeyType};
 use ahash::HashMap;
 use console::style;
 use dialoguer::{Confirm, Editor, Input, Select, theme::ColorfulTheme};
@@ -111,7 +111,7 @@ pub(crate) fn prompt_keys() -> Result<Vec<Secret>, DIDWebVHError> {
                 keys.push(Secret::from_multibase(&private, None).map_err(map_key_err)?);
             }
         } else {
-            let (did, key) = DID::generate_did_key(KeyType::Ed25519)
+            let (did, key) = generate_did_key(KeyType::Ed25519)
                 .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
             println!(
                 "{} {}",
@@ -204,12 +204,12 @@ pub(crate) fn prompt_create_key(id: &str) -> Result<(Secret, KeyCapability), DID
 
     let (mut secret, capability) = if selection == 0 {
         // Ed25519 — signing only
-        let (_, secret) = DID::generate_did_key(KeyType::Ed25519)
+        let (_, secret) = generate_did_key(KeyType::Ed25519)
             .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
         (secret, KeyCapability::SigningOnly)
     } else if selection == 1 {
         // X25519 — encryption only
-        let (_, secret) = DID::generate_did_key(KeyType::Ed25519)
+        let (_, secret) = generate_did_key(KeyType::Ed25519)
             .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
         let secret = secret
             .to_x25519()
@@ -219,7 +219,7 @@ pub(crate) fn prompt_create_key(id: &str) -> Result<(Secret, KeyCapability), DID
         // P-256, secp256k1, P-384 — general purpose
         let key_type = KeyType::try_from(items[selection].as_str())
             .map_err(|e| DIDWebVHError::DIDError(format!("Invalid key type: {e}")))?;
-        let (_, secret) = DID::generate_did_key(key_type)
+        let (_, secret) = generate_did_key(key_type)
             .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
         (secret, KeyCapability::General)
     };
@@ -307,7 +307,7 @@ pub(crate) fn prompt_generate_witness_nodes(
         .map_err(map_io)?
     {
         for i in 0..(threshold + 1) {
-            let (did, key) = DID::generate_did_key(KeyType::Ed25519)
+            let (did, key) = generate_did_key(KeyType::Ed25519)
                 .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
             println!(
                 "{} {}",
@@ -395,7 +395,7 @@ pub(crate) fn prompt_next_key_hashes() -> Result<(Vec<Multibase>, Vec<Secret>), 
             .interact()
             .map_err(map_io)?
         {
-            let (_, key) = DID::generate_did_key(KeyType::Ed25519)
+            let (_, key) = generate_did_key(KeyType::Ed25519)
                 .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
             println!(
                 "{} {} {} {}\n\t{} {}",

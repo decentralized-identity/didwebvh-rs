@@ -11,7 +11,6 @@
 
 use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
 use affinidi_secrets_resolver::{SecretsResolver, SimpleSecretsResolver, secrets::Secret};
-use affinidi_tdk::dids::{DID, KeyType};
 use anyhow::{Result, anyhow, bail};
 use byte_unit::{Byte, UnitType};
 use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
@@ -22,6 +21,7 @@ use didwebvh_rs::{
     parameters::Parameters,
     witness::{Witness, Witnesses},
 };
+use didwebvh_rs::{KeyType, did_key::generate_did_key};
 use format_num::format_num;
 use rand::{RngExt, distr::Alphabetic};
 use serde_json::json;
@@ -368,13 +368,13 @@ async fn generate_did(
     // ***** Generate Parameters *****
 
     // Generate updateKey for first log entry
-    let signing_did1_secret = DID::generate_did_key(affinidi_tdk::dids::KeyType::Ed25519)?.1;
+    let signing_did1_secret = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(signing_did1_secret.clone()).await;
 
     // Generate next_key_hashes
-    let next_key1 = DID::generate_did_key(KeyType::Ed25519)?.1;
+    let next_key1 = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(next_key1.clone()).await;
-    let next_key2 = DID::generate_did_key(KeyType::Ed25519)?.1;
+    let next_key2 = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(next_key2.clone()).await;
 
     // Generate witnesses
@@ -382,7 +382,7 @@ async fn generate_did(
         let mut witness_nodes = Vec::new();
 
         for _ in 0..args.witnesses {
-            let (w_did, w_secret) = DID::generate_did_key(KeyType::Ed25519)?;
+            let (w_did, w_secret) = generate_did_key(KeyType::Ed25519)?;
             secrets.insert(w_secret.clone()).await;
             witness_nodes.push(Witness {
                 id: Multibase::new(w_did),
@@ -497,9 +497,9 @@ async fn create_log_entry(
     let mut new_params = old_log_entry.validated_parameters.clone();
 
     // Generate next_key_hashes
-    let next_key1 = DID::generate_did_key(KeyType::Ed25519)?.1;
+    let next_key1 = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(next_key1.clone()).await;
-    let next_key2 = DID::generate_did_key(KeyType::Ed25519)?.1;
+    let next_key2 = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(next_key2.clone()).await;
 
     new_params.next_key_hashes = Some(Arc::new(vec![
@@ -562,7 +562,7 @@ async fn swap_witness(params: &mut Parameters, secrets: &mut SimpleSecretsResolv
     // remove random witness
     new_witnesses.remove(rn);
 
-    let (new_witness_did, secret) = DID::generate_did_key(KeyType::Ed25519)?;
+    let (new_witness_did, secret) = generate_did_key(KeyType::Ed25519)?;
     secrets.insert(secret.clone()).await;
 
     new_witnesses.push(Witness {

@@ -30,19 +30,19 @@
  */
 
 use crate::{
-    DIDWebVHError, DIDWebVHState, Multibase, Secret,
+    DIDWebVHError, DIDWebVHState, KeyType, Multibase, Secret,
     cli_common::{
         map_io, map_key_err, prompt_confirm, prompt_edit_document, prompt_keys,
         prompt_next_key_hashes, prompt_witnesses,
     },
     create::sign_witness_proofs,
+    did_key::generate_did_key,
     log_entry::LogEntry,
     log_entry_state::LogEntryState,
     parameters::Parameters,
     url::WebVHURL,
     witness::{Witness, Witnesses},
 };
-use affinidi_tdk::dids::{DID, KeyType};
 use ahash::HashMap;
 use console::style;
 use dialoguer::{Confirm, Input, MultiSelect, Select, theme::ColorfulTheme};
@@ -1144,7 +1144,7 @@ fn prompt_modify_witness_nodes(
             };
 
             for i in 0..count {
-                let (did, key) = DID::generate_did_key(KeyType::Ed25519)
+                let (did, key) = generate_did_key(KeyType::Ed25519)
                     .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
                 println!(
                     "{} {}",

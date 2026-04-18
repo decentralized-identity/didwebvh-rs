@@ -175,7 +175,7 @@ async fn create_new_did() -> Result<()> {
                 // Build a temporary LogEntryState to pass to save_did_web
                 let mut webvh_state = didwebvh_rs::DIDWebVHState::default();
                 webvh_state.load_log_entries_from_file(&file_name)?;
-                webvh_state.validate()?;
+                webvh_state.validate()?.assert_complete()?;
                 if let Some(entry) = webvh_state.log_entries().last() {
                     save_did_web(entry)?;
                 }

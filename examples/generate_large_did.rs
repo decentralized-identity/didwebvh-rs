@@ -10,13 +10,13 @@
 //!   cargo run --example generate_large_did -- --url https://example.com --target-kb 2048
 
 use affinidi_secrets_resolver::{SecretsResolver, SimpleSecretsResolver, secrets::Secret};
-use affinidi_tdk::dids::{DID, KeyType};
 use anyhow::{Result, anyhow};
 use byte_unit::{Byte, UnitType};
 use chrono::{Duration as ChronoDuration, FixedOffset, Utc};
 use clap::Parser;
 use console::style;
 use didwebvh_rs::{DIDWebVHState, Multibase, parameters::Parameters, url::WebVHURL};
+use didwebvh_rs::{KeyType, did_key::generate_did_key};
 use serde_json::json;
 use std::{fs::OpenOptions, io::Write, sync::Arc, time::SystemTime};
 use tracing_subscriber::filter;
@@ -253,12 +253,12 @@ pub async fn main() -> Result<()> {
 
 /// Generate a signing key and two next-rotation keys
 async fn generate_keys(secrets: &mut SimpleSecretsResolver) -> Result<(Secret, Vec<Secret>)> {
-    let signing_key = DID::generate_did_key(KeyType::Ed25519)?.1;
+    let signing_key = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(signing_key.clone()).await;
 
-    let next_key1 = DID::generate_did_key(KeyType::Ed25519)?.1;
+    let next_key1 = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(next_key1.clone()).await;
-    let next_key2 = DID::generate_did_key(KeyType::Ed25519)?.1;
+    let next_key2 = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(next_key2.clone()).await;
 
     Ok((signing_key, vec![next_key1, next_key2]))
@@ -318,9 +318,9 @@ async fn create_update_entry(
     let mut new_params = old_entry.validated_parameters.clone();
 
     // Generate new next keys for pre-rotation
-    let next_key1 = DID::generate_did_key(KeyType::Ed25519)?.1;
+    let next_key1 = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(next_key1.clone()).await;
-    let next_key2 = DID::generate_did_key(KeyType::Ed25519)?.1;
+    let next_key2 = generate_did_key(KeyType::Ed25519)?.1;
     secrets.insert(next_key2.clone()).await;
 
     new_params.next_key_hashes = Some(Arc::new(vec![
