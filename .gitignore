@@ -4,3 +4,7 @@
 /*-witness.json
 /*-secrets.json
 /www
+
+# npm artefacts from the cross-impl fixture generator
+/tests/fixtures/plain-rotation/node_modules/
+/tests/fixtures/plain-rotation/package-lock.json

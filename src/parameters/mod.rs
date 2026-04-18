@@ -354,7 +354,14 @@ impl Parameters {
             }
         }
 
-        // Validate and update UpdateKeys
+        // Validate and update UpdateKeys.
+        //
+        // `active_update_keys` is a forward-looking field: it is the set of keys that
+        // will authorize the NEXT log entry. For a given entry N, its proof must be
+        // authorized by `previous.active_update_keys`, EXCEPT when N was pre-committed
+        // by N-1's `nextKeyHashes` — in that case N's own `active_update_keys`
+        // self-authorize (see `LogEntry::verify_log_entry`). Both the read and write
+        // paths consult `previous.pre_rotation_active` to pick the right rule.
         if let Some(previous) = previous {
             match &self.update_keys {
                 None => {

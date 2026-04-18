@@ -83,11 +83,25 @@ impl LogEntry {
         };
         debug!("Validated parameters: {parameters:#?}");
 
-        // Ensure that the signed proof key is part of the authorized keys
-        if !LogEntry::check_signing_key_authorized(
-            &parameters.active_update_keys,
-            &proof.verification_method,
-        ) {
+        // Ensure that the signed proof key is part of the authorized keys.
+        //
+        // didwebvh 1.0 §"Authorized Keys for the New DID Log Entry":
+        // - Pre-rotation mode (previous entry declared `nextKeyHashes`): the current
+        //   entry's own `updateKeys` are pre-committed and self-authorize its proof.
+        // - Plain rotation: the current entry's proof must come from the PREVIOUS
+        //   entry's `updateKeys` — newly-declared keys do not activate until N+1.
+        // - Genesis entry: self-authorizing against its own `updateKeys`.
+        //
+        // `active_update_keys` is "keys active for the next entry" (forward-looking),
+        // which is exactly what we need for the plain-rotation read rule when applied
+        // to the previous entry. See also the mirror logic in `DIDWebVHState::verify_log_entry_state`.
+        let authorized = match (previous_log_entry, previous_parameters) {
+            (Some(_), Some(previous_params)) if !previous_params.pre_rotation_active => {
+                &previous_params.active_update_keys
+            }
+            _ => &parameters.active_update_keys,
+        };
+        if !LogEntry::check_signing_key_authorized(authorized, &proof.verification_method) {
             warn!(
                 "Signing key {} is not authorized",
                 &proof.verification_method
