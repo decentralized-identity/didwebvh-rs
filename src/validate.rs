@@ -20,40 +20,102 @@ use crate::{
 /// Why log-entry validation stopped before consuming every loaded entry.
 ///
 /// Returned inside [`ValidationReport::truncated`] when entries loaded into
-/// [`DIDWebVHState`] past `at_version_id` failed verification. The chain up to
-/// and including `at_version_id`'s predecessor is still usable (the last-known-good
-/// entries); everything at and after `at_version_id` has been dropped from
-/// [`DIDWebVHState::log_entries`].
+/// [`DIDWebVHState`] were dropped during validation. Two cases:
 ///
-/// The inner error is stringified rather than carried as [`DIDWebVHError`]
-/// because the latter is not `Clone` (it wraps non-cloneable `reqwest` and
-/// `serde_json` errors in some variants); surfacing the message preserves
-/// diagnostics without forcing a clone bound on the error type.
+/// - [`Self::VerificationFailed`]: a later entry failed signature or
+///   parameter verification. The chain up to the failing entry's predecessor
+///   is still usable; the failing entry *and everything after it* has been
+///   dropped from [`DIDWebVHState::log_entries`].
+/// - [`Self::PostDeactivation`]: a valid deactivation entry was followed by
+///   additional entries in the loaded log. Per spec a deactivated DID
+///   cannot be updated, so those trailing entries are dropped. Surfacing
+///   this loudly matters: silently accepting a `[genesis, deactivate,
+///   attacker-appended]` log would let an attacker hide tampered entries
+///   behind a real deactivation.
+///
+/// The inner `error` string (on `VerificationFailed`) is rendered rather
+/// than carried as a typed [`DIDWebVHError`] because the latter is not
+/// `Clone` (it wraps non-cloneable `reqwest` / `serde_json` errors in
+/// some variants). `#[non_exhaustive]` lets future variants land without
+/// breaking downstream matches.
 #[derive(Debug, Clone)]
-pub struct TruncationReason {
-    /// `versionId` of the entry at which validation stopped.
-    pub at_version_id: String,
-    /// Rendered error message from the failing entry's verification.
-    pub error: String,
+#[non_exhaustive]
+pub enum TruncationReason {
+    /// A log entry failed verification (bad proof, parameter transition,
+    /// hash chain, etc.). Contains the failing entry's `versionId` and the
+    /// rendered error message.
+    VerificationFailed {
+        /// `versionId` of the entry at which verification stopped.
+        at_version_id: String,
+        /// Rendered error message from the failing entry's verification.
+        error: String,
+    },
+    /// Entries past a valid deactivation entry were dropped. The controller
+    /// cannot legitimately extend a deactivated log; a resolver that sees
+    /// such entries should treat them as tampering attempts rather than
+    /// silently truncating.
+    PostDeactivation {
+        /// `versionId` of the deactivation entry.
+        deactivated_at: String,
+        /// Number of entries in the loaded log past the deactivation entry
+        /// that were dropped.
+        dropped_entries: u32,
+    },
+}
+
+impl TruncationReason {
+    /// The `versionId` at which the truncation happened — the failing entry
+    /// for `VerificationFailed`, the deactivation entry for
+    /// `PostDeactivation`.
+    pub fn at_version_id(&self) -> &str {
+        match self {
+            Self::VerificationFailed { at_version_id, .. }
+            | Self::PostDeactivation {
+                deactivated_at: at_version_id,
+                ..
+            } => at_version_id,
+        }
+    }
 }
 
 /// Summary of a call to [`DIDWebVHState::validate`].
 ///
 /// Always carries the `versionId` of the last-known-good entry in `ok_until`.
-/// If `truncated` is `Some`, entries past that point failed verification and
-/// were dropped — callers MUST decide whether that is acceptable for their
-/// use case (a resolver should typically reject, a debugger may tolerate).
+/// If `truncated` is `Some`, entries past that point were dropped — see
+/// [`TruncationReason`] for the two cases.
 ///
-/// The `#[must_use]` attribute forces callers to acknowledge truncation
-/// rather than silently ignoring a partially-validated log — this replaces
-/// the pre-0.5.0 behaviour where `validate()` returned `Ok(())` after
-/// silently truncating.
-#[must_use = "a ValidationReport may contain a truncation that the caller must handle"]
+/// # Handling the report
+///
+/// ```ignore
+/// // Strict: fail on any truncation (recommended for resolvers).
+/// state.validate()?.assert_complete()?;
+///
+/// // Best-effort: accept partial logs, inspect truncation manually.
+/// let report = state.validate()?;
+/// if let Some(reason) = &report.truncated {
+///     tracing::warn!(?reason, "partial validation");
+/// }
+/// ```
+///
+/// # On `#[must_use]`
+///
+/// The `#[must_use]` attribute catches the most obvious misuse —
+/// `state.validate();` as a bare statement — and forces a call-site
+/// binding. **It does not catch propagation-and-drop**: `state.validate()?;`
+/// still compiles cleanly, because `?` consumes the `Result` and drops
+/// the `Ok(ValidationReport)` without triggering the lint. Reach for
+/// [`Self::assert_complete`] whenever you need the stricter "succeed only
+/// if every loaded entry validated" contract — that is the one call that
+/// turns truncation into an `Err`.
+#[must_use = "a ValidationReport may contain a truncation that the caller must handle — \
+              call .assert_complete() to turn it into an error, or inspect .truncated"]
 #[derive(Debug, Clone)]
 pub struct ValidationReport {
     /// `versionId` of the last log entry that validated successfully.
     pub ok_until: String,
-    /// `Some` if verification stopped before the loaded log ended.
+    /// `Some` if some entries in the loaded log did not survive validation.
+    /// See [`TruncationReason`] for the variants (verification failure vs
+    /// post-deactivation tampering).
     pub truncated: Option<TruncationReason>,
 }
 
@@ -64,19 +126,29 @@ impl ValidationReport {
     /// wants `Ok(())` only when every loaded entry validated can write
     /// `state.validate()?.assert_complete()?`.
     pub fn assert_complete(self) -> Result<(), DIDWebVHError> {
-        if let Some(reason) = &self.truncated {
-            let version = crate::log_entry::parse_version_id_fields(&reason.at_version_id)
-                .map(|(n, _)| n)
-                .unwrap_or(0);
-            return Err(DIDWebVHError::validation(
-                format!(
-                    "Log truncated at {}: {}. Last valid entry: {}.",
-                    reason.at_version_id, reason.error, self.ok_until
-                ),
-                version,
-            ));
-        }
-        Ok(())
+        let Some(reason) = &self.truncated else {
+            return Ok(());
+        };
+        let version = crate::log_entry::parse_version_id_fields(reason.at_version_id())
+            .map(|(n, _)| n)
+            .unwrap_or(0);
+        let msg = match reason {
+            TruncationReason::VerificationFailed {
+                at_version_id,
+                error,
+            } => format!(
+                "Log truncated at {at_version_id}: {error}. Last valid entry: {}.",
+                self.ok_until
+            ),
+            TruncationReason::PostDeactivation {
+                deactivated_at,
+                dropped_entries,
+            } => format!(
+                "Log contains {dropped_entries} entries past the deactivation entry \
+                 at {deactivated_at}; a deactivated DID cannot be updated."
+            ),
+        };
+        Err(DIDWebVHError::validation(msg, version))
     }
 }
 
@@ -106,10 +178,14 @@ impl DIDWebVHState {
         options: &WitnessVerifyOptions,
     ) -> Result<ValidationReport, DIDWebVHError> {
         // Validate each LogEntry
+        let original_len = self.log_entries.len();
         let mut previous_entry: Option<&LogEntryState> = None;
         let mut truncated: Option<TruncationReason> = None;
+        // Records where deactivation happened so post-deactivation drops
+        // can be surfaced in the report.
+        let mut deactivation_info: Option<(usize, String)> = None;
 
-        for entry in self.log_entries.iter_mut() {
+        for (idx, entry) in self.log_entries.iter_mut().enumerate() {
             match entry.verify_log_entry(previous_entry) {
                 Ok(()) => (),
                 Err(e) => {
@@ -119,7 +195,7 @@ impl DIDWebVHState {
                     );
                     if previous_entry.is_some() {
                         // Record truncation and fall back to last known good.
-                        truncated = Some(TruncationReason {
+                        truncated = Some(TruncationReason::VerificationFailed {
                             at_version_id: entry.get_version_id().to_string(),
                             error: e.to_string(),
                         });
@@ -138,6 +214,7 @@ impl DIDWebVHState {
             {
                 // Deactivated, return the current LogEntry and MetaData
                 self.deactivated = true;
+                deactivation_info = Some((idx, entry.get_version_id().to_string()));
             }
 
             // Set the next previous records
@@ -146,6 +223,26 @@ impl DIDWebVHState {
             if self.deactivated {
                 // If we have a deactivated entry, we stop processing further entries
                 break;
+            }
+        }
+
+        // Post-deactivation entries: entries loaded past the deactivation
+        // entry cannot legitimately exist (a deactivated DID is terminal).
+        // Only report this when we didn't already record a verification
+        // failure — the two are mutually exclusive, but guard anyway.
+        if truncated.is_none()
+            && let Some((idx, deactivated_at)) = deactivation_info
+        {
+            let dropped = original_len.saturating_sub(idx + 1);
+            if dropped > 0 {
+                error!(
+                    "Log contains {dropped} entries past deactivation at {deactivated_at}; \
+                     treating as tampering."
+                );
+                truncated = Some(TruncationReason::PostDeactivation {
+                    deactivated_at,
+                    dropped_entries: u32::try_from(dropped).unwrap_or(u32::MAX),
+                });
             }
         }
 
@@ -321,6 +418,104 @@ mod tests {
         assert!(state.deactivated);
         // Should still have 2 entries (both valid, but deactivated stops further processing)
         assert_eq!(state.log_entries.len(), 2);
+    }
+
+    /// Tests that entries loaded past a valid deactivation are surfaced as
+    /// [`TruncationReason::PostDeactivation`] and then dropped.
+    ///
+    /// Models a tampering scenario: `[genesis, deactivate, attacker-appended]`.
+    /// Before this was surfaced, `validate()` returned `Ok` with no truncation
+    /// reported — the attacker-appended entry was silently dropped by `retain`.
+    /// A resolver had no way to tell apart a clean deactivated log from one
+    /// with extra junk after the deactivation. Now the report tells the caller
+    /// exactly how many entries past the deactivation were dropped, and
+    /// `assert_complete()` turns it into a hard error.
+    #[tokio::test]
+    async fn test_validate_entries_past_deactivation_reported() {
+        use super::TruncationReason;
+
+        let base_time = (Utc::now() - Duration::seconds(1000)).fixed_offset();
+        let key = generate_signing_key();
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
+            portable: Some(false),
+            ..Default::default()
+        };
+        let doc = did_doc_with_key("did:webvh:{SCID}:localhost%3A8000", &key);
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(Some(base_time), &doc, &params, &key)
+            .await
+            .unwrap();
+        let actual_doc = state.log_entries.last().unwrap().get_state().clone();
+
+        // Legit deactivation entry.
+        state
+            .create_log_entry(
+                Some(base_time + Duration::seconds(1)),
+                &actual_doc,
+                &Parameters {
+                    update_keys: Some(Arc::new(vec![])),
+                    deactivated: Some(true),
+                    ..Default::default()
+                },
+                &key,
+            )
+            .await
+            .unwrap();
+
+        // Attacker-appended entry: push a stub directly into the vec. We
+        // don't need to sign it — validate() breaks on the deactivation
+        // entry before ever reaching this one, so the trailing entry is
+        // dropped as PostDeactivation, not as VerificationFailed. Models
+        // what a resolver sees when loading a tampered did.jsonl from disk
+        // or HTTP: all entries load, then validation walks them in order.
+        state.log_entries.push(LogEntryState {
+            log_entry: crate::log_entry::LogEntry::Spec1_0(
+                crate::log_entry::spec_1_0::LogEntry1_0 {
+                    version_id: "3-ZZZZattackerappended".to_string(),
+                    version_time: (base_time + Duration::seconds(2)).fixed_offset(),
+                    parameters: crate::parameters::spec_1_0::Parameters1_0::default(),
+                    state: actual_doc.clone(),
+                    proof: vec![],
+                },
+            ),
+            version_number: 3,
+            validated_parameters: Parameters::default(),
+            validation_status: LogEntryValidationStatus::NotValidated,
+        });
+        // `create_log_entry` flipped state.deactivated to true during the
+        // deactivation entry — clear it so validate() gets the unvalidated
+        // state a freshly-loaded log would present.
+        state.deactivated = false;
+
+        // Reset validation status so validate() walks fresh.
+        for entry in &mut state.log_entries {
+            entry.validation_status = LogEntryValidationStatus::NotValidated;
+        }
+        assert_eq!(state.log_entries.len(), 3);
+
+        let report = state.validate().unwrap();
+        // The deactivation entry and everything before it survives.
+        assert_eq!(state.log_entries.len(), 2);
+        assert!(state.deactivated);
+        // The trailing entry is flagged, not silently dropped.
+        let Some(TruncationReason::PostDeactivation {
+            ref deactivated_at,
+            dropped_entries,
+        }) = report.truncated
+        else {
+            panic!("expected PostDeactivation, got {:?}", report.truncated);
+        };
+        assert_eq!(dropped_entries, 1);
+        assert!(deactivated_at.starts_with("2-"));
+
+        // assert_complete() must refuse the report.
+        let err = report.assert_complete().unwrap_err();
+        assert!(err.to_string().contains("past the deactivation entry"));
     }
 
     /// Tests that an invalid first log entry produces an immediate error.

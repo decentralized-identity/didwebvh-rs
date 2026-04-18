@@ -99,6 +99,26 @@ impl LogEntry {
             (Some(_), Some(previous_params)) if !previous_params.pre_rotation_active => {
                 &previous_params.active_update_keys
             }
+            (Some(_), Some(previous_params)) => {
+                // Pre-rotation self-authorisation: trust this arm only if
+                // the previous entry actually committed `nextKeyHashes` —
+                // otherwise `Parameters::validate` has diverged from
+                // `pre_rotation_active`, which would silently admit
+                // unauthorised keys. Cheap local invariant on a hot path.
+                debug_assert!(
+                    previous_params.next_key_hashes.is_some(),
+                    "pre_rotation_active=true implies next_key_hashes.is_some(); \
+                     Parameters::validate invariant broken",
+                );
+                if previous_params.next_key_hashes.is_none() {
+                    return Err(DIDWebVHError::ValidationError(
+                        "previous entry claims pre-rotation but has no nextKeyHashes: \
+                         refusing to self-authorise"
+                            .to_string(),
+                    ));
+                }
+                &parameters.active_update_keys
+            }
             _ => &parameters.active_update_keys,
         };
         if !LogEntry::check_signing_key_authorized(authorized, &proof.verification_method) {
