@@ -78,7 +78,7 @@ mod tests {
     use crate::resolve::DIDWebVH;
 
     #[tokio::test]
-    #[ignore] // requires network access to identity.foundation
+    #[ignore = "requires network access to identity.foundation"]
     async fn resolve_reference() {
         let webvh = DIDWebVH;
 
@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // requires network access to identity.foundation
+    #[ignore = "requires network access to identity.foundation"]
     async fn resolve_reference_specific_version() {
         let webvh = DIDWebVH;
 
@@ -106,7 +106,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // requires network access to identity.foundation
+    #[ignore = "requires network access to identity.foundation"]
     async fn resolve_reference_specific_time() {
         let webvh = DIDWebVH;
 

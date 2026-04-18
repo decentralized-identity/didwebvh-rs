@@ -67,7 +67,7 @@ impl LogEntryState {
 
     /// Returns the active witnesses for this LogEntry
     pub fn get_active_witnesses(&self) -> Option<Arc<Witnesses>> {
-        self.validated_parameters.active_witness.as_ref().cloned()
+        self.validated_parameters.active_witness.clone()
     }
 
     /// Get LogEntry State (DID Document)

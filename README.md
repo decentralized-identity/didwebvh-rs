@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/didwebvh-rs.svg)](https://crates.io/crates/didwebvh-rs)
 [![Documentation](https://docs.rs/didwebvh-rs/badge.svg)](https://docs.rs/didwebvh-rs)
-[![Rust](https://img.shields.io/badge/rust-1.90.0%2B-blue.svg?maxAge=3600)](https://github.com/decentralized-identity/didwebvh-rs)
+[![Rust](https://img.shields.io/badge/rust-1.94.0%2B-blue.svg?maxAge=3600)](https://github.com/decentralized-identity/didwebvh-rs)
 
 A complete implementation of the [did:webvh](https://identity.foundation/didwebvh/v1.0/)
 method in Rust. Supports version 1.0 spec.
@@ -47,7 +47,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.4.2"
+didwebvh-rs = "0.5.0"
 ```
 
 Then:
@@ -63,8 +63,17 @@ webvh.load_log_entries_from_file("did.jsonl")?;
 
 The `prelude` module re-exports the most commonly needed types:
 `DIDWebVHError`, `DIDWebVHState`, `LogEntryMethods`, `Parameters`,
-`CreateDIDConfig`, `create_did`, `Witnesses`, `WitnessProofCollection`,
-`Signer`, `KeyType`, and `async_trait`.
+`ValidationReport`, `TruncationReason`, `CreateDIDConfig`, `create_did`,
+`UpdateDIDConfig`, `update_did`, `Witnesses`, `WitnessProofCollection`,
+`Signer`, `KeyType`, `Secret`, `async_trait`, and the `generate_did_key`
+helper.
+
+> **Version skew note (0.5.0):** third-party types (`Signer`, `KeyType`,
+> `Secret`, `async_trait`) and the whole-crate re-export of
+> `affinidi_secrets_resolver` are no longer exposed at the crate root.
+> Reach for them via `prelude::*` or depend on the source crates in your
+> own Cargo.toml. This shields your build from version skew introduced
+> by whatever didwebvh-rs happens to pin.
 
 ## Feature Flags
 
@@ -74,7 +83,8 @@ The `prelude` module re-exports the most commonly needed types:
 | `ssi` | no | Enables integration with the [ssi](https://crates.io/crates/ssi) crate (implies `network`). |
 | `rustls` | no | Use `rustls` TLS backend (implies `network`). |
 | `native-tls` | no | Use platform-native TLS backend (implies `network`). |
-| `cli` | no | Interactive CLI flows for DID creation and updates. Adds `dialoguer`, `console`, and `affinidi-tdk`. Not included in WASM builds. |
+| `cli` | no | Interactive CLI flows for DID creation and updates. Adds `dialoguer` and `console`. Not included in WASM builds. |
+| `experimental-pqc` | no | **Experimental, off-spec.** Unlocks PQC cryptosuites (ML-DSA-{44,65,87}, SLH-DSA-SHA2-128s). Enable only for interop testing with other PQC-aware implementations — didwebvh 1.0 does not yet standardise these suites. See README "Experimental PQC support" below. |
 
 To use the library without network support (e.g. for local file validation only):
 
@@ -370,7 +380,6 @@ configuration:
 
 ```rust
 use didwebvh_rs::prelude::*;
-use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -486,6 +495,77 @@ let config = CreateDIDConfig::builder()
 
 The `sign_witness_proofs()` function is also available separately if you need
 to sign witness proofs outside of the full DID creation flow.
+
+## Experimental PQC support
+
+The `experimental-pqc` Cargo feature unlocks post-quantum cryptosuites
+(ML-DSA-{44,65,87}, SLH-DSA-SHA2-128s) for DID log entries and witness
+proofs. These suites are **not yet part of the didwebvh 1.0 spec** —
+enable only for interop testing with other PQC-aware implementations.
+
+```toml
+[dependencies]
+didwebvh-rs = { version = "0.5.0", features = ["experimental-pqc"] }
+```
+
+Key generation, signing, and verification flow through the same
+`generate_did_key` / `DataIntegrityProof::sign` / `proof.verify(...)` API
+as the classical suites — just pass a PQC `KeyType`:
+
+```rust
+use didwebvh_rs::{did_key::generate_did_key, prelude::KeyType};
+
+// Creates did:key:z6ML... with a 32-byte ML-DSA-44 private-key seed.
+let (did, key) = generate_did_key(KeyType::MlDsa44)?;
+```
+
+### Try it from the examples
+
+Every example under `examples/` takes a `--key-type` flag that maps onto
+the `Suite` enum (defined in `examples/common/suite.rs`). Classical
+suites are always available; PQC variants appear only when the feature
+is on:
+
+```bash
+# Create a DID with an ML-DSA-44 update key
+cargo run --features experimental-pqc --example create -- --key-type ml-dsa-44
+
+# Rotate keys across two ML-DSA-44 generations
+cargo run --features experimental-pqc --example rotate_keys -- --key-type ml-dsa-44
+
+# Benchmark a 120-entry history signed with ML-DSA-44
+cargo run --release --features experimental-pqc --example generate_history -- \
+    --key-type ml-dsa-44 -c 120
+
+# SLH-DSA-128s (hash-based, no JWK)
+cargo run --features experimental-pqc --example create -- --key-type slh-dsa-128
+```
+
+The interactive wizard (`--features cli,experimental-pqc`) adds ML-DSA
+and SLH-DSA entries to the key-type menu, clearly labelled
+*(experimental)*.
+
+### Runtime opt-in for PQC witness proofs (independent of the feature)
+
+The didwebvh 1.0 spec (§"The Witness Proofs File") says witness
+cryptosuite MUST be `eddsa-jcs-2022`. `WitnessVerifyOptions` widens the
+accepted set at runtime so a resolver can accept PQC-signed witness
+proofs without rebuilding the crate:
+
+```rust
+use didwebvh_rs::prelude::*;
+use didwebvh_rs::witness::WitnessVerifyOptions;
+use affinidi_data_integrity::crypto_suites::CryptoSuite;
+
+let options = WitnessVerifyOptions::new()
+    .with_extra_allowed_suite(CryptoSuite::MlDsa44Jcs2024);
+
+state.validate_with(&options)?.assert_complete()?;
+```
+
+Accepting non-spec witness suites is deliberate spec-deviation; it's an
+escape hatch for testing, not a production recommendation. Strict
+`state.validate()?` keeps the `eddsa-jcs-2022`-only default.
 
 ## License
 

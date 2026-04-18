@@ -7,10 +7,7 @@ use crate::{
     parameters::Parameters,
     witness::Witnesses,
 };
-use affinidi_data_integrity::{
-    DataIntegrityProof, verification_proof::verify_data_with_public_key,
-};
-use affinidi_secrets_resolver::secrets::Secret;
+use affinidi_data_integrity::{DataIntegrityProof, VerifyOptions};
 use base58::ToBase58;
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
@@ -66,21 +63,53 @@ pub trait PublicKey {
     fn get_public_key_bytes(&self) -> Result<Vec<u8>, DIDWebVHError>;
 }
 
+/// Enforces the didwebvh 1.0 shape constraints on a witness proof before
+/// cryptographic verification: cryptosuite must be `eddsa-jcs-2022` (unless
+/// the caller widened the allowed set via [`WitnessVerifyOptions`]), and
+/// `proofPurpose` must be `assertionMethod`. Returns an error mentioning
+/// the exact violation — the spec is unambiguous here, so silent acceptance
+/// would hide real interop bugs.
+///
+/// [`WitnessVerifyOptions`]: crate::witness::WitnessVerifyOptions
+pub(crate) fn enforce_witness_proof_shape(
+    proof: &DataIntegrityProof,
+    options: &crate::witness::WitnessVerifyOptions,
+) -> Result<(), DIDWebVHError> {
+    if !options.suite_is_allowed(proof.cryptosuite) {
+        return Err(DIDWebVHError::WitnessProofError(format!(
+            "witness proof uses cryptosuite {:?}, but the didwebvh 1.0 spec \
+             requires eddsa-jcs-2022 (add to WitnessVerifyOptions::extra_allowed_suites \
+             to accept non-spec suites explicitly)",
+            proof.cryptosuite
+        )));
+    }
+    if proof.proof_purpose != "assertionMethod" {
+        return Err(DIDWebVHError::WitnessProofError(format!(
+            "witness proof has proofPurpose '{}', but the didwebvh 1.0 spec \
+             requires 'assertionMethod'",
+            proof.proof_purpose
+        )));
+    }
+    Ok(())
+}
+
 impl PublicKey for DataIntegrityProof {
     fn get_public_key_bytes(&self) -> Result<Vec<u8>, DIDWebVHError> {
-        // Create public key bytes from Verification Material
-        if !self.verification_method.starts_with("did:key:") {
-            return Err(DIDWebVHError::InvalidMethodIdentifier(
-                "Verification method must start with 'did:key:'".to_string(),
-            ));
-        }
-        let Some((_, public_key)) = self.verification_method.split_once('#') else {
-            return Err(DIDWebVHError::InvalidMethodIdentifier(
-                "Invalid verification method format".to_string(),
-            ));
-        };
-        Secret::decode_multikey(public_key)
-            .map_err(|e| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid public key: {e}")))
+        // Delegate to the upstream resolver: it knows every multicodec
+        // registered for public keys (Ed25519, secp256k1, P-256/384/521,
+        // and — with feature gates — the ML-DSA / SLH-DSA variants) and
+        // validates the decoded length. Centralising the logic upstream
+        // means new key types added in affinidi-data-integrity flow
+        // through here without a didwebvh-rs patch.
+        Ok(
+            affinidi_data_integrity::did_vm::resolve_did_key(&self.verification_method)
+                .map_err(|e| {
+                    DIDWebVHError::InvalidMethodIdentifier(format!(
+                        "could not resolve did:key verificationMethod: {e}"
+                    ))
+                })?
+                .public_key_bytes,
+        )
     }
 }
 
@@ -193,19 +222,21 @@ macro_rules! impl_log_entry_common {
             pub fn validate_witness_proof(
                 &self,
                 witness_proof: &affinidi_data_integrity::DataIntegrityProof,
+                options: &crate::witness::WitnessVerifyOptions,
             ) -> Result<bool, DIDWebVHError> {
                 use crate::log_entry::PublicKey;
-                affinidi_data_integrity::verification_proof::verify_data_with_public_key(
-                    &serde_json::json!({"versionId": &self.version_id}),
-                    None,
-                    witness_proof,
-                    witness_proof.get_public_key_bytes()?.as_slice(),
-                )
-                .map_err(|e| {
-                    DIDWebVHError::LogEntryError(format!(
-                        "Data Integrity Proof verification failed: {e}"
-                    ))
-                })?;
+                crate::log_entry::enforce_witness_proof_shape(witness_proof, options)?;
+                witness_proof
+                    .verify_with_public_key(
+                        &serde_json::json!({"versionId": &self.version_id}),
+                        witness_proof.get_public_key_bytes()?.as_slice(),
+                        affinidi_data_integrity::VerifyOptions::new(),
+                    )
+                    .map_err(|e| {
+                        DIDWebVHError::LogEntryError(format!(
+                            "Data Integrity Proof verification failed: {e}"
+                        ))
+                    })?;
                 Ok(true)
             }
 
@@ -471,17 +502,21 @@ impl LogEntry {
     pub fn validate_witness_proof(
         &self,
         witness_proof: &DataIntegrityProof,
+        options: &crate::witness::WitnessVerifyOptions,
     ) -> Result<bool, DIDWebVHError> {
+        enforce_witness_proof_shape(witness_proof, options)?;
         // Verify the Data Integrity Proof against the Signing Document
-        verify_data_with_public_key(
-            &json!({"versionId": self.get_version_id()}),
-            None,
-            witness_proof,
-            witness_proof.get_public_key_bytes()?.as_slice(),
-        )
-        .map_err(|e| {
-            DIDWebVHError::LogEntryError(format!("Data Integrity Proof verification failed: {e}"))
-        })?;
+        witness_proof
+            .verify_with_public_key(
+                &json!({"versionId": self.get_version_id()}),
+                witness_proof.get_public_key_bytes()?.as_slice(),
+                VerifyOptions::new(),
+            )
+            .map_err(|e| {
+                DIDWebVHError::LogEntryError(format!(
+                    "Data Integrity Proof verification failed: {e}"
+                ))
+            })?;
 
         Ok(true)
     }
@@ -646,7 +681,12 @@ mod tests {
             verification_method: "did:key:z6MktestNoHash".to_string(),
         };
         let err = proof.get_public_key_bytes().unwrap_err();
-        assert!(err.to_string().contains("Invalid verification method"));
+        // resolve_did_key fails to decode the multibase body because
+        // "z6MktestNoHash" is not a valid base58btc multicodec payload.
+        assert!(
+            matches!(err, DIDWebVHError::InvalidMethodIdentifier(_)),
+            "expected InvalidMethodIdentifier, got {err:?}"
+        );
     }
 
     /// Tests that a well-formed did:key verification method with a valid ed25519

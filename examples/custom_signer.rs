@@ -1,29 +1,44 @@
 //! Demonstrates implementing a custom [`Signer`] for use with `didwebvh-rs`.
 //!
 //! In production you might delegate to an HSM, KMS, or remote signing service.
-//! This example shows the trait contract using a simple in-memory ed25519 key.
+//! This example shows the trait contract using a simple in-memory Ed25519 key.
+//!
+//! The `Signer` trait is suite-agnostic — `key_type()` can return any variant
+//! supported by the inner signing backend, including PQC variants under the
+//! `experimental-pqc` feature. This example picks Ed25519 for concision;
+//! swap the inner backend for a KMS/HSM and return whatever suite it offers.
+
+#[path = "common/suite.rs"]
+mod suite;
 
 use affinidi_data_integrity::DataIntegrityError;
-use async_trait::async_trait;
-use didwebvh_rs::Signer;
-use didwebvh_rs::affinidi_secrets_resolver::secrets::{KeyType, Secret};
-use didwebvh_rs::prelude::*;
+use clap::Parser;
+use didwebvh_rs::{did_key::generate_did_key, prelude::*};
 use serde_json::json;
 use std::sync::Arc;
+use suite::Suite;
 
-/// A minimal custom signer backed by an in-memory ed25519 key.
+#[derive(Parser, Debug)]
+#[command(about = "Create a DID with a custom Signer wrapping the chosen suite.")]
+struct Args {
+    #[arg(short = 'k', long, value_enum, default_value_t = Suite::default())]
+    key_type: Suite,
+}
+
+/// A minimal custom signer backed by an in-memory Secret.
 ///
 /// Replace the inner `Secret` with your own signing backend
-/// (e.g. AWS KMS, HashiCorp Vault, PKCS#11 HSM).
+/// (e.g. AWS KMS, HashiCorp Vault, PKCS#11 HSM). The signer stays
+/// suite-agnostic — it just delegates through to whatever key it wraps.
 struct MyKmsSigner {
     inner: Secret,
 }
 
 impl MyKmsSigner {
-    fn new() -> Self {
-        Self {
-            inner: Secret::generate_ed25519(None, None),
-        }
+    fn new(suite: Suite) -> Self {
+        let (_did, inner) =
+            generate_did_key(suite.key_type()).expect("did:key generation for chosen suite");
+        Self { inner }
     }
 
     fn public_key_multibase(&self) -> String {
@@ -49,7 +64,8 @@ impl Signer for MyKmsSigner {
 
 #[tokio::main]
 async fn main() {
-    let signer = MyKmsSigner::new();
+    let args = Args::parse();
+    let signer = MyKmsSigner::new(args.key_type);
     let pub_mb = signer.public_key_multibase();
 
     let parameters = Parameters {

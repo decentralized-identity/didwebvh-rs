@@ -29,7 +29,9 @@ jobs:
           components: clippy
       - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -- -D warnings
+      # --tests + --examples covers the shipping code without tripping
+      # the nightly-only did_benchmarks_nightly bench (uses #![feature(test)]).
+      - run: cargo clippy --all-features --tests --examples -- -D warnings
 
   test:
     name: Test
@@ -42,15 +44,15 @@ jobs:
       - run: cargo test --all-features
 
   msrv:
-    name: MSRV (1.90.0)
+    name: MSRV (1.94.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.90.0"
+          toolchain: "1.94.0"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check
+      - run: cargo check --all-features
 
   audit:
     name: Security Audit
@@ -60,4 +62,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - run: cargo install cargo-audit
-      - run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0388 --ignore RUSTSEC-2024-0370 --ignore RUSTSEC-2025-0134 --ignore RUSTSEC-2021-0127
+      # Ignored advisories are all transitive via the optional `ssi`
+      # feature; the default build has zero advisories. Re-audit when
+      # upstream `ssi` drops the affected dep chains.
+      # - RUSTSEC-2023-0071: rsa 0.6.1 (via ssi-jwk)
+      # - RUSTSEC-2024-0388: derivative unmaintained (via ssi-jwk)
+      # - RUSTSEC-2024-0370: proc-macro-error unmaintained (via did-tz)
+      # - RUSTSEC-2025-0134: rustls-pemfile unmaintained (via reqwest 0.11)
+      # - RUSTSEC-2021-0127: serde_cbor unmaintained (via ssi-vc-jose-cose)
+      # - RUSTSEC-2026-0098: rustls-webpki 0.101.7 URI name constraints (via reqwest 0.11)
+      # - RUSTSEC-2026-0099: rustls-webpki 0.101.7 wildcard constraints (via reqwest 0.11)
+      - run: >-
+          cargo audit
+          --ignore RUSTSEC-2023-0071
+          --ignore RUSTSEC-2024-0388
+          --ignore RUSTSEC-2024-0370
+          --ignore RUSTSEC-2025-0134
+          --ignore RUSTSEC-2021-0127
+          --ignore RUSTSEC-2026-0098
+          --ignore RUSTSEC-2026-0099

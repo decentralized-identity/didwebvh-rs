@@ -520,10 +520,10 @@ pub async fn interactive_create_did(
     );
 
     // ── Step 2: Resolve authorization keys ──
-    let auth_keys = if !config.authorization_keys.is_empty() {
-        config.authorization_keys
-    } else {
+    let auth_keys = if config.authorization_keys.is_empty() {
         prompt_authorization_keys(&webvh_did)?
+    } else {
+        config.authorization_keys
     };
 
     println!("{}", style("Authorizing Keys:").color256(69));
@@ -569,10 +569,10 @@ pub async fn interactive_create_did(
     }
 
     // Verification Methods
-    let vm_secrets = if !config.verification_methods.is_empty() {
-        build_verification_methods(&webvh_did, &mut did_document, config.verification_methods)?
-    } else {
+    let vm_secrets = if config.verification_methods.is_empty() {
         prompt_verification_methods(&webvh_did, &mut did_document)?
+    } else {
+        build_verification_methods(&webvh_did, &mut did_document, config.verification_methods)?
     };
 
     // Services

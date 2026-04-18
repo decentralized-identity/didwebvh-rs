@@ -10,8 +10,7 @@ use crate::{
     parameters::Parameters,
     witness::proofs::WitnessProofCollection,
 };
-use affinidi_data_integrity::DataIntegrityProof;
-use affinidi_secrets_resolver::secrets::Secret;
+use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -29,6 +28,8 @@ pub mod cli_create;
 #[cfg(feature = "cli")]
 pub mod cli_update;
 pub mod create;
+/// `did:key` helpers used by tests, examples and the interactive CLI.
+pub mod did_key;
 pub mod did_web;
 pub mod log_entry;
 /// Manages per-entry validation state during DID log processing.
@@ -44,25 +45,45 @@ pub mod validate;
 pub mod witness;
 
 pub use multibase_type::Multibase;
+pub use validate::{TruncationReason, ValidationReport};
 
 #[cfg(test)]
 pub(crate) mod test_utils;
 
-// Re-export Affinidi Secrets Resolver so others can create Secrets
+/// One-release-only deprecation shim for code that used to reach for
+/// `didwebvh_rs::affinidi_secrets_resolver::*`.
+///
+/// Removed in 0.6.0. The replacement is either:
+/// - `use didwebvh_rs::prelude::Secret;` (and friends), or
+/// - a direct `affinidi-secrets-resolver` dependency in your own `Cargo.toml`
+///   if you need the full surface.
+///
+/// Rationale for the re-exported whole crate being deprecated:
+/// tying `didwebvh_rs::affinidi_secrets_resolver` to whatever we pin made
+/// downstream version skew silent and painful. Depending on the upstream
+/// crate directly makes the version visible in your `Cargo.lock`.
+#[deprecated(
+    since = "0.5.0",
+    note = "use `didwebvh_rs::prelude::Secret` (and friends) or depend on \
+            `affinidi-secrets-resolver` directly; this re-export will be \
+            removed in 0.6.0"
+)]
 pub use affinidi_secrets_resolver;
 
-// Re-export Signer trait and KeyType so consumers can implement custom signing backends.
+// `pub(crate)` re-exports for items that are used widely across this crate's
+// internal modules but are NOT part of the stable top-level public API.
+// Downstream consumers should reach for `didwebvh_rs::prelude::*` (or depend
+// on the source crates directly) so they control their own version skew.
 //
 // # Security note for Signer implementors
 //
-// If your `Signer` implementation holds key material in memory (rather than
+// If your [`Signer`] implementation holds key material in memory (rather than
 // delegating to an HSM/KMS), consider zeroizing sensitive buffers on drop
 // (e.g. via the `zeroize` crate) to limit exposure of secrets in memory.
-pub use affinidi_data_integrity::signer::Signer;
-pub use affinidi_secrets_resolver::secrets::KeyType;
-
-// Re-export async_trait so consumers implementing `Signer` don't need a separate dependency.
-pub use async_trait::async_trait;
+pub(crate) use affinidi_data_integrity::signer::Signer;
+#[cfg(feature = "cli")]
+pub(crate) use affinidi_secrets_resolver::secrets::KeyType;
+pub(crate) use affinidi_secrets_resolver::secrets::Secret;
 
 /// WebVH Specification supports multiple LogEntry versions in the same DID
 #[non_exhaustive]
@@ -478,7 +499,7 @@ impl DIDWebVHState {
         };
 
         // Generate the proof for the log entry
-        let proof = DataIntegrityProof::sign_jcs_data(&new_entry, None, signing_key, None)
+        let proof = DataIntegrityProof::sign(&new_entry, signing_key, SignOptions::new())
             .await
             .map_err(|e| {
                 DIDWebVHError::SCIDError(format!(
@@ -837,7 +858,14 @@ mod tests {
     /// log entries never downgrade the spec version across the DID history.
     #[test]
     fn version_as_f32() {
-        assert_eq!(Version::V1_0.as_f32(), 1_f32);
+        // Exact equality on an f32 literal is fine here: we're comparing two
+        // constants (1.0), not the result of any floating-point arithmetic.
+        #[allow(
+            clippy::float_cmp,
+            reason = "comparing two exact f32 constants, no rounding involved"
+        )]
+        let eq = Version::V1_0.as_f32() == 1_f32;
+        assert!(eq);
     }
 
     /// Tests that a first log entry can be successfully created with valid parameters

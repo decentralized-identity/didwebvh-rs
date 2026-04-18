@@ -7,10 +7,10 @@
  */
 
 use crate::{
-    DIDWebVHError, Multibase, Secret,
+    DIDWebVHError, KeyType, Multibase, Secret,
+    did_key::generate_did_key,
     witness::{Witness, Witnesses},
 };
-use affinidi_tdk::dids::{DID, KeyType};
 use ahash::HashMap;
 use console::style;
 use dialoguer::{Confirm, Editor, Input, Select, theme::ColorfulTheme};
@@ -111,7 +111,7 @@ pub(crate) fn prompt_keys() -> Result<Vec<Secret>, DIDWebVHError> {
                 keys.push(Secret::from_multibase(&private, None).map_err(map_key_err)?);
             }
         } else {
-            let (did, key) = DID::generate_did_key(KeyType::Ed25519)
+            let (did, key) = generate_did_key(KeyType::Ed25519)
                 .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
             println!(
                 "{} {}",
@@ -186,14 +186,48 @@ pub(crate) fn prompt_create_key(id: &str) -> Result<(Secret, KeyCapability), DID
         style("-").color256(69),
         style("Signing + encryption. NIST curve, higher security margin than P-256.").color256(69)
     );
+    #[cfg(feature = "experimental-pqc")]
+    {
+        println!(
+            "\t{} {} {}",
+            style("ML-DSA-44 (experimental)").color256(141),
+            style("-").color256(69),
+            style(
+                "Post-quantum signing (FIPS 204). Off-spec for didwebvh 1.0 \
+                 — interop testing only."
+            )
+            .color256(208)
+        );
+        println!(
+            "\t{} {} {}",
+            style("SLH-DSA-SHA2-128s (experimental)").color256(141),
+            style("-").color256(69),
+            style(
+                "Post-quantum signing, hash-based (FIPS 205). Off-spec for \
+                 didwebvh 1.0 — interop testing only."
+            )
+            .color256(208)
+        );
+    }
 
-    let items = vec![
-        KeyType::Ed25519.to_string(),
-        "X25519".to_string(),
-        KeyType::P256.to_string(),
-        KeyType::Secp256k1.to_string(),
-        KeyType::P384.to_string(),
-    ];
+    let items: Vec<String> = {
+        // Only `mut` under the PQC feature; cfg_attr keeps the no-PQC build
+        // warning-clean without duplicating the vec literal.
+        #[cfg_attr(not(feature = "experimental-pqc"), allow(unused_mut))]
+        let mut v = vec![
+            KeyType::Ed25519.to_string(),
+            "X25519".to_string(),
+            KeyType::P256.to_string(),
+            KeyType::Secp256k1.to_string(),
+            KeyType::P384.to_string(),
+        ];
+        #[cfg(feature = "experimental-pqc")]
+        {
+            v.push("ML-DSA-44".to_string());
+            v.push("SLH-DSA-SHA2-128s".to_string());
+        }
+        v
+    };
 
     let selection = Select::with_theme(&ColorfulTheme::default())
         .with_prompt("Key type")
@@ -204,22 +238,32 @@ pub(crate) fn prompt_create_key(id: &str) -> Result<(Secret, KeyCapability), DID
 
     let (mut secret, capability) = if selection == 0 {
         // Ed25519 — signing only
-        let (_, secret) = DID::generate_did_key(KeyType::Ed25519)
+        let (_, secret) = generate_did_key(KeyType::Ed25519)
             .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
         (secret, KeyCapability::SigningOnly)
     } else if selection == 1 {
         // X25519 — encryption only
-        let (_, secret) = DID::generate_did_key(KeyType::Ed25519)
+        let (_, secret) = generate_did_key(KeyType::Ed25519)
             .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
         let secret = secret
             .to_x25519()
             .map_err(|e| DIDWebVHError::DIDError(format!("X25519 conversion failed: {e}")))?;
         (secret, KeyCapability::EncryptionOnly)
     } else {
-        // P-256, secp256k1, P-384 — general purpose
-        let key_type = KeyType::try_from(items[selection].as_str())
-            .map_err(|e| DIDWebVHError::DIDError(format!("Invalid key type: {e}")))?;
-        let (_, secret) = DID::generate_did_key(key_type)
+        // P-256, secp256k1, P-384 — general purpose. PQC variants fall
+        // through here too (signing-only in practice, but KeyCapability
+        // doesn't distinguish PQC — they are classified as General for
+        // now). The CryptoSuite negotiation at sign/verify time is what
+        // actually gates PQC.
+        let key_type = match items[selection].as_str() {
+            #[cfg(feature = "experimental-pqc")]
+            "ML-DSA-44" => KeyType::MlDsa44,
+            #[cfg(feature = "experimental-pqc")]
+            "SLH-DSA-SHA2-128s" => KeyType::SlhDsaSha2_128s,
+            s => KeyType::try_from(s)
+                .map_err(|e| DIDWebVHError::DIDError(format!("Invalid key type: {e}")))?,
+        };
+        let (_, secret) = generate_did_key(key_type)
             .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
         (secret, KeyCapability::General)
     };
@@ -306,8 +350,8 @@ pub(crate) fn prompt_generate_witness_nodes(
         .interact()
         .map_err(map_io)?
     {
-        for i in 0..(threshold + 1) {
-            let (did, key) = DID::generate_did_key(KeyType::Ed25519)
+        for i in 0..=threshold {
+            let (did, key) = generate_did_key(KeyType::Ed25519)
                 .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
             println!(
                 "{} {}",
@@ -395,7 +439,7 @@ pub(crate) fn prompt_next_key_hashes() -> Result<(Vec<Multibase>, Vec<Secret>), 
             .interact()
             .map_err(map_io)?
         {
-            let (_, key) = DID::generate_did_key(KeyType::Ed25519)
+            let (_, key) = generate_did_key(KeyType::Ed25519)
                 .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
             println!(
                 "{} {} {} {}\n\t{} {}",

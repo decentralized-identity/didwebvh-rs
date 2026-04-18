@@ -137,7 +137,7 @@ async fn create_new_did() -> Result<()> {
             })
             .interact()?;
 
-        if let Some((prefix, _)) = file_name.split_once(".") {
+        if let Some((prefix, _)) = file_name.split_once('.') {
             // Save log entry
             result.log_entry().save_to_file(&file_name)?;
             println!(
@@ -175,7 +175,7 @@ async fn create_new_did() -> Result<()> {
                 // Build a temporary LogEntryState to pass to save_did_web
                 let mut webvh_state = didwebvh_rs::DIDWebVHState::default();
                 webvh_state.load_log_entries_from_file(&file_name)?;
-                webvh_state.validate()?;
+                webvh_state.validate()?.assert_complete()?;
                 if let Some(entry) = webvh_state.log_entries().last() {
                     save_did_web(entry)?;
                 }
@@ -264,7 +264,7 @@ async fn update_existing_did() -> Result<()> {
             })
             .interact()?;
 
-        if let Some((prefix, _)) = file_name.split_once(".") {
+        if let Some((prefix, _)) = file_name.split_once('.') {
             // Save the new log entry (append)
             result.log_entry().save_to_file(&file_name)?;
             println!(

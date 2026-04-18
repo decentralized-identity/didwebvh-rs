@@ -30,19 +30,19 @@
  */
 
 use crate::{
-    DIDWebVHError, DIDWebVHState, Multibase, Secret,
+    DIDWebVHError, DIDWebVHState, KeyType, Multibase, Secret, ValidationReport,
     cli_common::{
         map_io, map_key_err, prompt_confirm, prompt_edit_document, prompt_keys,
         prompt_next_key_hashes, prompt_witnesses,
     },
     create::sign_witness_proofs,
+    did_key::generate_did_key,
     log_entry::LogEntry,
     log_entry_state::LogEntryState,
     parameters::Parameters,
     url::WebVHURL,
     witness::{Witness, Witnesses},
 };
-use affinidi_tdk::dids::{DID, KeyType};
 use ahash::HashMap;
 use console::style;
 use dialoguer::{Confirm, Input, MultiSelect, Select, theme::ColorfulTheme};
@@ -348,9 +348,12 @@ pub async fn interactive_update_did(
     };
 
     // ── Step 2: Validate state ──
-    webvh_state.validate().map_err(|e| {
-        DIDWebVHError::ValidationError(format!("Failed to validate DID WebVH state: {e}"))
-    })?;
+    webvh_state
+        .validate()
+        .and_then(ValidationReport::assert_complete)
+        .map_err(|e| {
+            DIDWebVHError::ValidationError(format!("Failed to validate DID WebVH state: {e}"))
+        })?;
 
     println!(
         "{}",
@@ -547,16 +550,15 @@ async fn do_migrate(
     );
 
     // Get new URL
-    let new_url_str = match pre_url {
-        Some(url) => url,
-        None => {
-            let input: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("New URL (e.g. https://new-domain.example.com/)")
-                .with_initial_text(did_url.get_http_url(None)?)
-                .interact_text()
-                .map_err(map_io)?;
-            input
-        }
+    let new_url_str = if let Some(url) = pre_url {
+        url
+    } else {
+        let input: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("New URL (e.g. https://new-domain.example.com/)")
+            .with_initial_text(did_url.get_http_url(None)?)
+            .interact_text()
+            .map_err(map_io)?;
+        input
     };
 
     let new_url = Url::parse(&new_url_str)
@@ -1137,14 +1139,22 @@ fn prompt_modify_witness_nodes(
         );
 
         if prompt_confirm("Auto-generate witness key pairs?", true)? {
-            let count = if new_witnesses.len() as u32 > threshold {
+            // Safe cast: witness counts are user-entered via a small u32
+            // prompt and never exceed the spec's practical threshold
+            // (double-digits at most). No 4B+ witnesses in the real world.
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "witness count is bounded by the u32 threshold prompt"
+            )]
+            let new_len_as_u32 = new_witnesses.len() as u32;
+            let count = if new_len_as_u32 > threshold {
                 break;
             } else {
-                (threshold + 1) - new_witnesses.len() as u32
+                (threshold + 1) - new_len_as_u32
             };
 
             for i in 0..count {
-                let (did, key) = DID::generate_did_key(KeyType::Ed25519)
+                let (did, key) = generate_did_key(KeyType::Ed25519)
                     .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
                 println!(
                     "{} {}",

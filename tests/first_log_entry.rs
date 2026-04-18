@@ -1,11 +1,11 @@
-use affinidi_data_integrity::verification_proof::verify_data_with_public_key;
+use affinidi_data_integrity::VerifyOptions;
 use didwebvh_rs::log_entry::{LogEntry, LogEntryMethods, PublicKey};
 
 #[cfg(test)]
 pub fn load_test_file(file: &str) -> String {
     use std::fs;
 
-    fs::read_to_string(file).unwrap_or_else(|_| panic!("Failed to read test file: {file}",))
+    fs::read_to_string(file).unwrap_or_else(|_| panic!("Failed to read test file: {file}"))
 }
 
 #[test]
@@ -34,13 +34,13 @@ fn test_first_log_entry_verify_signature() {
     first_log_entry.clear_proofs();
 
     assert!(
-        verify_data_with_public_key(
-            &first_log_entry,
-            None,
-            &proof,
-            proof.get_public_key_bytes().unwrap().as_slice()
-        )
-        .is_ok()
+        proof
+            .verify_with_public_key(
+                &first_log_entry,
+                proof.get_public_key_bytes().unwrap().as_slice(),
+                VerifyOptions::new(),
+            )
+            .is_ok()
     );
 }
 
@@ -61,13 +61,13 @@ fn test_first_log_entry_verify_signature_tampered() {
     first_log_entry.clear_proofs();
 
     assert!(
-        verify_data_with_public_key(
-            &first_log_entry,
-            None,
-            &proof,
-            proof.get_public_key_bytes().unwrap().as_slice()
-        )
-        .is_err()
+        proof
+            .verify_with_public_key(
+                &first_log_entry,
+                proof.get_public_key_bytes().unwrap().as_slice(),
+                VerifyOptions::new(),
+            )
+            .is_err()
     );
 }
 
@@ -79,7 +79,7 @@ fn test_first_log_entry_verify_full() {
         .expect("Failed to parse first log entry JSON");
 
     let result = first_log_entry.verify_log_entry(None, None);
-    println!("{result:#?}",);
+    println!("{result:#?}");
     assert!(result.is_ok());
 }
 

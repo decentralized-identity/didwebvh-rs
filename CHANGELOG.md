@@ -1,5 +1,118 @@
 # didwebvh-rs Changelog history
 
+## 18th April 2026
+
+### Release 0.5.0 — breaking
+
+#### Fixed
+
+- **Fixed issue #35** — resolution rejected spec-compliant logs that used
+  plain key rotation (no pre-rotation). The read path now authorises
+  non-pre-committed log entries against the **previous** entry's
+  `updateKeys`, matching `didwebvh 1.0` §"Authorized Keys" and the writer's
+  pre-existing logic. Logs produced by other spec-compliant resolvers
+  (e.g. the TypeScript reference resolver) that use plain rotation now
+  resolve correctly.
+
+#### Breaking
+
+- **`DIDWebVHState::validate` returns `ValidationReport`**. Previously the
+  function silently truncated the log and returned `Ok(())` on partial
+  validation — the failure mode that surfaced #35. The new
+  `#[must_use]` `ValidationReport` carries `ok_until: String` and
+  `truncated: Option<TruncationReason>`; `ValidationReport::assert_complete()`
+  is the one-call path for strict resolution.
+- **Third-party types removed from top-level re-exports.**
+  `didwebvh_rs::{Signer, KeyType, async_trait}` and
+  `didwebvh_rs::affinidi_secrets_resolver::*` are gone; use
+  `didwebvh_rs::prelude::*` or depend on the source crates directly. Avoids
+  silent version skew via the crate-root convenience re-export.
+- **Dropped `affinidi-tdk` as a runtime dep.** The `cli` feature no longer
+  pulls in tdk (and its messaging-SDK / meeting-place transitive graph).
+  Replaced the single callsite with `didwebvh_rs::did_key::generate_did_key`,
+  a ~30-line wrapper over `affinidi-did-common` + `affinidi-secrets-resolver`.
+- **Witness proofs now spec-strict by default.** `LogEntry::validate_witness_proof`
+  and `WitnessProofCollection::validate_log_entry` take `&WitnessVerifyOptions`.
+  The default options reject witness proofs that don't use `eddsa-jcs-2022`
+  with `proofPurpose: assertionMethod`, matching `didwebvh 1.0` §"The
+  Witness Proofs File". Use `WitnessVerifyOptions::with_extra_allowed_suite`
+  for additive runtime opt-in; `DIDWebVHState::validate_with(options)` is the
+  companion to `validate()` for callers that need this.
+- **Deprecated `affinidi-data-integrity` APIs migrated off.** `sign_jcs_data`,
+  `sign_rdfc_data*`, and `verify_data_with_public_key` replaced with the
+  unified `DataIntegrityProof::sign(&doc, signer, SignOptions)` and
+  `proof.verify_with_public_key(&doc, pk, VerifyOptions)` in 0.5.4.
+- **MSRV bumped to 1.94.0** (required by upstream `affinidi-*` 0.5.x / 0.6.x).
+
+#### Added
+
+- **`didwebvh_rs::did_key::generate_did_key`** — creates a fresh
+  `did:key` with a `Secret` (id set to `did:key:{mb}#{mb}`).
+- **`didwebvh_rs::witness::WitnessVerifyOptions`** (`#[non_exhaustive]`)
+  with `extra_allowed_suites: Vec<CryptoSuite>` for runtime cryptosuite
+  opt-in.
+- **`ValidationReport` + `TruncationReason`** re-exported at the crate root.
+- **Regression test** for issue #35 (`tests/plain_rotation_issue_35.rs`),
+  with a Node-based fixture generator committed under
+  `tests/fixtures/plain-rotation/`.
+- **[lints.rust] + [lints.clippy]** section in Cargo.toml with pedantic
+  group enabled and a curated allowlist.
+- **`experimental-pqc` Cargo feature** — forwards to
+  `affinidi-data-integrity/post-quantum` +
+  `affinidi-secrets-resolver/post-quantum` to unlock ML-DSA-{44,65,87}
+  and SLH-DSA-SHA2-128s cryptosuites. Off-spec for didwebvh 1.0; use for
+  interop testing with other PQC-aware implementations. The runtime
+  `WitnessVerifyOptions::extra_allowed_suites` escape hatch stays
+  available independently of the compile-time feature.
+
+#### Chores
+
+- **Bumped `ssi` requirement from 0.15 to 0.16** (optional feature). The
+  old pin carried a transitive `libipld 0.14 → core2 ^0.4` chain whose
+  sole `core2 0.4.0` version is yanked from crates.io, breaking
+  `cargo update`. 0.16 dropped that chain.
+
+#### Refactored
+
+- `PublicKey::get_public_key_bytes` now delegates to
+  `affinidi_data_integrity::did_vm::resolve_did_key`, which supports every
+  multicodec registered upstream (Ed25519, secp256k1, P-256/384/521 today;
+  ML-DSA / SLH-DSA when the upstream feature is enabled).
+
+#### Known issues
+
+- **`didwebvh-ts` interop test ignored** — the reference TypeScript
+  resolver uses the literal `"{SCID}"` placeholder (not the previous
+  entry's versionId) when computing entryHashes for non-genesis entries,
+  contrary to the `didwebvh 1.0` spec §"Entry Hash Generation and
+  Verification". The committed cross-impl fixture is behind
+  `#[ignore]` pending upstream resolution.
+- **`ssi` optional feature pulls known-advisory transitive crates.** The
+  default build (no `ssi` feature) is advisory-clean. Enabling `ssi`
+  pulls in a long transitive tree including the `did-*` adapters, which
+  indirectly depend on `rsa 0.6.1` (RUSTSEC-2023-0071, Marvin Attack),
+  `rustls-webpki 0.101.7` (RUSTSEC-2026-0098 + RUSTSEC-2026-0099, name
+  constraint bugs), and four unmaintained crates (`derivative`,
+  `proc-macro-error`, `rustls-pemfile`, `serde_cbor`). CI's `cargo audit`
+  step explicitly ignores these with a reason comment; resolve by
+  upgrading `ssi` when upstream drops the affected dep chains.
+
+#### Migration notes
+
+```rust
+// Before (0.4.x)
+use didwebvh_rs::{Signer, KeyType};
+use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
+state.validate()?;
+
+// After (0.5.0)
+use didwebvh_rs::prelude::*;   // gets Signer, KeyType, Secret, ValidationReport, ...
+state.validate()?.assert_complete()?;   // strict mode (recommended for resolvers)
+// or
+let report = state.validate()?;
+if let Some(reason) = report.truncated { /* handle partial validation */ }
+```
+
 ## 15th April 2026
 
 ### Release 0.4.2

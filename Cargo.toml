@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.4.2"
+version = "0.5.0"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -11,7 +11,15 @@ keywords = ["ssi", "did", "webvh", "verifiable"]
 publish = true
 license = "Apache-2.0"
 readme = "README.md"
-rust-version = "1.90.0"
+rust-version = "1.94.0"
+
+# `getrandom` is listed in [dependencies] with `features = ["wasm_js"]`
+# but isn't directly imported — the purpose is to enable the `wasm_js`
+# feature on the transitive graph so downstream consumers can build for
+# wasm32-unknown-unknown without panicking. cargo-machete can't tell the
+# difference, so we whitelist it here.
+[package.metadata.cargo-machete]
+ignored = ["getrandom"]
 
 [features]
 default = ["network"]
@@ -19,10 +27,24 @@ ssi = ["dep:ssi", "network"]
 network = ["dep:reqwest"]
 rustls = ["network", "reqwest/rustls"]
 native-tls = ["network", "reqwest/native-tls"]
-cli = ["dep:dialoguer", "dep:console", "dep:affinidi-tdk"]
+cli = ["dep:dialoguer", "dep:console"]
+# Experimental post-quantum cryptosuites (ML-DSA-{44,65,87}, SLH-DSA-128).
+# Not yet in the didwebvh 1.0 spec — enable only for interop testing with
+# other PQC-aware implementations. See README "Experimental PQC support"
+# for a worked example.
+#
+# Runtime companion: `WitnessVerifyOptions::extra_allowed_suites` widens
+# the accepted witness cryptosuite set at runtime without rebuilding,
+# useful when a consumer wants PQC on the resolve path but doesn't want
+# to ship a PQC-generating build.
+experimental-pqc = [
+    "affinidi-data-integrity/post-quantum",
+    "affinidi-secrets-resolver/post-quantum",
+]
 
 [dependencies]
 affinidi-data-integrity = { version = "0.5" }
+affinidi-did-common = "0.3"
 affinidi-secrets-resolver = "0.5"
 
 ahash = { version = "0.8", features = ["serde"] }
@@ -35,7 +57,7 @@ serde_json = "1.0"
 serde_json_canonicalizer = "0.3"
 serde_with = "3.18"
 sha2 = "0.11"
-ssi = { version = "0.15", features = ["secp384r1"], optional = true }
+ssi = { version = "0.16", features = ["secp384r1"], optional = true }
 thiserror = "2.0"
 tokio = { version = "1.50" }
 tracing = { version = "0.1" }
@@ -43,12 +65,10 @@ url = "2.5"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 # Optional dependencies for `cli` feature (interactive DID creation flow)
-affinidi-tdk = { version = "0.6", optional = true }
 console = { version = "0.16", optional = true }
 dialoguer = { version = "0.12", optional = true }
 
 [dev-dependencies]
-affinidi-tdk = "0.6"
 anyhow = "1.0"
 byte-unit = "5.2"
 clap = { version = "4.6", features = ["derive"] }
@@ -82,6 +102,58 @@ required-features = ["network"]
 [[example]]
 name = "generate_large_did"
 required-features = ["network"]
+
+[lints.rust]
+# Default lints become errors in CI via `cargo clippy -- -D warnings`.
+# Local builds still see them as warnings so iteration stays tight.
+warnings = "warn"
+
+[lints.clippy]
+# Pedantic group is on as warnings, so CI (-D warnings) fails on any new
+# pedantic lint. Run locally with
+#     cargo clippy --all-features --all-targets
+# to see them.
+pedantic = { level = "warn", priority = -1 }
+
+# Curated allowlist. The three `cast_*` lints used to be in here on the
+# "usually intentional" argument — removed in P1.3 because they genuinely
+# do catch bugs in version-number / length arithmetic. Per-site overrides
+# (with a `reason = "..."`) are used where the cast is truly bounded.
+module_name_repetitions = "allow"     # `log_entry::LogEntry`, `parameters::Parameters` etc.
+must_use_candidate = "allow"          # Every pure fn gets flagged; not worth it.
+missing_errors_doc = "allow"          # Valuable but requires broad docstring churn.
+missing_panics_doc = "allow"          # Same.
+similar_names = "allow"               # `proof` vs `proofs`, `params` vs `parameters`.
+too_many_lines = "allow"              # Opinionated.
+doc_markdown = "allow"                # 150+ false positives across docstrings.
+return_self_not_must_use = "allow"    # Noisy on the builder pattern.
+option_option = "allow"               # Tri-state `Option<Arc<Vec<T>>>` is intentional in Parameters.
+unnecessary_trailing_comma = "allow"  # `format!("...", x,)` is a style preference; reduces diff churn on arg additions.
+semicolon_if_nothing_returned = "allow" # Opinionated; already-formatted code fails but adds no signal.
+items_after_statements = "allow"      # Hurts readability in long functions more than it helps.
+needless_continue = "allow"           # Explicit `continue` in loop logic is often clearer than an empty else.
+redundant_else = "allow"              # Mirror-image of `needless_continue`; keep branches symmetric.
+case_sensitive_file_extension_comparisons = "allow" # DID log filenames are spec-defined, fixed case.
+needless_pass_by_value = "allow"      # Builder + config patterns intentionally take owned values.
+trivially_copy_pass_by_ref = "allow"  # Trait-consistent signatures matter more than +0-byte passes.
+unnecessary_wraps = "allow"           # Some functions return Result for future fallibility even when today they are infallible.
+match_wildcard_for_single_variants = "allow" # `_ =>` is fine on `#[non_exhaustive]` enums.
+implicit_clone = "allow"              # `s.to_string()` on a `&String` is idiomatic Rust.
+format_push_string = "allow"          # `s.push_str(&format!(...))` is clearer than write! in small snippets.
+used_underscore_binding = "allow"     # Bindings named `_e` that ARE referenced by `{_e}` are readable; not noise-free to chase.
+ref_option = "allow"                  # `&Option<T>` is fine in public API; changing to `Option<&T>` would be a breaking signature churn.
+manual_let_else = "allow"             # Style preference; the `let Some(x) = ... else { return ...; }` rewrite is sometimes LESS readable in short blocks.
+assigning_clones = "allow"            # `x = y.clone()` → `x.clone_from(&y)` — marginal perf, hurts readability.
+explicit_iter_loop = "allow"          # `for x in v.iter()` vs `for x in &v` is stylistic, not a real lint signal.
+single_char_pattern = "allow"          # `.split("a")` vs `.split('a')` — micro-perf of single match calls, negligible.
+uninlined_format_args = "allow"       # `format!("{}", x)` vs `format!("{x}")` is a style toggle; both are fine.
+redundant_closure_for_method_calls = "allow" # `|x| x.foo()` vs `Foo::foo` is stylistic; closures are often clearer.
+match_same_arms = "allow"             # Separate arms with identical bodies can aid readability when the discriminants differ semantically.
+map_unwrap_or = "allow"               # `.map(f).unwrap_or(x)` is often clearer than `.map_or(x, f)` (reads left-to-right).
+match_wild_err_arm = "allow"          # `Err(_) => panic!(...)` in tests is the idiomatic "this should never fail" pattern.
+needless_bool = "allow"               # `if x { true } else { false }` is sometimes clearer than just `x` when the shape documents intent.
+redundant_closure = "allow"           # `|x| x.method()` vs `Type::method` — closures often read better in context.
+unnecessary_semicolon = "allow"        # Trailing `;` on `let _ = expr();` statements is clearer than bare `;`.
 
 [[bench]]
 name = "did_benchmarks"

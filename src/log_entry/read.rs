@@ -8,7 +8,7 @@ use crate::{
     log_entry::{LogEntryMethods, PublicKey, spec_1_0::LogEntry1_0, spec_1_0_pre::LogEntry1_0Pre},
     parameters::Parameters,
 };
-use affinidi_data_integrity::verification_proof::verify_data_with_public_key;
+use affinidi_data_integrity::VerifyOptions;
 use chrono::Utc;
 use std::{
     fs::File,
@@ -83,11 +83,45 @@ impl LogEntry {
         };
         debug!("Validated parameters: {parameters:#?}");
 
-        // Ensure that the signed proof key is part of the authorized keys
-        if !LogEntry::check_signing_key_authorized(
-            &parameters.active_update_keys,
-            &proof.verification_method,
-        ) {
+        // Ensure that the signed proof key is part of the authorized keys.
+        //
+        // didwebvh 1.0 §"Authorized Keys for the New DID Log Entry":
+        // - Pre-rotation mode (previous entry declared `nextKeyHashes`): the current
+        //   entry's own `updateKeys` are pre-committed and self-authorize its proof.
+        // - Plain rotation: the current entry's proof must come from the PREVIOUS
+        //   entry's `updateKeys` — newly-declared keys do not activate until N+1.
+        // - Genesis entry: self-authorizing against its own `updateKeys`.
+        //
+        // `active_update_keys` is "keys active for the next entry" (forward-looking),
+        // which is exactly what we need for the plain-rotation read rule when applied
+        // to the previous entry. See also the mirror logic in `DIDWebVHState::verify_log_entry_state`.
+        let authorized = match (previous_log_entry, previous_parameters) {
+            (Some(_), Some(previous_params)) if !previous_params.pre_rotation_active => {
+                &previous_params.active_update_keys
+            }
+            (Some(_), Some(previous_params)) => {
+                // Pre-rotation self-authorisation: trust this arm only if
+                // the previous entry actually committed `nextKeyHashes` —
+                // otherwise `Parameters::validate` has diverged from
+                // `pre_rotation_active`, which would silently admit
+                // unauthorised keys. Cheap local invariant on a hot path.
+                debug_assert!(
+                    previous_params.next_key_hashes.is_some(),
+                    "pre_rotation_active=true implies next_key_hashes.is_some(); \
+                     Parameters::validate invariant broken",
+                );
+                if previous_params.next_key_hashes.is_none() {
+                    return Err(DIDWebVHError::ValidationError(
+                        "previous entry claims pre-rotation but has no nextKeyHashes: \
+                         refusing to self-authorise"
+                            .to_string(),
+                    ));
+                }
+                &parameters.active_update_keys
+            }
+            _ => &parameters.active_update_keys,
+        };
+        if !LogEntry::check_signing_key_authorized(authorized, &proof.verification_method) {
             warn!(
                 "Signing key {} is not authorized",
                 &proof.verification_method
@@ -110,18 +144,15 @@ impl LogEntry {
             }),
         };
 
-        let verified = verify_data_with_public_key(
-            &verify_doc,
-            None,
-            proof,
-            proof.get_public_key_bytes()?.as_slice(),
-        )
-        .map_err(|e| DIDWebVHError::LogEntryError(format!("Signature verification failed: {e}")))?;
-        if !verified.verified {
-            return Err(DIDWebVHError::LogEntryError(
-                "Signature verification failed".to_string(),
-            ));
-        }
+        proof
+            .verify_with_public_key(
+                &verify_doc,
+                proof.get_public_key_bytes()?.as_slice(),
+                VerifyOptions::new(),
+            )
+            .map_err(|e| {
+                DIDWebVHError::LogEntryError(format!("Signature verification failed: {e}"))
+            })?;
 
         // As a version of this LogEntry gets modified to recalculate hashes,
         // we create a clone once and reuse it for verification

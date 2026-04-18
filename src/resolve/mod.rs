@@ -546,7 +546,11 @@ impl DIDWebVHState {
         parsed_did_url: &WebVHURL,
     ) -> Result<(&LogEntry, MetaData), DIDWebVHError> {
         let _span = span!(Level::DEBUG, "resolve_state").entered();
-        self.validate()?;
+        // A resolver MUST reject a truncated log — a partial resolution is
+        // worse than no resolution because the caller cannot tell the
+        // difference. `assert_complete` surfaces the truncation as a
+        // `ValidationError`.
+        self.validate()?.assert_complete()?;
 
         // Per spec (Read/Resolve step 6): the DID being resolved MUST match the
         // top-level `id` in at least one version of the DIDDoc.

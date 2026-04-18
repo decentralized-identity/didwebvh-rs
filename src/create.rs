@@ -12,7 +12,7 @@ use crate::{
     url::WebVHURL,
     witness::{Witnesses, proofs::WitnessProofCollection},
 };
-use affinidi_data_integrity::DataIntegrityProof;
+use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
 use affinidi_secrets_resolver::secrets::Secret;
 use ahash::HashMap;
 use serde_json::{Value, json};
@@ -350,10 +350,8 @@ fn replace_did_placeholder(did_document: &mut Value, did: &str) {
                 replace_did_placeholder(value, did);
             }
         }
-        Value::String(s) => {
-            if s.contains("{DID}") {
-                *s = s.replace("{DID}", did);
-            }
+        Value::String(s) if s.contains("{DID}") => {
+            *s = s.replace("{DID}", did);
         }
         _ => {}
     }
@@ -442,6 +440,17 @@ fn build_alias_list(also_known_as: &Value, new_alias: &str) -> Result<Vec<Value>
 /// secret in `witness_secrets` (keyed by witness DID) and signs a proof.
 ///
 /// Returns `Ok(true)` if witness proofs were signed, `Ok(false)` if no witnesses configured.
+///
+/// `witness_secrets` takes `ahash::HashMap` (the crate's default hasher
+/// everywhere) rather than the generic `HashMap<K, V, S>` because downstream
+/// callers uniformly use the same hasher; the pedantic `implicit_hasher`
+/// lint is allowed here at the call site instead of pushing the generic
+/// through a widely-used public signature.
+#[allow(
+    clippy::implicit_hasher,
+    reason = "didwebvh-rs uses ahash::HashMap uniformly; adding an S-generic \
+              is churn without a real interop need."
+)]
 pub async fn sign_witness_proofs<W: Signer>(
     witness_proofs: &mut WitnessProofCollection,
     log_entry: &LogEntryState,
@@ -477,11 +486,10 @@ pub async fn sign_witness_proofs<W: Signer>(
         validate_did_key_vm(secret.verification_method())?;
 
         // Generate Signature
-        let proof = DataIntegrityProof::sign_jcs_data(
+        let proof = DataIntegrityProof::sign(
             &json!({"versionId": log_entry.get_version_id()}),
-            None,
             secret,
-            None,
+            SignOptions::new(),
         )
         .await
         .map_err(|e| {
@@ -1508,9 +1516,10 @@ mod tests {
 
         // Verify the proof can be validated by the log entry
         let witness_proof = proofs.get_proofs(&version_id).unwrap();
-        let validation = log_entry_state
-            .log_entry
-            .validate_witness_proof(witness_proof.proof.first().unwrap());
+        let validation = log_entry_state.log_entry.validate_witness_proof(
+            witness_proof.proof.first().unwrap(),
+            &crate::witness::WitnessVerifyOptions::new(),
+        );
         assert!(validation.is_ok());
     }
 

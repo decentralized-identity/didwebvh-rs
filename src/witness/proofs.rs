@@ -177,15 +177,17 @@ impl WitnessProofCollection {
         })
     }
 
-    /// Save proofs to a file
-    /// Returns bytes written
-    pub fn save_to_file(&self, file_path: &str) -> Result<u32, DIDWebVHError> {
+    /// Save proofs to a file. Returns the number of bytes written.
+    ///
+    /// `u64` rather than `u32` because pruned-but-large witness-proof
+    /// files (aggregating proofs across many versionIds) can exceed
+    /// `u32::MAX` on disk in principle; using `u64` removes the
+    /// truncation risk without changing the happy path.
+    pub fn save_to_file(&self, file_path: &str) -> Result<u64, DIDWebVHError> {
         let json_data = serde_json::to_string(&self.proofs).map_err(|e| {
-            DIDWebVHError::WitnessProofError(
-                format!("Couldn't serialize Witness Proofs Data: {e}",),
-            )
+            DIDWebVHError::WitnessProofError(format!("Couldn't serialize Witness Proofs Data: {e}"))
         })?;
-        let bytes = json_data.len() as u32;
+        let bytes = json_data.len() as u64;
         std::fs::write(file_path, json_data).map_err(|e| {
             DIDWebVHError::WitnessProofError(format!(
                 "Couldn't write to Witness Proofs file ({file_path}): {e}",
