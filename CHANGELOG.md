@@ -87,6 +87,15 @@
   contrary to the `didwebvh 1.0` spec §"Entry Hash Generation and
   Verification". The committed cross-impl fixture is behind
   `#[ignore]` pending upstream resolution.
+- **`ssi` optional feature pulls known-advisory transitive crates.** The
+  default build (no `ssi` feature) is advisory-clean. Enabling `ssi`
+  pulls in a long transitive tree including the `did-*` adapters, which
+  indirectly depend on `rsa 0.6.1` (RUSTSEC-2023-0071, Marvin Attack),
+  `rustls-webpki 0.101.7` (RUSTSEC-2026-0098 + RUSTSEC-2026-0099, name
+  constraint bugs), and four unmaintained crates (`derivative`,
+  `proc-macro-error`, `rustls-pemfile`, `serde_cbor`). CI's `cargo audit`
+  step explicitly ignores these with a reason comment; resolve by
+  upgrading `ssi` when upstream drops the affected dep chains.
 
 #### Migration notes
 
