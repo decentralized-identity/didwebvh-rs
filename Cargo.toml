@@ -13,6 +13,14 @@ license = "Apache-2.0"
 readme = "README.md"
 rust-version = "1.94.0"
 
+# `getrandom` is listed in [dependencies] with `features = ["wasm_js"]`
+# but isn't directly imported — the purpose is to enable the `wasm_js`
+# feature on the transitive graph so downstream consumers can build for
+# wasm32-unknown-unknown without panicking. cargo-machete can't tell the
+# difference, so we whitelist it here.
+[package.metadata.cargo-machete]
+ignored = ["getrandom"]
+
 [features]
 default = ["network"]
 ssi = ["dep:ssi", "network"]

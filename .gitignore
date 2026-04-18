@@ -5,6 +5,12 @@
 /*-secrets.json
 /www
 
+# Editor + OS droppings
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
 # npm artefacts from the cross-impl fixture generator
 /tests/fixtures/plain-rotation/node_modules/
 /tests/fixtures/plain-rotation/package-lock.json

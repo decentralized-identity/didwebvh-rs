@@ -53,7 +53,7 @@ impl WitnessVerifyOptions {
     }
 
     /// Enforce the structural constraints from didwebvh 1.0 §"The Witness
-    /// Proofs File" on a witness [`DataIntegrityProof`]: the cryptosuite
+    /// Proofs File" on a witness [`affinidi_data_integrity::DataIntegrityProof`]: the cryptosuite
     /// must be accepted (either the spec default `eddsa-jcs-2022` or a
     /// caller-opted-in extra) and `proofPurpose` must be `assertionMethod`.
     ///
