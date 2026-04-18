@@ -93,6 +93,31 @@ required-features = ["network"]
 name = "generate_large_did"
 required-features = ["network"]
 
+[lints.rust]
+# Enforce clean builds in CI; any new warning becomes an error there.
+# Suppressed locally via RUSTFLAGS if you explicitly want warnings-only.
+warnings = "warn"
+
+[lints.clippy]
+# Baseline correctness/pedantic groups enabled as warnings. CI promotes
+# warnings to errors (see CI config), so a new lint firing will gate merges.
+pedantic = { level = "warn", priority = -1 }
+
+# Noisy-for-this-crate lints that buy little signal relative to churn.
+# Keep the allowlist curated — re-evaluate in the next breaking release.
+module_name_repetitions = "allow"  # `log_entry::LogEntry`, `parameters::Parameters` etc.
+must_use_candidate = "allow"       # Every pure fn gets flagged; not worth it.
+missing_errors_doc = "allow"       # Valuable but requires broad docstring churn.
+missing_panics_doc = "allow"       # Same.
+similar_names = "allow"            # `proof` vs `proofs`, `params` vs `parameters`.
+too_many_lines = "allow"           # Opinionated.
+cast_possible_truncation = "allow" # Usually intentional (u32 -> usize etc.).
+cast_sign_loss = "allow"           # Usually intentional.
+cast_precision_loss = "allow"      # Usually intentional.
+doc_markdown = "allow"             # 150+ false positives across docstrings.
+return_self_not_must_use = "allow" # Noisy on the builder pattern.
+option_option = "allow"            # Tri-state `Option<Arc<Vec<T>>>` is intentional in Parameters.
+
 [[bench]]
 name = "did_benchmarks"
 harness = false
