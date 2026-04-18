@@ -858,7 +858,14 @@ mod tests {
     /// log entries never downgrade the spec version across the DID history.
     #[test]
     fn version_as_f32() {
-        assert_eq!(Version::V1_0.as_f32(), 1_f32);
+        // Exact equality on an f32 literal is fine here: we're comparing two
+        // constants (1.0), not the result of any floating-point arithmetic.
+        #[allow(
+            clippy::float_cmp,
+            reason = "comparing two exact f32 constants, no rounding involved"
+        )]
+        let eq = Version::V1_0.as_f32() == 1_f32;
+        assert!(eq);
     }
 
     /// Tests that a first log entry can be successfully created with valid parameters

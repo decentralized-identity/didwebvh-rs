@@ -48,7 +48,7 @@ pub async fn resolve() {
             let did_doc = match log_entry.get_did_document() {
                 Ok(doc) => serde_json::to_string_pretty(&doc).unwrap(),
                 Err(e) => {
-                    println!("Failed to get DID Document from log entry: {}", e);
+                    println!("Failed to get DID Document from log entry: {e}");
                     return;
                 }
             };

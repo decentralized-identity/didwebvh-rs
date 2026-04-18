@@ -440,6 +440,17 @@ fn build_alias_list(also_known_as: &Value, new_alias: &str) -> Result<Vec<Value>
 /// secret in `witness_secrets` (keyed by witness DID) and signs a proof.
 ///
 /// Returns `Ok(true)` if witness proofs were signed, `Ok(false)` if no witnesses configured.
+///
+/// `witness_secrets` takes `ahash::HashMap` (the crate's default hasher
+/// everywhere) rather than the generic `HashMap<K, V, S>` because downstream
+/// callers uniformly use the same hasher; the pedantic `implicit_hasher`
+/// lint is allowed here at the call site instead of pushing the generic
+/// through a widely-used public signature.
+#[allow(
+    clippy::implicit_hasher,
+    reason = "didwebvh-rs uses ahash::HashMap uniformly; adding an S-generic \
+              is churn without a real interop need."
+)]
 pub async fn sign_witness_proofs<W: Signer>(
     witness_proofs: &mut WitnessProofCollection,
     log_entry: &LogEntryState,

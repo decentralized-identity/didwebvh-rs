@@ -350,7 +350,7 @@ pub(crate) fn prompt_generate_witness_nodes(
         .interact()
         .map_err(map_io)?
     {
-        for i in 0..(threshold + 1) {
+        for i in 0..=threshold {
             let (did, key) = generate_did_key(KeyType::Ed25519)
                 .map_err(|e| DIDWebVHError::DIDError(format!("Key generation failed: {e}")))?;
             println!(

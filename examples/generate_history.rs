@@ -12,6 +12,16 @@
 //! Try PQC with `--features experimental-pqc -- --key-type ml-dsa-44` to
 //! benchmark post-quantum signatures on a realistic history.
 
+// Benchmarking / display math casts are intentional: timing results fit
+// easily in f64 even with precision loss, and entry-count loop counters
+// are bounded by the `--count` CLI arg (u32).
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_lossless
+)]
+
 #[path = "common/suite.rs"]
 mod suite;
 
@@ -112,14 +122,14 @@ pub async fn main() -> Result<()> {
     // Use a fixed start date in the past with 1-second increments to ensure
     // each versionTime is strictly greater than the previous (required by spec)
     let base_time: DateTime<FixedOffset> =
-        (Utc::now() - ChronoDuration::seconds(args.count as i64 + 10)).fixed_offset();
+        (Utc::now() - ChronoDuration::seconds(i64::from(args.count) + 10)).fixed_offset();
 
     // Generate initial DID
     let mut next = generate_did(&mut didwebvh, &mut secrets, &args, base_time).await?;
 
     // Loop for count months (first entry represents the first month)
-    for i in 2..(args.count + 1) {
-        let version_time = base_time + ChronoDuration::seconds(i as i64);
+    for i in 2..=args.count {
+        let version_time = base_time + ChronoDuration::seconds(i64::from(i));
         next = create_log_entry(&mut didwebvh, &mut secrets, &next, i, &args, version_time).await?;
     }
 
@@ -135,7 +145,7 @@ pub async fn main() -> Result<()> {
         .open("did.jsonl")?;
 
     let mut byte_count: u64 = 0;
-    for entry in didwebvh.log_entries().iter() {
+    for entry in didwebvh.log_entries() {
         // Convert LogEntry to JSON and write to file
         let json_entry = serde_json::to_string(&entry.log_entry)?;
         file.write_all(json_entry.as_bytes())?;
@@ -174,9 +184,9 @@ pub async fn main() -> Result<()> {
     println!(
         "\t{}{}{}{}\n\t{}{}{}{}{}",
         style("Timing: Generating WebVH: ").color256(34),
-        style(format!("{webvh_generate_duration}ms",)).color256(141),
+        style(format!("{webvh_generate_duration}ms")).color256(141),
         style(", save to disk: ").color256(34),
-        style(format!("{webvh_le_save_duration}ms",)).color256(141),
+        style(format!("{webvh_le_save_duration}ms")).color256(141),
         style("Total Time: ").color256(34),
         style(format!(
             "{}ms",
@@ -200,7 +210,7 @@ pub async fn main() -> Result<()> {
         didwebvh.witness_proofs_mut().write_optimise_records()?;
         let bytes = didwebvh.witness_proofs().save_to_file("did-witness.json")?;
         let end = SystemTime::now();
-        let bytes = Byte::from_u64(bytes as u64).get_appropriate_unit(UnitType::Decimal);
+        let bytes = Byte::from_u64(bytes).get_appropriate_unit(UnitType::Decimal);
 
         println!(
             "\t{}{} {}{}",
@@ -479,9 +489,7 @@ async fn witness_log_entry(
             SignOptions::new(),
         )
         .await
-        .map_err(|e| {
-            anyhow!("Couldn't generate Data Integrity Proof for LogEntry. Reason: {e}",)
-        })?;
+        .map_err(|e| anyhow!("Couldn't generate Data Integrity Proof for LogEntry. Reason: {e}"))?;
 
         // Save proof to collection
         witness_proofs

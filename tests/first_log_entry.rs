@@ -5,7 +5,7 @@ use didwebvh_rs::log_entry::{LogEntry, LogEntryMethods, PublicKey};
 pub fn load_test_file(file: &str) -> String {
     use std::fs;
 
-    fs::read_to_string(file).unwrap_or_else(|_| panic!("Failed to read test file: {file}",))
+    fs::read_to_string(file).unwrap_or_else(|_| panic!("Failed to read test file: {file}"))
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn test_first_log_entry_verify_full() {
         .expect("Failed to parse first log entry JSON");
 
     let result = first_log_entry.verify_log_entry(None, None);
-    println!("{result:#?}",);
+    println!("{result:#?}");
     assert!(result.is_ok());
 }
 

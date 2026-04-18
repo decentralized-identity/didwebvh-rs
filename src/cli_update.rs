@@ -550,16 +550,15 @@ async fn do_migrate(
     );
 
     // Get new URL
-    let new_url_str = match pre_url {
-        Some(url) => url,
-        None => {
-            let input: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("New URL (e.g. https://new-domain.example.com/)")
-                .with_initial_text(did_url.get_http_url(None)?)
-                .interact_text()
-                .map_err(map_io)?;
-            input
-        }
+    let new_url_str = if let Some(url) = pre_url {
+        url
+    } else {
+        let input: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("New URL (e.g. https://new-domain.example.com/)")
+            .with_initial_text(did_url.get_http_url(None)?)
+            .interact_text()
+            .map_err(map_io)?;
+        input
     };
 
     let new_url = Url::parse(&new_url_str)
@@ -1140,10 +1139,18 @@ fn prompt_modify_witness_nodes(
         );
 
         if prompt_confirm("Auto-generate witness key pairs?", true)? {
-            let count = if new_witnesses.len() as u32 > threshold {
+            // Safe cast: witness counts are user-entered via a small u32
+            // prompt and never exceed the spec's practical threshold
+            // (double-digits at most). No 4B+ witnesses in the real world.
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "witness count is bounded by the u32 threshold prompt"
+            )]
+            let new_len_as_u32 = new_witnesses.len() as u32;
+            let count = if new_len_as_u32 > threshold {
                 break;
             } else {
-                (threshold + 1) - new_witnesses.len() as u32
+                (threshold + 1) - new_len_as_u32
             };
 
             for i in 0..count {

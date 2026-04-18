@@ -302,7 +302,7 @@ impl DIDWebVHState {
             3600_u32
         };
 
-        self.expires = Utc::now().fixed_offset() + Duration::seconds(ttl as i64);
+        self.expires = Utc::now().fixed_offset() + Duration::seconds(i64::from(ttl));
 
         let ok_until = last_log_entry.get_version_id().to_string();
         Ok(ValidationReport {

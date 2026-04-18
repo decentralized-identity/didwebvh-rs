@@ -137,7 +137,7 @@ async fn create_new_did() -> Result<()> {
             })
             .interact()?;
 
-        if let Some((prefix, _)) = file_name.split_once(".") {
+        if let Some((prefix, _)) = file_name.split_once('.') {
             // Save log entry
             result.log_entry().save_to_file(&file_name)?;
             println!(
@@ -264,7 +264,7 @@ async fn update_existing_did() -> Result<()> {
             })
             .interact()?;
 
-        if let Some((prefix, _)) = file_name.split_once(".") {
+        if let Some((prefix, _)) = file_name.split_once('.') {
             // Save the new log entry (append)
             result.log_entry().save_to_file(&file_name)?;
             println!(

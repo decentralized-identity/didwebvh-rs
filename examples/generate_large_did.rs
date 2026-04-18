@@ -11,6 +11,14 @@
 //!   cargo run --example generate_large_did --features experimental-pqc -- \
 //!       --url https://example.com --key-type ml-dsa-44
 
+// Benchmarking / display math casts are intentional.
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_lossless
+)]
+
 #[path = "common/suite.rs"]
 mod suite;
 
@@ -130,9 +138,9 @@ pub async fn main() -> Result<()> {
 
     while current_size < target_bytes {
         entry_count += 1;
-        let version_time = base_time + ChronoDuration::seconds(entry_count as i64);
+        let version_time = base_time + ChronoDuration::seconds(i64::from(entry_count));
 
-        let (new_next_keys, _) = create_update_entry(
+        let (new_next_keys, ()) = create_update_entry(
             &mut didwebvh,
             &mut secrets,
             &previous_keys,
@@ -171,7 +179,7 @@ pub async fn main() -> Result<()> {
         .open("did.jsonl")?;
 
     let mut byte_count: u64 = 0;
-    for entry in didwebvh.log_entries().iter() {
+    for entry in didwebvh.log_entries() {
         let json_entry = serde_json::to_string(&entry.log_entry)?;
         file.write_all(json_entry.as_bytes())?;
         file.write_all(b"\n")?;
@@ -202,7 +210,7 @@ pub async fn main() -> Result<()> {
     );
 
     let throughput = if gen_duration_ms + write_duration_ms > 0 {
-        (1000.0 / (gen_duration_ms + write_duration_ms) as f64) * entry_count as f64
+        (1000.0 / (gen_duration_ms + write_duration_ms) as f64) * f64::from(entry_count)
     } else {
         0.0
     };
@@ -214,7 +222,7 @@ pub async fn main() -> Result<()> {
 
     // === Verify by loading and validating ===
     println!();
-    println!("{}", style("=== Verification ===").color256(214),);
+    println!("{}", style("=== Verification ===").color256(214));
 
     let mut verify_state = DIDWebVHState::default();
 

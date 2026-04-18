@@ -101,29 +101,51 @@ required-features = ["network"]
 warnings = "warn"
 
 [lints.clippy]
-# Pedantic is available as opt-in for local development:
-#
-#     cargo clippy --all-features --all-targets -- -W clippy::pedantic
-#
-# but NOT gated in CI yet. 116 residual pedantic warnings against the
-# 0.5.0 codebase — tracked in the `0.5.x-polish` issue for mechanical
-# cleanup. Promoting to `warn` (+ `-D warnings` in CI) is a planned
-# follow-up once that backlog clears. Keeping the allowlist here so
-# the promotion is a one-line change when ready.
-#
-# Allowlist below will apply the moment pedantic flips to `warn`.
-module_name_repetitions = "allow"  # `log_entry::LogEntry`, `parameters::Parameters` etc.
-must_use_candidate = "allow"       # Every pure fn gets flagged; not worth it.
-missing_errors_doc = "allow"       # Valuable but requires broad docstring churn.
-missing_panics_doc = "allow"       # Same.
-similar_names = "allow"            # `proof` vs `proofs`, `params` vs `parameters`.
-too_many_lines = "allow"           # Opinionated.
-cast_possible_truncation = "allow" # Usually intentional (u32 -> usize etc.).
-cast_sign_loss = "allow"           # Usually intentional.
-cast_precision_loss = "allow"      # Usually intentional.
-doc_markdown = "allow"             # 150+ false positives across docstrings.
-return_self_not_must_use = "allow" # Noisy on the builder pattern.
-option_option = "allow"            # Tri-state `Option<Arc<Vec<T>>>` is intentional in Parameters.
+# Pedantic group is on as warnings, so CI (-D warnings) fails on any new
+# pedantic lint. Run locally with
+#     cargo clippy --all-features --all-targets
+# to see them.
+pedantic = { level = "warn", priority = -1 }
+
+# Curated allowlist. The three `cast_*` lints used to be in here on the
+# "usually intentional" argument — removed in P1.3 because they genuinely
+# do catch bugs in version-number / length arithmetic. Per-site overrides
+# (with a `reason = "..."`) are used where the cast is truly bounded.
+module_name_repetitions = "allow"     # `log_entry::LogEntry`, `parameters::Parameters` etc.
+must_use_candidate = "allow"          # Every pure fn gets flagged; not worth it.
+missing_errors_doc = "allow"          # Valuable but requires broad docstring churn.
+missing_panics_doc = "allow"          # Same.
+similar_names = "allow"               # `proof` vs `proofs`, `params` vs `parameters`.
+too_many_lines = "allow"              # Opinionated.
+doc_markdown = "allow"                # 150+ false positives across docstrings.
+return_self_not_must_use = "allow"    # Noisy on the builder pattern.
+option_option = "allow"               # Tri-state `Option<Arc<Vec<T>>>` is intentional in Parameters.
+unnecessary_trailing_comma = "allow"  # `format!("...", x,)` is a style preference; reduces diff churn on arg additions.
+semicolon_if_nothing_returned = "allow" # Opinionated; already-formatted code fails but adds no signal.
+items_after_statements = "allow"      # Hurts readability in long functions more than it helps.
+needless_continue = "allow"           # Explicit `continue` in loop logic is often clearer than an empty else.
+redundant_else = "allow"              # Mirror-image of `needless_continue`; keep branches symmetric.
+case_sensitive_file_extension_comparisons = "allow" # DID log filenames are spec-defined, fixed case.
+needless_pass_by_value = "allow"      # Builder + config patterns intentionally take owned values.
+trivially_copy_pass_by_ref = "allow"  # Trait-consistent signatures matter more than +0-byte passes.
+unnecessary_wraps = "allow"           # Some functions return Result for future fallibility even when today they are infallible.
+match_wildcard_for_single_variants = "allow" # `_ =>` is fine on `#[non_exhaustive]` enums.
+implicit_clone = "allow"              # `s.to_string()` on a `&String` is idiomatic Rust.
+format_push_string = "allow"          # `s.push_str(&format!(...))` is clearer than write! in small snippets.
+used_underscore_binding = "allow"     # Bindings named `_e` that ARE referenced by `{_e}` are readable; not noise-free to chase.
+ref_option = "allow"                  # `&Option<T>` is fine in public API; changing to `Option<&T>` would be a breaking signature churn.
+manual_let_else = "allow"             # Style preference; the `let Some(x) = ... else { return ...; }` rewrite is sometimes LESS readable in short blocks.
+assigning_clones = "allow"            # `x = y.clone()` → `x.clone_from(&y)` — marginal perf, hurts readability.
+explicit_iter_loop = "allow"          # `for x in v.iter()` vs `for x in &v` is stylistic, not a real lint signal.
+single_char_pattern = "allow"          # `.split("a")` vs `.split('a')` — micro-perf of single match calls, negligible.
+uninlined_format_args = "allow"       # `format!("{}", x)` vs `format!("{x}")` is a style toggle; both are fine.
+redundant_closure_for_method_calls = "allow" # `|x| x.foo()` vs `Foo::foo` is stylistic; closures are often clearer.
+match_same_arms = "allow"             # Separate arms with identical bodies can aid readability when the discriminants differ semantically.
+map_unwrap_or = "allow"               # `.map(f).unwrap_or(x)` is often clearer than `.map_or(x, f)` (reads left-to-right).
+match_wild_err_arm = "allow"          # `Err(_) => panic!(...)` in tests is the idiomatic "this should never fail" pattern.
+needless_bool = "allow"               # `if x { true } else { false }` is sometimes clearer than just `x` when the shape documents intent.
+redundant_closure = "allow"           # `|x| x.method()` vs `Type::method` — closures often read better in context.
+unnecessary_semicolon = "allow"        # Trailing `;` on `let _ = expr();` statements is clearer than bare `;`.
 
 [[bench]]
 name = "did_benchmarks"
