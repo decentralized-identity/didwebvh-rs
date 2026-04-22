@@ -366,22 +366,8 @@ impl DIDWebVHState {
         // Ensure that the signing key is valid
         Self::check_signing_key(last_log_entry, parameters, signing_key)?;
 
-        // If this LogEntry causes the DID to be deactivated, then updateKeys should be set to
-        // invalid
-        if parameters.deactivated.unwrap_or_default() {
-            let version = last_log_entry.map_or(1, |e| e.version_number + 1);
-            // DID will be deactivated
-            if let Some(keys) = &parameters.update_keys
-                && keys.is_empty()
-            {
-                // Valid empty UpdateKeys for a deactivated DID
-            } else {
-                return Err(DIDWebVHError::log_entry(
-                    "Cannot deactivate DID unless update_keys is set to []",
-                    version,
-                ));
-            }
-        }
+        // `updateKeys` on a deactivation entry is SHOULD be empty per
+        // didwebvh 1.0 §Deactivate, not MUST. Accept any value.
 
         let mut new_entry = if let Some(last_log_entry) = last_log_entry {
             // Utilizes the previous LogEntry for some info
@@ -647,7 +633,10 @@ impl DIDWebVHState {
 
     /// Deactivate the DID, creating a final log entry.
     ///
-    /// Sets `deactivated: true` and clears `update_keys` as required by the spec.
+    /// Sets `deactivated: true` and clears `update_keys`, matching the
+    /// SHOULD recommendation in didwebvh 1.0 §Deactivate. The resolver
+    /// accepts deactivation entries with non-empty `update_keys` too, but
+    /// this writer takes the recommended path.
     pub async fn deactivate(
         &mut self,
         signing_key: &dyn Signer,
@@ -1193,32 +1182,46 @@ mod tests {
 
     // ===== create_log_entry() additional tests =====
 
-    /// Tests that creating a deactivated log entry fails when update_keys is non-empty.
-    /// Expected: create_log_entry returns Err with a message about update_keys needing to be empty.
-    /// This matters because the spec requires that deactivated DIDs have empty update_keys
-    /// to ensure no further updates can be made after deactivation.
+    /// Tests that a deactivation entry succeeds when it carries non-empty
+    /// updateKeys. Per didwebvh 1.0 §Deactivate, empty updateKeys is a SHOULD,
+    /// not a MUST — the resolver accepts deactivation entries regardless of
+    /// updateKeys shape.
     #[tokio::test]
-    async fn webvh_create_log_entry_deactivated_with_keys_error() {
+    async fn webvh_create_log_entry_deactivated_with_keys_ok() {
         let key = crate::test_utils::generate_signing_key();
+        let mut key_with_id = key.clone();
+        let pk = key.get_public_keymultibase().unwrap();
+        key_with_id.id = format!("did:key:{pk}#{pk}");
+
         let state = did_doc();
-        let parameters = Parameters {
-            update_keys: Some(Arc::new(vec![Multibase::new(
-                key.get_public_keymultibase().unwrap(),
-            )])),
-            deactivated: Some(true),
+        let params1 = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(pk.clone())])),
             ..Default::default()
         };
         let mut didwebvh = DIDWebVHState::default();
+        let base_time = (Utc::now() - chrono::Duration::seconds(10)).fixed_offset();
+        didwebvh
+            .create_log_entry(Some(base_time), &state, &params1, &key_with_id)
+            .await
+            .unwrap();
+
+        let actual_doc = didwebvh.log_entries.last().unwrap().get_state().clone();
+
+        // Deactivation entry — keeps the same updateKeys rather than clearing them.
+        let params2 = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(pk)])),
+            deactivated: Some(true),
+            ..Default::default()
+        };
         let result = didwebvh
-            .create_log_entry(None, &state, &parameters, &key)
+            .create_log_entry(
+                Some(base_time + chrono::Duration::seconds(1)),
+                &actual_doc,
+                &params2,
+                &key_with_id,
+            )
             .await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("update_keys is set to []")
-        );
+        assert!(result.is_ok(), "unexpected error: {:?}", result.err());
     }
 
     /// Tests the full deactivation flow: create an initial entry, then deactivate with

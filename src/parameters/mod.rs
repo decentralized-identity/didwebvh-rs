@@ -504,26 +504,15 @@ impl Parameters {
             }
         }
 
-        // Check deactivation status
-        if let Some(deactivated) = self.deactivated
-            && deactivated
+        // Deactivation: genesis entry cannot be deactivated; subsequent
+        // entries may be, with any `updateKeys` shape — per didwebvh 1.0
+        // §Deactivate, empty `updateKeys` is a SHOULD, not a MUST.
+        if let Some(true) = self.deactivated
             && previous.is_none()
         {
-            // Can't be deactivated on the first log entry
             return Err(DIDWebVHError::DeactivatedError(
                 "DID cannot be deactivated on the first Log Entry".to_string(),
             ));
-        } else if let Some(deactivated) = self.deactivated
-            && deactivated
-        {
-            if let Some(update_keys) = &self.update_keys
-                && !update_keys.is_empty()
-            {
-                return Err(DIDWebVHError::DeactivatedError(
-                    "DID Parameters say deactivated, yet updateKeys are not null!".to_string(),
-                ));
-            }
-            new_parameters.update_keys = Some(Arc::new(Vec::new()));
         }
 
         new_parameters.deactivated = self.deactivated;
@@ -1194,33 +1183,28 @@ mod tests {
         );
     }
 
-    /// Given a subsequent entry that is deactivated but still has non-empty updateKeys,
-    /// then validate() should return an error.
-    ///
-    /// The spec requires that deactivation clears updateKeys (sets them to an empty
-    /// array) to prevent any future updates. Retaining keys would be contradictory.
+    /// Given a subsequent entry with deactivated=true and non-empty updateKeys,
+    /// then validate() should succeed and preserve the declared keys. Per
+    /// didwebvh 1.0 §Deactivate, empty updateKeys is a SHOULD, not a MUST.
     #[test]
-    fn validate_deactivated_non_empty_keys_error() {
+    fn validate_deactivated_non_empty_keys_ok() {
         let previous = validated_first_params();
         let current = Parameters {
             deactivated: Some(true),
             update_keys: Some(Arc::new(vec![Multibase::new("non-empty")])),
             ..Default::default()
         };
-        let err = current.validate(Some(&previous)).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("deactivated, yet updateKeys are not null")
-        );
+        let result = current.validate(Some(&previous)).unwrap();
+        assert_eq!(result.deactivated, Some(true));
+        let keys = result.update_keys.unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].as_str(), "non-empty");
     }
 
     /// Given a subsequent entry with deactivated=true and empty updateKeys,
-    /// then validate() should succeed with empty keys and deactivated=true.
-    ///
-    /// This is the correct way to deactivate a DID per the spec: set deactivated
-    /// to true and clear all updateKeys so no further modifications are possible.
+    /// then validate() should succeed (the SHOULD happy path).
     #[test]
-    fn validate_deactivated_sets_empty_keys() {
+    fn validate_deactivated_empty_keys_ok() {
         let previous = validated_first_params();
         let current = Parameters {
             deactivated: Some(true),
