@@ -1,5 +1,53 @@
 # didwebvh-rs Changelog history
 
+## 22nd April 2026
+
+### Release 0.5.1 — spec-compliance patch
+
+Closes gaps flagged in
+[didwebvh-test-suite PR #4](https://github.com/decentralized-identity/didwebvh-test-suite/pull/4).
+Additive public surface change only: `MetaData` gains a `version_number`
+field. Consumers that construct `MetaData` with `..Default::default()` or
+that only read fields are unaffected. Positional struct-literal
+construction would need the new field added — but `MetaData` is primarily
+produced by the resolver and consumed by callers, so this is expected to
+be transparent in practice.
+
+#### Fixed
+
+- **Deactivation accepts non-empty `updateKeys`.** Per didwebvh 1.0
+  §Deactivate, `updateKeys` SHOULD be set to `[]` on the deactivation
+  entry — it is not a MUST. The resolver previously rejected deactivation
+  entries whose `updateKeys` was non-empty with
+  `"DID Parameters say deactivated, yet updateKeys are not null!"`; it now
+  accepts any shape. Logs produced by the TypeScript reference resolver
+  that carry forward `updateKeys` on the deactivation entry now resolve.
+
+#### Added
+
+- **`MetaData::version_number: u32`.** The resolved DID document metadata
+  now exposes the integer version number (e.g. `2` for versionId
+  `"2-Qm..."`) alongside the existing `version_id` string, matching the
+  shape emitted by `didwebvh-ts`. Consumers no longer need to parse the
+  `versionId` prefix themselves.
+- **Committed interop fixtures from didwebvh-test-suite PR #4** under
+  `tests/test_vectors/test_suite/` with a matching walker in
+  `tests/test_suite_interop.rs`. Twelve happy-path scenarios resolve; one
+  (`witness-update`) is `#[ignore]`'d pending a follow-up investigation
+  into TS-vs-Rust witness proof canonicalization after mid-chain witness
+  configuration changes.
+
+#### Changed
+
+- **`affinidi-data-integrity` bumped to `0.6`.** No API impact on didwebvh-rs
+  consumers — the upstream change is transparent through our wrappers.
+- `tokio` loosened from `= "1.50"` to `"1"` to match the workspace-wide
+  policy of tracking the minor line rather than pinning a patch.
+- Transitive dependencies refreshed via `cargo update`:
+  `affinidi-crypto 0.1.4 → 0.1.5`, `openssl 0.10.77 → 0.10.78`,
+  `openssl-sys 0.9.113 → 0.9.114`, `rustls-webpki 0.103.12 → 0.103.13`,
+  `sha3 0.10.8 → 0.10.9`, `typenum 1.19.0 → 1.20.0`, `winnow 1.0.1 → 1.0.2`.
+
 ## 18th April 2026
 
 ### Release 0.5.0 — breaking
