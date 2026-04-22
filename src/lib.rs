@@ -567,6 +567,7 @@ impl DIDWebVHState {
     pub fn generate_meta_data(&self, log_entry: &LogEntryState) -> MetaData {
         MetaData {
             version_id: log_entry.get_version_id().to_string(),
+            version_number: log_entry.version_number,
             version_time: log_entry.get_version_time_string().to_string(),
             created: self.meta_first_ts.clone(),
             updated: self.meta_last_ts.clone(),

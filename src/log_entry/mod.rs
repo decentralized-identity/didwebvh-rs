@@ -39,6 +39,10 @@ pub(crate) fn encode_sha256_multihash(digest: &[u8]) -> Vec<u8> {
 pub struct MetaData {
     /// The `<version_number>-<hash>` identifier for this log entry.
     pub version_id: String,
+    /// Integer version number parsed from `version_id` (e.g. `2` for
+    /// `"2-Qm..."`). Exposed as a sibling of `version_id` for consumers
+    /// that want the integer without parsing the string.
+    pub version_number: u32,
     /// RFC 3339 timestamp when this version was created.
     pub version_time: String,
     /// RFC 3339 timestamp when the DID was first created.
@@ -641,6 +645,32 @@ mod tests {
     use affinidi_data_integrity::{DataIntegrityProof, crypto_suites::CryptoSuite};
     use chrono::Utc;
     use serde_json::json;
+
+    // ===== MetaData tests =====
+
+    /// `MetaData::version_number` serialises as `versionNumber` alongside
+    /// `versionId`. Required for TS-interop parity with didwebvh-ts resolver
+    /// output.
+    #[test]
+    fn metadata_serialises_version_number_as_camel_case_integer() {
+        let meta = MetaData {
+            version_id: "42-QmExample".to_string(),
+            version_number: 42,
+            version_time: "2000-01-01T00:00:00Z".to_string(),
+            created: "2000-01-01T00:00:00Z".to_string(),
+            updated: "2000-01-01T00:00:00Z".to_string(),
+            scid: "QmExample".to_string(),
+            portable: false,
+            deactivated: false,
+            witness: None,
+            watchers: None,
+        };
+        let v = serde_json::to_value(&meta).unwrap();
+        assert_eq!(v.get("versionNumber"), Some(&serde_json::json!(42)));
+        assert_eq!(v.get("versionId"), Some(&serde_json::json!("42-QmExample")));
+        let round_tripped: MetaData = serde_json::from_value(v).unwrap();
+        assert_eq!(round_tripped.version_number, 42);
+    }
 
     // ===== PublicKey trait tests =====
 
