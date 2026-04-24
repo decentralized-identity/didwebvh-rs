@@ -85,7 +85,7 @@ impl WebVHURL {
         // split query from the rest of the URL
         let (prefix, query) = match prefix.split_once('?') {
             Some((prefix, query)) => (prefix, Some(query.to_string())),
-            None => (url, None),
+            None => (prefix, None),
         };
 
         let (query_version_id, query_version_time, query_version_number) =
@@ -479,6 +479,20 @@ mod tests {
         };
 
         assert_eq!(parsed.fragment, Some("key-fragment".to_string()));
+        assert_eq!(parsed.domain, "example.com");
+    }
+
+    #[test]
+    fn url_with_fragment_no_query_does_not_leak_into_domain() {
+        // Regression: when a fragment was present but no query, the query-split
+        // fallback restored the original (fragment-bearing) string as the prefix,
+        // so the domain became `127.0.0.1#x` and dodged reject_ip_address().
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:127.0.0.1#x").is_err());
+
+        let parsed = WebVHURL::parse_did_url("did:webvh:scid:example.com:dir#frag").unwrap();
+        assert_eq!(parsed.domain, "example.com");
+        assert_eq!(parsed.path, "/dir/");
+        assert_eq!(parsed.fragment, Some("frag".to_string()));
     }
 
     #[test]
