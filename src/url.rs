@@ -123,6 +123,15 @@ impl WebVHURL {
         let mut path = String::new();
         let mut file_name = String::new();
         for part in parts[2..].iter() {
+            // These segments are joined with '/' into the HTTP path that the
+            // resolver fetches. Reject anything that would let a crafted DID
+            // escape its directory (`..`), collapse to the current dir (`.`),
+            // produce `//` (empty), or smuggle an extra separator (`/`).
+            if part.is_empty() || *part == "." || *part == ".." || part.contains('/') {
+                return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                    "Invalid URL: path segment ({part:?}) is not allowed",
+                )));
+            }
             if part != &"whois" {
                 path.push('/');
                 path.push_str(part);
@@ -523,6 +532,19 @@ mod tests {
             "https://domain:8000/custom/path/whois.vp"
         );
         Ok(())
+    }
+
+    #[test]
+    fn url_rejects_path_traversal() {
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:..:admin").is_err());
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:a:..").is_err());
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:.").is_err());
+    }
+
+    #[test]
+    fn url_rejects_empty_or_slash_segment() {
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com::x").is_err());
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:a/b").is_err());
     }
 
     #[test]
