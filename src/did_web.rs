@@ -26,10 +26,13 @@ impl DIDWebVHState {
     /// Takes a did:webvh ID and converts it to a did:web ID
     pub fn convert_webvh_id_to_web_id(id: &str) -> String {
         // input: did:webvh:<SCID>:<path>
+        // `id` is taken from the DID document's `state["id"]`, i.e. attacker-
+        // controlled, so a malformed value with fewer than three ':' segments
+        // must degrade to a useless-but-safe result rather than panic.
         let parts: Vec<&str> = id.split(':').collect();
         let mut new_did = String::new();
         new_did.push_str("did:web");
-        for p in parts[3..].iter() {
+        for p in parts.get(3..).unwrap_or_default() {
             new_did.push(':');
             new_did.push_str(p);
         }
@@ -356,6 +359,20 @@ mod tests {
                 id: "did:web:affinidi.com#whois".to_string(),
                 service_endpoint: "https://affinidi.com/whois.vp".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn test_convert_webvh_to_web_malformed_no_panic() {
+        // state["id"] is attacker-controlled; fewer than three ':' segments
+        // used to panic on `parts[3..]`. It must now return a (useless but
+        // harmless) bare "did:web" instead of crashing the resolver.
+        assert_eq!(DIDWebVHState::convert_webvh_id_to_web_id(""), "did:web");
+        assert_eq!(DIDWebVHState::convert_webvh_id_to_web_id("x"), "did:web");
+        assert_eq!(DIDWebVHState::convert_webvh_id_to_web_id("a:b"), "did:web");
+        assert_eq!(
+            DIDWebVHState::convert_webvh_id_to_web_id("did:webvh:scid"),
+            "did:web"
         );
     }
 
