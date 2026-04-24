@@ -72,6 +72,19 @@ impl LogEntry {
             )));
         }
 
+        // didwebvh 1.0 mandates eddsa-jcs-2022 for the controller's log-entry
+        // proof. Enforcing it here (as we already do for witness proofs via
+        // enforce_witness_proof_shape) blocks algorithm-substitution: the key
+        // bytes are decoded from did:key independently of the suite, so a
+        // proof that selects a different suite would otherwise feed those
+        // bytes into a verifier they were not generated for.
+        if proof.cryptosuite != affinidi_data_integrity::crypto_suites::CryptoSuite::EddsaJcs2022 {
+            return Err(DIDWebVHError::ValidationError(format!(
+                "Invalid cryptosuite {:?}: log entry proofs must use eddsa-jcs-2022",
+                proof.cryptosuite
+            )));
+        }
+
         // Ensure the Parameters are correctly setup
         let parameters = match self.get_parameters().validate(previous_parameters) {
             Ok(params) => params,
@@ -431,6 +444,35 @@ mod tests {
                 "Expected assertionMethod error for proofPurpose '{bad_purpose}', got: {result:?}",
             );
         }
+    }
+
+    /// Tests that verify_log_entry rejects a proof whose cryptosuite is not
+    /// eddsa-jcs-2022. The spec mandates this suite; accepting eddsa-rdfc-2022
+    /// would feed the same did:key bytes into a different canonicalization
+    /// pipeline and break interop/signature-domain separation.
+    #[test]
+    fn test_invalid_cryptosuite_rejected() {
+        let entry = LogEntry::Spec1_0(LogEntry1_0 {
+            version_id: "1-abcdef".to_string(),
+            version_time: Utc::now().fixed_offset(),
+            parameters: Parameters1_0::default(),
+            state: json!({}),
+            proof: vec![DataIntegrityProof {
+                type_: "DataIntegrityProof".to_string(),
+                cryptosuite: CryptoSuite::EddsaRdfc2022,
+                created: None,
+                verification_method: "did:key:z6Mk#z6Mk".to_string(),
+                proof_purpose: "assertionMethod".to_string(),
+                proof_value: Some("zDummy".to_string()),
+                context: None,
+            }],
+        });
+
+        let result = entry.verify_log_entry(None, None);
+        assert!(
+            matches!(result, Err(DIDWebVHError::ValidationError(ref msg)) if msg.contains("eddsa-jcs-2022")),
+            "Expected eddsa-jcs-2022 error, got: {result:?}",
+        );
     }
 
     /// Tests that verify_portability passes when the DID document id has not
