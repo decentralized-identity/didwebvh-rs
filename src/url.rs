@@ -103,7 +103,13 @@ impl WebVHURL {
 
         let scid = parts[0].to_string();
 
-        let (domain, port) = match parts[1].split_once("%3A") {
+        // Percent-encoding is case-insensitive (RFC 3986 §2.1). Matching only the
+        // uppercase form would leave `127.0.0.1%3a8080` as the "domain", which then
+        // slips past `reject_ip_address()` because it no longer parses as a bare IP.
+        let (domain, port) = match parts[1]
+            .split_once("%3A")
+            .or_else(|| parts[1].split_once("%3a"))
+        {
             Some((domain, port)) => {
                 let port = match port.parse::<u16>() {
                     Ok(port) => port,
@@ -504,6 +510,21 @@ mod tests {
     #[test]
     fn url_with_port() {
         assert!(WebVHURL::parse_did_url("did:webvh:scid:domain%3A8000").is_ok());
+    }
+
+    #[test]
+    fn url_with_lowercase_pct_port() -> Result<(), DIDWebVHError> {
+        let parsed = WebVHURL::parse_did_url("did:webvh:scid:domain%3a8000")?;
+        assert_eq!(parsed.domain, "domain");
+        assert_eq!(parsed.port, Some(8000));
+        Ok(())
+    }
+
+    #[test]
+    fn url_rejects_ipv4_with_lowercase_pct_port() {
+        // Previously slipped past reject_ip_address() because the unparsed
+        // `%3a8080` suffix stayed glued to the host.
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:127.0.0.1%3a8080").is_err());
     }
 
     #[test]
