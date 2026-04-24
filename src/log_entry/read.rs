@@ -278,6 +278,26 @@ impl LogEntry {
         let current_id = self.get_state().get("id").and_then(|v| v.as_str());
         let previous_id = previous.get_state().get("id").and_then(|v| v.as_str());
 
+        // Portability lets the host/path change; the SCID never does. Without
+        // this, a portable DID could set entry N's state.id to
+        // `did:webvh:<anything>:new-host` (with the old DID in alsoKnownAs)
+        // and resolve_state would then accept a request for that arbitrary
+        // SCID — the same self-certifying bypass verify_scid() closes for the
+        // genesis entry, reopened at N>1. parameters.scid is carried forward
+        // unchanged from genesis, so it is the authoritative anchor.
+        if let Some(current) = current_id {
+            let scid = parameters.scid.as_deref().map(String::as_str);
+            let doc_scid = current
+                .strip_prefix("did:webvh:")
+                .and_then(|rest| rest.split_once(':'))
+                .map(|(s, _)| s);
+            if doc_scid.is_none() || doc_scid != scid {
+                return Err(DIDWebVHError::ValidationError(format!(
+                    "DID document id SCID ({doc_scid:?}) does not match parameters.scid ({scid:?})",
+                )));
+            }
+        }
+
         if let (Some(current), Some(previous_did)) = (current_id, previous_id)
             && current != previous_did
         {
@@ -421,6 +441,18 @@ mod tests {
         })
     }
 
+    /// Validated-parameters fixture for `verify_portability` tests: `scid` is
+    /// set to match the `did:webvh:abc123:...` doc ids used throughout, so the
+    /// SCID-immutability check passes and the test exercises only the
+    /// portability rule it names.
+    fn portability_params(portable: Option<bool>) -> Parameters {
+        Parameters {
+            portable,
+            scid: Some(Arc::new("abc123".to_string())),
+            ..Default::default()
+        }
+    }
+
     /// Helper to create a minimal Spec1_0 LogEntry with a specific timestamp.
     /// Uses a fixed versionId of "1-abc123", a default DID document state with a
     /// valid id field, default parameters, and an empty proof list. Useful for tests
@@ -507,10 +539,7 @@ mod tests {
         // Same DID id between entries, portable=false → should pass
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
-        let params = Parameters {
-            portable: Some(false),
-            ..Default::default()
-        };
+        let params = portability_params(Some(false));
 
         assert!(current.verify_portability(&previous, &params).is_ok());
     }
@@ -525,10 +554,7 @@ mod tests {
         // DID id changed, portable=false → must fail
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:newdomain.com"}));
-        let params = Parameters {
-            portable: Some(false),
-            ..Default::default()
-        };
+        let params = portability_params(Some(false));
 
         let result = current.verify_portability(&previous, &params);
         assert!(result.is_err());
@@ -550,10 +576,7 @@ mod tests {
         // DID id changed, portable=None (defaults to false) → must fail
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:newdomain.com"}));
-        let params = Parameters {
-            portable: None,
-            ..Default::default()
-        };
+        let params = portability_params(None);
 
         let result = current.verify_portability(&previous, &params);
         assert!(result.is_err());
@@ -575,10 +598,7 @@ mod tests {
         // DID id changed, portable=true, but no alsoKnownAs → must fail
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:newdomain.com"}));
-        let params = Parameters {
-            portable: Some(true),
-            ..Default::default()
-        };
+        let params = portability_params(Some(true));
 
         let result = current.verify_portability(&previous, &params);
         assert!(result.is_err());
@@ -604,10 +624,7 @@ mod tests {
             "id": "did:webvh:abc123:newdomain.com",
             "alsoKnownAs": ["did:webvh:abc123:other.com"]
         }));
-        let params = Parameters {
-            portable: Some(true),
-            ..Default::default()
-        };
+        let params = portability_params(Some(true));
 
         let result = current.verify_portability(&previous, &params);
         assert!(result.is_err());
@@ -632,12 +649,31 @@ mod tests {
             "id": "did:webvh:abc123:newdomain.com",
             "alsoKnownAs": ["did:webvh:abc123:example.com"]
         }));
-        let params = Parameters {
-            portable: Some(true),
-            ..Default::default()
-        };
+        let params = portability_params(Some(true));
 
         assert!(current.verify_portability(&previous, &params).is_ok());
+    }
+
+    /// Regression: portability lets the host change, never the SCID. Before
+    /// this check a portable DID could set entry N's `state.id` to
+    /// `did:webvh:<anything>:new-host` (with the old DID in alsoKnownAs) and
+    /// pass — the same self-certifying bypass `verify_scid` closes for the
+    /// genesis, reopened at N>1. `parameters.scid` is the genesis hash carried
+    /// forward unchanged, so any entry whose doc-id SCID differs is rejected.
+    #[test]
+    fn test_portability_rejects_scid_change() {
+        let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let current = make_log_entry(json!({
+            "id": "did:webvh:DIFFERENTSCID:newdomain.com",
+            "alsoKnownAs": ["did:webvh:abc123:example.com"]
+        }));
+        let params = portability_params(Some(true));
+
+        let err = current.verify_portability(&previous, &params).unwrap_err();
+        assert!(
+            err.to_string().contains("does not match parameters.scid"),
+            "got: {err}"
+        );
     }
 
     /// Tests that verify_portability succeeds when the DID id has not changed,
@@ -650,10 +686,7 @@ mod tests {
         // Same DID id, portable=true → should pass (no move happened)
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
-        let params = Parameters {
-            portable: Some(true),
-            ..Default::default()
-        };
+        let params = portability_params(Some(true));
 
         assert!(current.verify_portability(&previous, &params).is_ok());
     }
