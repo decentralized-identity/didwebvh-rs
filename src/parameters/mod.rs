@@ -365,11 +365,30 @@ impl Parameters {
         if let Some(previous) = previous {
             match &self.update_keys {
                 None => {
-                    // If absent, keep current updateKeys
+                    // If absent, keep current updateKeys.
+                    // But when the *previous* entry committed nextKeyHashes, this
+                    // entry MUST present updateKeys that hash into that set.
+                    // Allowing absence here would let an attacker who compromised
+                    // an old update key sign this entry with it (the pre-rotation
+                    // branch in verify_log_entry self-authorises against
+                    // `parameters.active_update_keys`, which would inherit the old
+                    // keys unchanged) — defeating pre-rotation entirely.
+                    if pre_rotation_previous_value {
+                        return Err(DIDWebVHError::ParametersError(
+                            "updateKeys must be provided when previous entry committed nextKeyHashes (pre-rotation active)"
+                                .to_string(),
+                        ));
+                    }
                     new_parameters.active_update_keys = previous.active_update_keys.clone();
                 }
                 Some(update_keys) => {
                     if update_keys.is_empty() {
+                        if pre_rotation_previous_value {
+                            return Err(DIDWebVHError::ParametersError(
+                                "updateKeys must not be empty when previous entry committed nextKeyHashes (pre-rotation active)"
+                                    .to_string(),
+                            ));
+                        }
                         // If empty, turn off updateKeys
                         new_parameters.update_keys = Some(Arc::new(Vec::new()));
                         new_parameters.active_update_keys = previous.active_update_keys.clone();
@@ -1046,6 +1065,50 @@ mod tests {
         };
         let err = current.validate(Some(&previous)).unwrap_err();
         assert!(err.to_string().contains("nextKeyHashes cannot be absent"));
+    }
+
+    /// Security regression: when the previous entry committed nextKeyHashes,
+    /// the current entry MUST present updateKeys. Omitting them previously
+    /// caused active_update_keys to inherit the *old* keys unchanged, and
+    /// verify_log_entry's pre-rotation branch then authorized the proof
+    /// against those old keys — letting a compromised old key forge the next
+    /// entry and bypass pre-rotation entirely.
+    #[test]
+    fn validate_update_keys_absent_pre_rotation_active_error() {
+        let mut previous = validated_first_params();
+        previous.pre_rotation_active = true;
+        previous.next_key_hashes = Some(Arc::new(vec![Multibase::new("hash")]));
+
+        let current = Parameters {
+            next_key_hashes: Some(Arc::new(vec![Multibase::new("next-hash")])),
+            update_keys: None,
+            ..Default::default()
+        };
+        let err = current.validate(Some(&previous)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("updateKeys must be provided when previous entry committed nextKeyHashes")
+        );
+    }
+
+    /// Security regression: same bypass as above via an explicitly empty
+    /// updateKeys array instead of omission.
+    #[test]
+    fn validate_update_keys_empty_pre_rotation_active_error() {
+        let mut previous = validated_first_params();
+        previous.pre_rotation_active = true;
+        previous.next_key_hashes = Some(Arc::new(vec![Multibase::new("hash")]));
+
+        let current = Parameters {
+            next_key_hashes: Some(Arc::new(vec![])),
+            update_keys: Some(Arc::new(vec![])),
+            ..Default::default()
+        };
+        let err = current.validate(Some(&previous)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("updateKeys must not be empty when previous entry committed nextKeyHashes")
+        );
     }
 
     /// Given a previous entry with pre-rotation active and a current entry with empty nextKeyHashes,
