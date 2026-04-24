@@ -195,11 +195,21 @@ impl LogEntry {
             return false;
         }
 
-        if let Some((_, key)) = proof_key.split_once('#') {
-            authorized_keys.iter().any(|f| f.as_str() == key)
-        } else {
-            false
+        // The proof's verificationMethod must be exactly `did:key:{mb}#{mb}` for an
+        // authorized multibase `{mb}`. Signature verification later decodes the public
+        // key from the DID *body* (before `#`) via `resolve_did_key`, so checking only
+        // the fragment would let `did:key:<attacker>#<authorized>` pass authorization
+        // here while verifying against the attacker's key — a full forgery.
+        let Some((did, fragment)) = proof_key.split_once('#') else {
+            return false;
+        };
+        let Some(body) = did.strip_prefix("did:key:") else {
+            return false;
+        };
+        if body != fragment {
+            return false;
         }
+        authorized_keys.iter().any(|f| f.as_str() == body)
     }
 
     /// Checks the version ID of a LogEntry against the previous LogEntry
@@ -717,6 +727,40 @@ mod tests {
         assert!(LogEntry::check_signing_key_authorized(
             &Arc::new(authorized_keys),
             "did:key:z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15#z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15"
+        ));
+    }
+
+    /// Regression: a verificationMethod whose fragment names an authorized key but whose
+    /// did:key body names a *different* key must be rejected. Signature verification
+    /// decodes the public key from the body, so accepting this would allow anyone to
+    /// forge log entries by signing with their own key and pointing the fragment at an
+    /// authorized one.
+    #[test]
+    fn test_authorized_keys_mismatched_body_and_fragment_rejected() {
+        let authorized = "z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15";
+        let attacker = "z6MktKQzZyzDTccPxQR1vQfYHrXUmyDkBkJ7nFjTuqmas5Z2";
+        let authorized_keys: Vec<Multibase> = vec![Multibase::new(authorized)];
+
+        assert!(!LogEntry::check_signing_key_authorized(
+            &Arc::new(authorized_keys.clone()),
+            &format!("did:key:{attacker}#{authorized}"),
+        ));
+        // and the mirror: authorized body with attacker fragment must also fail
+        assert!(!LogEntry::check_signing_key_authorized(
+            &Arc::new(authorized_keys),
+            &format!("did:key:{authorized}#{attacker}"),
+        ));
+    }
+
+    /// A verificationMethod that isn't a did:key URI at all must be rejected even if
+    /// its fragment matches an authorized key.
+    #[test]
+    fn test_authorized_keys_non_did_key_rejected() {
+        let authorized = "z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15";
+        let authorized_keys: Vec<Multibase> = vec![Multibase::new(authorized)];
+        assert!(!LogEntry::check_signing_key_authorized(
+            &Arc::new(authorized_keys),
+            &format!("did:web:example.com#{authorized}"),
         ));
     }
 
