@@ -250,6 +250,30 @@ impl WebVHURL {
         })
     }
 
+    /// Re-check the host *after* `Url::parse` has normalised it.
+    ///
+    /// `reject_ip_address()` runs on the raw DID segment, which has not been
+    /// percent-decoded — so `127%2E0%2E0%2E1` does not parse as an `IpAddr`
+    /// and slips through. `Url::parse` then decodes it to `127.0.0.1` and
+    /// the resolver would happily fetch from localhost (or
+    /// `169.254.169.254`, etc.). This check looks at what the HTTP client
+    /// will actually connect to, after all of the `url` crate's host
+    /// normalisation, and rejects any IP literal.
+    fn reject_ip_host(url: &Url) -> Result<(), DIDWebVHError> {
+        match url.host() {
+            Some(url::Host::Ipv4(ip)) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                "Invalid URL: IP addresses are not allowed, use a domain name instead: {ip}",
+            ))),
+            Some(url::Host::Ipv6(ip)) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                "Invalid URL: IP addresses are not allowed, use a domain name instead: {ip}",
+            ))),
+            Some(url::Host::Domain(_)) => Ok(()),
+            None => Err(DIDWebVHError::InvalidMethodIdentifier(
+                "Invalid URL: Must contain domain".to_string(),
+            )),
+        }
+    }
+
     /// Rejects IP addresses (both IPv4 and IPv6) as the domain component.
     /// The did:webvh spec requires domain names, not IP addresses.
     fn reject_ip_address(domain: &str) -> Result<(), DIDWebVHError> {
@@ -361,12 +385,11 @@ impl WebVHURL {
             url_string.push_str(&format!("#{fragment}",));
         }
 
-        match Url::parse(&url_string) {
-            Ok(url) => Ok(url),
-            Err(err) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
-                "Invalid URL: {err}",
-            ))),
-        }
+        let url = Url::parse(&url_string).map_err(|err| {
+            DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}"))
+        })?;
+        Self::reject_ip_host(&url)?;
+        Ok(url)
     }
 
     /// Returns the URL for a whois.vp file location
@@ -382,12 +405,11 @@ impl WebVHURL {
             url_string.push_str("whois.vp");
         }
 
-        match Url::parse(&url_string) {
-            Ok(url) => Ok(url),
-            Err(err) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
-                "Invalid URL: {err}",
-            ))),
-        }
+        let url = Url::parse(&url_string).map_err(|err| {
+            DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}"))
+        })?;
+        Self::reject_ip_host(&url)?;
+        Ok(url)
     }
 
     /// Returns the URL for the #files service URL
@@ -402,12 +424,11 @@ impl WebVHURL {
             url_string.push_str(&self.path);
         }
 
-        match Url::parse(&url_string) {
-            Ok(url) => Ok(url),
-            Err(err) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
-                "Invalid URL: {err}",
-            ))),
-        }
+        let url = Url::parse(&url_string).map_err(|err| {
+            DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}"))
+        })?;
+        Self::reject_ip_host(&url)?;
+        Ok(url)
     }
 }
 
@@ -539,6 +560,33 @@ mod tests {
         // Previously slipped past reject_ip_address() because the unparsed
         // `%3a8080` suffix stayed glued to the host.
         assert!(WebVHURL::parse_did_url("did:webvh:scid:127.0.0.1%3a8080").is_err());
+    }
+
+    /// Regression: `reject_ip_address()` runs on the raw, still-percent-
+    /// encoded domain segment, so `127%2E0%2E0%2E1` is not an `IpAddr` and
+    /// passes — but `Url::parse` then decodes it to `127.0.0.1` and the
+    /// resolver would fetch from localhost. `get_http_url` now re-checks
+    /// the host *after* parse so the encoding the attacker chooses no
+    /// longer matters.
+    #[test]
+    fn url_rejects_pct_encoded_ip_host() {
+        for did in [
+            "did:webvh:scid:127%2E0%2E0%2E1",
+            "did:webvh:scid:127%2e0%2e0%2e1",
+            "did:webvh:scid:169%2E254%2E169%2E254",
+            "did:webvh:scid:127%2E0%2E0%2E1%3A8080",
+        ] {
+            let parsed = WebVHURL::parse_did_url(did).expect("parse stage doesn't decode");
+            let err = parsed
+                .get_http_url(None)
+                .expect_err("post-parse host check must reject the decoded IP");
+            assert!(
+                err.to_string().contains("IP addresses are not allowed"),
+                "{did} -> {err}"
+            );
+            assert!(parsed.get_http_whois_url().is_err());
+            assert!(parsed.get_http_files_url().is_err());
+        }
     }
 
     #[test]
