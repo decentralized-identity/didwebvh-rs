@@ -132,8 +132,17 @@ impl WebVHURL {
             // These segments are joined with '/' into the HTTP path that the
             // resolver fetches. Reject anything that would let a crafted DID
             // escape its directory (`..`), collapse to the current dir (`.`),
-            // produce `//` (empty), or smuggle an extra separator (`/`).
-            if part.is_empty() || *part == "." || *part == ".." || part.contains('/') {
+            // produce `//` (empty), or smuggle an extra separator (`/`, `\`).
+            // The check runs on the *percent-decoded* segment because the raw
+            // segment is later passed through Url::parse, which decodes and
+            // normalises — so `%2E%2E` would otherwise survive the literal
+            // `..` check here and then collapse into a parent-dir reference.
+            let decoded = percent_encoding::percent_decode_str(part).decode_utf8_lossy();
+            if decoded.is_empty()
+                || decoded == "."
+                || decoded == ".."
+                || decoded.contains(['/', '\\'])
+            {
                 return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
                     "Invalid URL: path segment ({part:?}) is not allowed",
                 )));
@@ -622,6 +631,27 @@ mod tests {
         assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:..:admin").is_err());
         assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:a:..").is_err());
         assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:.").is_err());
+    }
+
+    /// Regression: the traversal check used to compare the *raw* segment
+    /// against `..` / `.` / `/`, so `%2E%2E` passed — and then Url::parse
+    /// decoded and normalised it (`/%2E%2E/x/` → `/x/`), defeating the
+    /// check entirely. The check now percent-decodes first.
+    #[test]
+    fn url_rejects_pct_encoded_path_traversal() {
+        for did in [
+            "did:webvh:scid:example.com:%2E%2E:admin",
+            "did:webvh:scid:example.com:%2e%2e:admin",
+            "did:webvh:scid:example.com:.%2E",
+            "did:webvh:scid:example.com:%2E",
+            "did:webvh:scid:example.com:a%2Fb",
+            "did:webvh:scid:example.com:a%5Cb",
+        ] {
+            assert!(
+                WebVHURL::parse_did_url(did).is_err(),
+                "{did} should be rejected"
+            );
+        }
     }
 
     #[test]

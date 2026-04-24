@@ -1462,6 +1462,7 @@ dependencies = [
  "dialoguer",
  "format_num",
  "getrandom 0.4.2",
+ "percent-encoding",
  "proptest",
  "rand 0.10.1",
  "reqwest 0.13.3",

@@ -61,6 +61,7 @@ ssi = { version = "0.16", features = ["secp384r1"], optional = true }
 thiserror = "2.0"
 tokio = { version = "1" }
 tracing = { version = "0.1" }
+percent-encoding = "2.3"
 url = "2.5"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
