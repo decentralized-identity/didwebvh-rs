@@ -21,9 +21,12 @@
 
 use crate::{
     DIDWebVHError,
+    log_entry::{PublicKey, enforce_witness_proof_shape},
     log_entry_state::LogEntryState,
     witness::{WitnessVerifyOptions, proofs::WitnessProofCollection},
 };
+use affinidi_data_integrity::VerifyOptions;
+use serde_json::json;
 use tracing::{debug, warn};
 
 impl WitnessProofCollection {
@@ -58,7 +61,8 @@ impl WitnessProofCollection {
         let mut valid_proofs = 0;
         for w in witness_nodes {
             let did_key_vm = w.as_did_key();
-            let Some((_, oldest_id, proof)) = self.witness_version.get(&did_key_vm) else {
+            let Some((proof_version_id, oldest_id, proof)) = self.witness_version.get(&did_key_vm)
+            else {
                 // No proof available for this witness, threshold will catch if too few proofs
                 debug!("No Witness proofs exist for witness ({})", w.id);
                 continue;
@@ -84,13 +88,32 @@ impl WitnessProofCollection {
                 oldest_id, version_number
             );
             if oldest_id > &version_number {
-                // This proof is older than the current LogEntry, skip it
+                // This proof is for a *later* published LogEntry. It transitively
+                // attests this earlier entry, but we cannot assume it will be
+                // verified later: if the witness was rotated out before that
+                // version, no entry will ever check it. Verify the signature
+                // here against the versionId the proof actually covers before
+                // counting it toward the threshold.
+                enforce_witness_proof_shape(proof, options)?;
+                proof
+                    .verify_with_public_key(
+                        &json!({"versionId": &**proof_version_id}),
+                        proof.get_public_key_bytes()?.as_slice(),
+                        VerifyOptions::new(),
+                    )
+                    .map_err(|e| {
+                        DIDWebVHError::WitnessProofError(format!(
+                            "LogEntry ({}): Witness proof for later version ({}) failed verification: {}",
+                            log_entry.get_version_id(),
+                            proof_version_id,
+                            e
+                        ))
+                    })?;
                 debug!(
-                    "LogEntry ({}): Skipping witness proof from {} (oldest: {oldest_id})",
+                    "LogEntry ({}): later witness proof from {} (for {oldest_id}) verified ok",
                     log_entry.get_version_id(),
                     w.id,
                 );
-                // Still counts as a valid proof
                 valid_proofs += 1;
                 continue;
             } else {
@@ -320,16 +343,55 @@ mod tests {
     /// A proof attesting to a later (but still published) version should still satisfy
     /// the witness requirement for earlier entries, supporting efficient batched
     /// witnessing.
+    #[tokio::test]
+    async fn test_witness_proof_older_than_current_counts() {
+        let mut proofs = WitnessProofCollection::default();
+        let secret = affinidi_secrets_resolver::secrets::Secret::generate_ed25519(None, None);
+        let pk = secret.get_public_keymultibase().unwrap();
+        let mut witness_secret = secret.clone();
+        witness_secret.id = format!("did:key:{pk}#{pk}");
+
+        // A genuine signature over version 3 — must verify when counted toward version 1.
+        let signed_proof = DataIntegrityProof::sign(
+            &json!({"versionId": "3-hash"}),
+            &witness_secret,
+            SignOptions::new(),
+        )
+        .await
+        .unwrap();
+        proofs.add_proof("3-hash", &signed_proof, false).unwrap();
+
+        let witnesses = Witnesses::Value {
+            threshold: 1,
+            witnesses: vec![Witness {
+                id: Multibase::new(format!("did:key:{pk}")),
+            }],
+        };
+        let entry = make_witnessed_entry("1-abcd", witnesses);
+        // highest_version_number=5, proof is for version 3
+        // oldest_id(3) <= highest(5) but oldest_id(3) > version_number(1) → verified, then counted
+        proofs
+            .validate_log_entry(&entry, 5, &WitnessVerifyOptions::new())
+            .expect("Older proof should still count as valid");
+    }
+
+    /// Tests that a *forged* witness proof for a later-but-published version is
+    /// rejected and does not count toward the threshold.
+    ///
+    /// This is the security regression test for the threshold bypass: previously,
+    /// a proof for version N > current was counted without signature verification,
+    /// on the assumption it would be checked when version N was processed. But if
+    /// the witness had been rotated out before version N, the forged proof was
+    /// never verified anywhere.
     #[test]
-    fn test_witness_proof_older_than_current_counts() {
+    fn test_witness_proof_later_version_forged_rejected() {
         use crate::test_utils::make_test_proof;
         let mut proofs = WitnessProofCollection::default();
         let raw_key = "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6";
         let witness_id = format!("did:key:{raw_key}");
         let vm = format!("{witness_id}#{raw_key}");
+        // Unsigned/garbage proof claiming to attest version 3.
         let proof = make_test_proof(&vm);
-        // Add proof for version 3 — version_number is 1, oldest_id (3) > version_number (1)
-        // But oldest_id (3) <= highest_version_number (5) → still counts as valid
         proofs.add_proof("3-hash", &proof, false).unwrap();
 
         let witnesses = Witnesses::Value {
@@ -339,11 +401,11 @@ mod tests {
             }],
         };
         let entry = make_witnessed_entry("1-abcd", witnesses);
-        // highest_version_number=5, proof is for version 3
-        // oldest_id(3) <= highest(5) but oldest_id(3) > version_number(1) → counts as valid
-        proofs
+        // highest=5, proof claims version 3 (>1, ≤5): must be verified, and verification must fail.
+        let err = proofs
             .validate_log_entry(&entry, 5, &WitnessVerifyOptions::new())
-            .expect("Older proof should still count as valid");
+            .expect_err("forged later-version proof must not satisfy threshold");
+        assert!(err.to_string().contains("Witness"));
     }
 
     /// Tests the happy path where a valid, cryptographically signed witness proof
