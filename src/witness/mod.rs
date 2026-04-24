@@ -130,6 +130,20 @@ impl Witnesses {
                         threshold
                     )));
                 }
+                // Reject duplicate witness IDs. validate_log_entry() iterates the
+                // configured witness list and counts one match per entry, so a list
+                // like [W1, W1, W1] with threshold 3 would let a single proof from
+                // W1 satisfy the threshold — defeating the whole point of requiring
+                // multiple independent witnesses.
+                let mut seen = std::collections::HashSet::with_capacity(witnesses.len());
+                for w in witnesses {
+                    if !seen.insert(w.id.as_str()) {
+                        return Err(DIDWebVHError::ValidationError(format!(
+                            "Witness ({}) appears more than once in the witness list",
+                            w.id
+                        )));
+                    }
+                }
             }
             _ => {
                 return Err(DIDWebVHError::ValidationError(
@@ -286,6 +300,26 @@ mod tests {
         };
         let err = w.validate().unwrap_err();
         assert!(err.to_string().contains("less than the threshold"));
+    }
+
+    /// Tests that a witness list containing the same witness ID more than once is
+    /// rejected. Duplicates would otherwise let a single witness's proof be counted
+    /// multiple times toward the threshold during validation.
+    #[test]
+    fn test_validate_duplicate_witnesses_error() {
+        let w = Witnesses::Value {
+            threshold: 2,
+            witnesses: vec![
+                Witness {
+                    id: Multibase::new("w1"),
+                },
+                Witness {
+                    id: Multibase::new("w1"),
+                },
+            ],
+        };
+        let err = w.validate().unwrap_err();
+        assert!(err.to_string().contains("more than once"));
     }
 
     /// Tests that a valid witness configuration passes validation successfully.
