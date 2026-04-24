@@ -459,6 +459,7 @@ impl DIDWebVHState {
 
                     let client = reqwest::ClientBuilder::new()
                         .timeout(network_timeout)
+                        .redirect(reqwest::redirect::Policy::none())
                         .build()
                         .map_err(|e| DIDWebVHError::NetworkError {
                             url: String::new(),
