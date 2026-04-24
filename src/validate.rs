@@ -539,6 +539,53 @@ mod tests {
         assert!(err.to_string().contains("past the deactivation entry"));
     }
 
+    /// Regression: `verify_scid()` proved `parameters.scid` was the genesis
+    /// self-hash but never checked that the SCID embedded in the DID
+    /// document's `id` was that same value. An attacker could publish a
+    /// genesis with `state.id = "did:webvh:<anything>:host"` and
+    /// `parameters.scid = <real-hash>` — `verify_scid` passed, and a
+    /// resolver requesting `did:webvh:<anything>:host` would match it
+    /// against `state["id"]` and accept. The SCID in the DID the user typed
+    /// then has zero cryptographic binding to the log.
+    ///
+    /// `create_log_entry` builds exactly this when the supplied document's
+    /// `id` uses a literal string instead of the `{SCID}` placeholder: the
+    /// `{SCID}` → real-hash substitution only touches `parameters.scid`.
+    #[tokio::test]
+    async fn test_validate_rejects_scid_mismatch_between_params_and_doc_id() {
+        let key = generate_signing_key();
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
+            portable: Some(false),
+            ..Default::default()
+        };
+        // No `{SCID}` placeholder — the doc id keeps this fake SCID while
+        // parameters.scid is set to the real genesis hash.
+        let doc = did_doc_with_key(
+            "did:webvh:QmFakeScidNotTheRealHash:localhost%3A8000",
+            &key,
+        );
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(None, &doc, &params, &key)
+            .await
+            .unwrap();
+        for entry in &mut state.log_entries {
+            entry.validation_status = LogEntryValidationStatus::NotValidated;
+        }
+
+        let err = state
+            .validate()
+            .expect_err("doc-id SCID must match the verified parameters.scid");
+        assert!(
+            err.to_string().contains("does not match parameters.scid"),
+            "got: {err}"
+        );
+    }
+
     /// Tests that an invalid first log entry produces an immediate error.
     ///
     /// If the very first entry in the log is malformed (e.g., missing a proof),

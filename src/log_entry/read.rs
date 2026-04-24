@@ -367,6 +367,28 @@ impl LogEntry {
             )));
         }
 
+        // The check above proves `parameters.scid` is the genesis self-hash.
+        // It does NOT prove the SCID embedded in the DID document's `id` is
+        // that same value — `state["id"]` is attacker-authored and the
+        // string-replace above only targets `parameters.scid`. Without this
+        // check an attacker can set `state.id = "did:webvh:<anything>:host"`
+        // and `parameters.scid = <real-hash>`; verify_scid passes, and a
+        // resolver requesting `did:webvh:<anything>:host` matches it against
+        // `state["id"]` and accepts. The "self-certifying" in SCID would then
+        // certify nothing about the DID the user actually resolved.
+        let doc_scid = self
+            .get_state()
+            .get("id")
+            .and_then(|v| v.as_str())
+            .and_then(|id| id.strip_prefix("did:webvh:"))
+            .and_then(|rest| rest.split_once(':'))
+            .map(|(s, _)| s);
+        if doc_scid != Some(scid.as_str()) {
+            return Err(DIDWebVHError::ValidationError(format!(
+                "DID document id SCID ({doc_scid:?}) does not match parameters.scid ({scid})",
+            )));
+        }
+
         Ok(())
     }
 }
