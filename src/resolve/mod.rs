@@ -391,6 +391,23 @@ impl DIDWebVHState {
     /// * `did` — The DID to resolve (may include query parameters like `?versionId=...`).
     /// * `options` — Network options (timeout, eager witness download, max response size).
     ///   Use [`ResolveOptions::default()`] for sensible defaults (10 s timeout, 200 KB limit).
+    ///
+    /// # Returned `LogEntry` vs. resolution-time DID Document
+    ///
+    /// The returned [`LogEntry`] carries `state` exactly as it was signed and
+    /// hashed — i.e. **without** the implicit `#files` / `#whois` services. To
+    /// obtain the resolution-time DID Document with the implicit services
+    /// injected (matching the `didDocument` shape returned by
+    /// `didwebvh-ts`'s `resolveDIDFromLog`), call
+    /// [`crate::log_entry::LogEntryMethods::get_did_document`] on the
+    /// returned entry. That method clones `state` and appends the
+    /// implicit services on the clone, so the LogEntry's stored `state` is
+    /// never mutated and the hash chain remains intact.
+    ///
+    /// **Never** feed the document returned by `get_did_document()` back into
+    /// a new LogEntry's `state` — doing so would bake the implicit services
+    /// into the canonical bytes and break interop with every other
+    /// implementation.
     pub async fn resolve(
         &mut self,
         did: &str,

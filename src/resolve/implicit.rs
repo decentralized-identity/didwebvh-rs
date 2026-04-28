@@ -317,6 +317,67 @@ mod tests {
         );
     }
 
+    /// Path-bearing DID: the `#files` `serviceEndpoint` MUST be the host plus
+    /// the colon-delimited path joined with `/`, with no trailing slash. The
+    /// `#whois` endpoint MUST be `<#files>/whois.vp`. Pinned against the
+    /// didwebvh-ts reference output (`getBaseUrl`) so the two implementations
+    /// emit byte-identical resolved documents for path-bearing DIDs.
+    #[test]
+    fn test_path_bearing_did_files_and_whois_endpoints() {
+        let did = "did:webvh:scid123:example.com:foo:bar";
+        let mut state = json!({"id": did});
+        update_implicit_services(None, &mut state, did).unwrap();
+        let services = state["service"].as_array().unwrap();
+        assert_eq!(services[0]["id"].as_str(), Some("#files"));
+        assert_eq!(
+            services[0]["serviceEndpoint"].as_str(),
+            Some("https://example.com/foo/bar")
+        );
+        assert_eq!(services[1]["id"].as_str(), Some("#whois"));
+        assert_eq!(
+            services[1]["serviceEndpoint"].as_str(),
+            Some("https://example.com/foo/bar/whois.vp")
+        );
+    }
+
+    /// Port-only DID (no path): `%3A` between host and port decodes to `:`.
+    /// `#files` is `https://host:port` (no trailing slash); `#whois` appends
+    /// `/whois.vp`. Matches didwebvh-ts `getBaseUrl`.
+    #[test]
+    fn test_port_only_did_files_and_whois_endpoints() {
+        let did = "did:webvh:scid123:example.com%3A8080";
+        let mut state = json!({"id": did});
+        update_implicit_services(None, &mut state, did).unwrap();
+        let services = state["service"].as_array().unwrap();
+        assert_eq!(
+            services[0]["serviceEndpoint"].as_str(),
+            Some("https://example.com:8080")
+        );
+        assert_eq!(
+            services[1]["serviceEndpoint"].as_str(),
+            Some("https://example.com:8080/whois.vp")
+        );
+    }
+
+    /// Port-and-path DID: combines the previous two cases. Matches
+    /// didwebvh-ts `getBaseUrl`. Most likely surface for a future divergence,
+    /// so worth pinning explicitly.
+    #[test]
+    fn test_port_and_path_did_files_and_whois_endpoints() {
+        let did = "did:webvh:scid123:example.com%3A8080:foo:bar";
+        let mut state = json!({"id": did});
+        update_implicit_services(None, &mut state, did).unwrap();
+        let services = state["service"].as_array().unwrap();
+        assert_eq!(
+            services[0]["serviceEndpoint"].as_str(),
+            Some("https://example.com:8080/foo/bar")
+        );
+        assert_eq!(
+            services[1]["serviceEndpoint"].as_str(),
+            Some("https://example.com:8080/foo/bar/whois.vp")
+        );
+    }
+
     /// User-supplied services keep their original order; implicits are
     /// appended after them. Order is part of the JCS canonical form, so this
     /// test pins down the expected layout.
