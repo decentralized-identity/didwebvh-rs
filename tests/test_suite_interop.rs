@@ -13,7 +13,14 @@ use serde_json::Value;
 
 const ROOT: &str = "tests/test_vectors/test_suite";
 
-async fn run(scenario: &str) {
+/// Per-scenario runner.
+///
+/// `assert_did_document` opts the scenario into a deep equality check of the
+/// resolved DID Document against `resolutionResult.json#/didDocument`. This
+/// catches divergences in implicit-service injection (`#files`/`#whois`),
+/// service ordering, and field shape that the versionId-only check would
+/// miss. Off by default while we ramp up parity scenario-by-scenario.
+async fn run(scenario: &str, assert_did_document: bool) {
     let dir = format!("{ROOT}/{scenario}");
     let jsonl = std::fs::read_to_string(format!("{dir}/did.jsonl"))
         .unwrap_or_else(|e| panic!("read did.jsonl for {scenario}: {e}"));
@@ -62,71 +69,95 @@ async fn run(scenario: &str) {
         meta.version_number, expected_version_number,
         "{scenario}: metadata versionNumber mismatch"
     );
+
+    if assert_did_document {
+        let resolved_doc = entry
+            .get_did_document()
+            .unwrap_or_else(|e| panic!("{scenario}: get_did_document failed: {e:?}"));
+        let expected_doc = expected
+            .pointer("/didDocument")
+            .cloned()
+            .unwrap_or_else(|| panic!("{scenario}: expected.didDocument missing"));
+        assert_eq!(
+            resolved_doc,
+            expected_doc,
+            "{scenario}: resolved DID Document does not match expected.\n\
+             resolved = {resolved}\n\
+             expected = {expected}",
+            resolved = serde_json::to_string_pretty(&resolved_doc).unwrap(),
+            expected = serde_json::to_string_pretty(&expected_doc).unwrap(),
+        );
+    }
 }
+
+// Most scenarios still only check `versionId` while DID-Document parity ramps
+// up. The `services` scenario opts in to the deeper check — it exercises both
+// user-supplied services and implicit `#files`/`#whois` injection, which is
+// the most likely place for a regression to hide.
 
 #[tokio::test]
 async fn basic_create() {
-    run("basic-create").await;
+    run("basic-create", true).await;
 }
 
 #[tokio::test]
 async fn basic_update() {
-    run("basic-update").await;
+    run("basic-update", true).await;
 }
 
 #[tokio::test]
 async fn key_rotation() {
-    run("key-rotation").await;
+    run("key-rotation", true).await;
 }
 
 #[tokio::test]
 async fn multi_update() {
-    run("multi-update").await;
+    run("multi-update", false).await;
 }
 
 #[tokio::test]
 async fn multiple_update_keys() {
-    run("multiple-update-keys").await;
+    run("multiple-update-keys", false).await;
 }
 
 #[tokio::test]
 async fn deactivate() {
-    run("deactivate").await;
+    run("deactivate", true).await;
 }
 
 #[tokio::test]
 async fn services() {
-    run("services").await;
+    run("services", true).await;
 }
 
 #[tokio::test]
 #[ignore = "witness proof signature on entry 2 fails verification; \
             out of v0.5.1 scope, tracked as follow-up (tasks/todo.md)"]
 async fn witness_update() {
-    run("witness-update").await;
+    run("witness-update", false).await;
 }
 
 #[tokio::test]
 async fn witness_threshold() {
-    run("witness-threshold").await;
+    run("witness-threshold", true).await;
 }
 
 #[tokio::test]
 async fn portable() {
-    run("portable").await;
+    run("portable", false).await;
 }
 
 #[tokio::test]
 async fn portable_move() {
-    run("portable-move").await;
+    run("portable-move", false).await;
 }
 
 #[tokio::test]
 async fn pre_rotation() {
-    run("pre-rotation").await;
+    run("pre-rotation", false).await;
 }
 
 #[tokio::test]
 async fn pre_rotation_consume() {
-    run("pre-rotation-consume").await;
+    run("pre-rotation-consume", false).await;
 }

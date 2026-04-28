@@ -6,13 +6,45 @@
 //! - **`#whois`** — a `LinkedVerifiablePresentation` service pointing to `whois.vp`
 //!
 //! This module checks a resolved DID Document and appends any missing implicit
-//! services. Existing services with matching `#files` or `#whois` fragment IDs
-//! are preserved (not duplicated).
+//! services. Existing services that already supply a `#files`/`#whois` fragment
+//! (either as the relative form `"#whois"` or the absolute form
+//! `"<did>#whois"`) are preserved and not duplicated.
+//!
+//! ## Format
+//!
+//! Both implicit services are emitted with **relative-fragment IDs** (`"#files"`
+//! / `"#whois"`) and in **`#files` then `#whois` order**, matching the
+//! didwebvh-test-suite reference output (and the didwebvh-ts reference
+//! implementation). The `#files` `serviceEndpoint` is the DID's HTTP base URL
+//! with any trailing `/` removed.
+//!
+//! ## Hash safety
+//!
+//! These services are **never** folded back into the LogEntry's stored `state`.
+//! [`update_implicit_services`] mutates the *caller's* `new_state` `Value`,
+//! which is constructed fresh by [`get_did_document`]/[`to_web_did`] from a
+//! clone of `state`. The signed/hashed bytes are taken from `state` directly,
+//! so implicit injection cannot affect the entry hash, the SCID, or any
+//! `eddsa-jcs-2022` proof.
+//!
+//! [`get_did_document`]: crate::log_entry::LogEntryMethods::get_did_document
+//! [`to_web_did`]: crate::DIDWebVHState::to_web_did
 
 use crate::{DIDWebVHError, ensure_object_mut, url::WebVHURL};
 use serde_json::{Value, json};
 
-// Checks and adds implicit services if not present (#files and #whois)
+/// Checks and adds implicit services if not present (`#files` and `#whois`).
+///
+/// `services` is the existing `service` array from the source DID Document (or
+/// `None` if absent). `new_state` is the *destination* document — typically a
+/// clone of the source state — into which the merged service array is written.
+///
+/// Implicit services are appended in spec order (`#files` first, then
+/// `#whois`) **after** any user-supplied services, preserving the user's
+/// service ordering. Because JCS does not reorder JSON arrays (RFC 8785
+/// §3.2.4), array order is part of the canonical form — but this function only
+/// runs on the resolution-time `Value`, never on the LogEntry's `state`, so
+/// the entry hash and proof bytes are unaffected.
 pub(crate) fn update_implicit_services(
     services: Option<&Value>,
     new_state: &mut Value,
@@ -21,26 +53,32 @@ pub(crate) fn update_implicit_services(
     let url = WebVHURL::parse_did_url(did_id)?;
 
     let Some(services) = services else {
-        // There are no services, add the implicit services
+        // There are no services, add the implicit services in spec order
         ensure_object_mut(new_state)?.insert(
             "service".to_string(),
-            Value::Array(vec![
-                get_service_whois(did_id, &url)?,
-                get_service_files(did_id, &url)?,
-            ]),
+            Value::Array(vec![get_service_files(&url)?, get_service_whois(&url)?]),
         );
         return Ok(());
     };
 
     if let Some(services) = services.as_array() {
+        let absolute_whois = format!("{did_id}#whois");
+        let absolute_files = format!("{did_id}#files");
+
         let mut has_whois = false;
         let mut has_files = false;
 
         for service in services {
             if let Some(id) = service.get("id").and_then(|v| v.as_str()) {
-                if id.ends_with("#whois") {
+                // Strict match: only the relative form `#whois`/`#files` or the
+                // absolute form `<did>#whois`/`<did>#files` count as the
+                // implicit service. Any other ID that happens to end in
+                // `#whois`/`#files` (e.g. a foreign DID or an unrelated URL)
+                // is treated as a user-defined service so we still inject the
+                // implicit one for *this* DID.
+                if id == "#whois" || id == absolute_whois {
                     has_whois = true;
-                } else if id.ends_with("#files") {
+                } else if id == "#files" || id == absolute_files {
                     has_files = true;
                 }
             }
@@ -48,11 +86,11 @@ pub(crate) fn update_implicit_services(
 
         let mut new_services = services.clone();
 
-        if !has_whois {
-            new_services.push(get_service_whois(did_id, &url)?);
-        }
         if !has_files {
-            new_services.push(get_service_files(did_id, &url)?);
+            new_services.push(get_service_files(&url)?);
+        }
+        if !has_whois {
+            new_services.push(get_service_whois(&url)?);
         }
 
         ensure_object_mut(new_state)?.insert("service".to_string(), Value::Array(new_services));
@@ -65,24 +103,30 @@ pub(crate) fn update_implicit_services(
     Ok(())
 }
 
-/// id: did:web ID
-/// url: did:webvh URL
-fn get_service_whois(id: &str, url: &WebVHURL) -> Result<Value, DIDWebVHError> {
+/// `#whois` — `LinkedVerifiablePresentation` service pointing at the DID's
+/// `whois.vp`. ID is emitted as a relative fragment to match the
+/// didwebvh-test-suite reference output.
+fn get_service_whois(url: &WebVHURL) -> Result<Value, DIDWebVHError> {
     Ok(json!({
         "@context": "https://identity.foundation/linked-vp/contexts/v1",
-        "id": ([id, "#whois"].concat()),
+        "id": "#whois",
         "type": "LinkedVerifiablePresentation",
         "serviceEndpoint": url.get_http_whois_url()?
     }))
 }
 
-/// id: did:web ID
-/// url: did:webvh URL
-fn get_service_files(id: &str, url: &WebVHURL) -> Result<Value, DIDWebVHError> {
+/// `#files` — `relativeRef` service pointing at the DID's HTTP base URL.
+///
+/// The base URL is emitted **without** a trailing `/`. `Url::to_string()`
+/// always appends `/` to a host-only URL, but the test-suite reference (and
+/// didwebvh-ts) emit `https://example.com`, not `https://example.com/`.
+fn get_service_files(url: &WebVHURL) -> Result<Value, DIDWebVHError> {
+    let endpoint = url.get_http_files_url()?.to_string();
+    let endpoint = endpoint.strip_suffix('/').unwrap_or(&endpoint);
     Ok(json!({
-        "id": ([id,"#files"].concat()),
+        "id": "#files",
         "type": "relativeRef",
-        "serviceEndpoint": url.get_http_files_url()?
+        "serviceEndpoint": endpoint
     }))
 }
 
@@ -92,20 +136,17 @@ mod tests {
     use serde_json::json;
 
     /// Tests that when a DID Document has no services defined, both implicit
-    /// services (#whois and #files) are automatically added.
-    /// Expected: The resulting document should contain exactly 2 services.
-    /// This matters because the WebVH spec requires these implicit services
-    /// for DID discoverability (whois) and file access (files).
+    /// services are automatically added in spec order: `#files` first, then
+    /// `#whois`. IDs are emitted as relative fragments.
     #[test]
     fn test_no_services_adds_both() {
         let mut state = json!({"id": "did:webvh:scid123:example.com"});
         update_implicit_services(None, &mut state, "did:webvh:scid123:example.com").unwrap();
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 2);
-        // Check one ends with #whois and one with #files
-        let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();
-        assert!(ids.iter().any(|id| id.ends_with("#whois")));
-        assert!(ids.iter().any(|id| id.ends_with("#files")));
+        // Order matters for JCS: #files MUST come before #whois.
+        assert_eq!(services[0]["id"].as_str(), Some("#files"));
+        assert_eq!(services[1]["id"].as_str(), Some("#whois"));
     }
 
     /// Tests that when a DID Document has existing custom services but is missing
@@ -164,11 +205,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Tests that when a DID Document has only the #whois service, the missing
-    /// #files service is added while preserving the existing #whois service.
-    /// Expected: The resulting document has 2 services, including one ending with #files.
-    /// This matters because partial implicit service coverage must be detected and
-    /// completed to ensure full spec compliance during resolution.
+    /// When only `#whois` exists (absolute form), the missing `#files` is
+    /// appended. The existing service is preserved unchanged.
     #[test]
     fn test_only_whois_adds_files() {
         let existing = json!([
@@ -185,14 +223,11 @@ mod tests {
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 2);
         let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();
-        assert!(ids.iter().any(|id| id.ends_with("#files")));
+        assert!(ids.contains(&"#files"));
     }
 
-    /// Tests that when a DID Document has only the #files service, the missing
-    /// #whois service is added while preserving the existing #files service.
-    /// Expected: The resulting document has 2 services, including one ending with #whois.
-    /// This matters because the #whois service is required for linked verifiable
-    /// presentation discovery, and its absence must be corrected during resolution.
+    /// When only `#files` exists (absolute form), the missing `#whois` is
+    /// appended. The existing service is preserved unchanged.
     #[test]
     fn test_only_files_adds_whois() {
         let existing = json!([
@@ -209,6 +244,101 @@ mod tests {
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 2);
         let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();
-        assert!(ids.iter().any(|id| id.ends_with("#whois")));
+        assert!(ids.contains(&"#whois"));
+    }
+
+    /// Both relative-form (`"#whois"`) and absolute-form
+    /// (`"<did>#whois"`) IDs satisfy the "already present" check, so
+    /// implicit injection is skipped for either.
+    #[test]
+    fn test_relative_and_absolute_forms_both_recognised() {
+        for whois_id in ["#whois", "did:webvh:scid123:example.com#whois"] {
+            for files_id in ["#files", "did:webvh:scid123:example.com#files"] {
+                let existing = json!([
+                    {"id": whois_id, "type": "LinkedVerifiablePresentation", "serviceEndpoint": "x"},
+                    {"id": files_id, "type": "relativeRef", "serviceEndpoint": "y"}
+                ]);
+                let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
+                let services_ref = state.get("service").cloned();
+                update_implicit_services(
+                    services_ref.as_ref(),
+                    &mut state,
+                    "did:webvh:scid123:example.com",
+                )
+                .unwrap();
+                let services = state["service"].as_array().unwrap();
+                assert_eq!(
+                    services.len(),
+                    2,
+                    "no injection expected for ({whois_id}, {files_id})"
+                );
+            }
+        }
+    }
+
+    /// Strict matching: a service with an `id` that merely *ends with*
+    /// `#whois` (e.g. a foreign DID's whois, or an unrelated URL fragment) is
+    /// **not** treated as this DID's implicit service. The implicit service is
+    /// still injected. This guards against the previous `ends_with` check
+    /// silently suppressing implicit injection.
+    #[test]
+    fn test_unrelated_whois_suffix_does_not_suppress_injection() {
+        let existing = json!([
+            {"id": "did:webvh:OTHER:example.com#whois", "type": "LinkedVerifiablePresentation", "serviceEndpoint": "x"},
+            {"id": "https://elsewhere.example/#files", "type": "relativeRef", "serviceEndpoint": "y"}
+        ]);
+        let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
+        let services_ref = state.get("service").cloned();
+        update_implicit_services(
+            services_ref.as_ref(),
+            &mut state,
+            "did:webvh:scid123:example.com",
+        )
+        .unwrap();
+        let services = state["service"].as_array().unwrap();
+        // 2 user services + 2 implicit services = 4
+        assert_eq!(services.len(), 4);
+        // Implicits are appended at the end in #files, #whois order.
+        assert_eq!(services[2]["id"].as_str(), Some("#files"));
+        assert_eq!(services[3]["id"].as_str(), Some("#whois"));
+    }
+
+    /// `#files` `serviceEndpoint` must NOT have a trailing slash for a
+    /// host-only DID — matches the didwebvh-test-suite reference output.
+    #[test]
+    fn test_files_endpoint_has_no_trailing_slash() {
+        let mut state = json!({"id": "did:webvh:scid123:example.com"});
+        update_implicit_services(None, &mut state, "did:webvh:scid123:example.com").unwrap();
+        let files = &state["service"][0];
+        assert_eq!(files["id"].as_str(), Some("#files"));
+        assert_eq!(
+            files["serviceEndpoint"].as_str(),
+            Some("https://example.com")
+        );
+    }
+
+    /// User-supplied services keep their original order; implicits are
+    /// appended after them. Order is part of the JCS canonical form, so this
+    /// test pins down the expected layout.
+    #[test]
+    fn test_user_services_preserved_implicits_appended() {
+        let existing = json!([
+            {"id": "#linked-domain", "type": "LinkedDomains", "serviceEndpoint": "https://example.com"},
+            {"id": "#messaging", "type": "DIDCommMessaging", "serviceEndpoint": "https://example.com/dc"}
+        ]);
+        let mut state = json!({"id": "did:webvh:scid123:example.com", "service": existing});
+        let services_ref = state.get("service").cloned();
+        update_implicit_services(
+            services_ref.as_ref(),
+            &mut state,
+            "did:webvh:scid123:example.com",
+        )
+        .unwrap();
+        let services = state["service"].as_array().unwrap();
+        assert_eq!(services.len(), 4);
+        assert_eq!(services[0]["id"].as_str(), Some("#linked-domain"));
+        assert_eq!(services[1]["id"].as_str(), Some("#messaging"));
+        assert_eq!(services[2]["id"].as_str(), Some("#files"));
+        assert_eq!(services[3]["id"].as_str(), Some("#whois"));
     }
 }

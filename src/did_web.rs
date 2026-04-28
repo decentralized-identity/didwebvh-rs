@@ -195,7 +195,7 @@ mod tests {
     use serde_json::{Value, json};
 
     // Dummy struct to help with testing DID Services
-    #[derive(Deserialize, PartialEq)]
+    #[derive(Debug, Deserialize, PartialEq)]
     struct Service {
         pub id: String,
         #[serde(rename = "serviceEndpoint")]
@@ -322,6 +322,9 @@ mod tests {
         assert!(also_known_as.contains(&"did:webvh:acme1234:affinidi.com".to_string()));
     }
 
+    /// Implicit services are emitted with relative-fragment IDs (`#files`,
+    /// `#whois`) and the `#files` `serviceEndpoint` has no trailing slash.
+    /// Matches the didwebvh-test-suite reference output and didwebvh-ts.
     #[test]
     fn test_services_none() {
         let old_state = json!({"id": "did:webvh:acme1234:affinidi.com"});
@@ -337,14 +340,21 @@ mod tests {
         .expect("Couldn't process service attribute");
 
         assert_eq!(services.len(), 2);
-        assert!(services.contains(&Service {
-            id: "did:web:affinidi.com#files".to_string(),
-            service_endpoint: "https://affinidi.com/".to_string()
-        }));
-        assert!(services.contains(&Service {
-            id: "did:web:affinidi.com#whois".to_string(),
-            service_endpoint: "https://affinidi.com/whois.vp".to_string()
-        }));
+        // Order matters: #files MUST come before #whois.
+        assert_eq!(
+            services[0],
+            Service {
+                id: "#files".to_string(),
+                service_endpoint: "https://affinidi.com".to_string(),
+            }
+        );
+        assert_eq!(
+            services[1],
+            Service {
+                id: "#whois".to_string(),
+                service_endpoint: "https://affinidi.com/whois.vp".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -375,6 +385,9 @@ mod tests {
         assert_eq!(replace_webvh_prefix(input), input);
     }
 
+    /// Path-bearing DID: implicit services still use relative IDs, and the
+    /// `#files` endpoint drops its trailing slash to match the test-suite
+    /// convention.
     #[test]
     fn test_services_none_custom_path() {
         let old_state = json!({"id": "did:webvh:acme1234:affinidi.com:custom:path"});
@@ -390,13 +403,19 @@ mod tests {
         .expect("Couldn't process service attribute");
 
         assert_eq!(services.len(), 2);
-        assert!(services.contains(&Service {
-            id: "did:web:affinidi.com:custom:path#files".to_string(),
-            service_endpoint: "https://affinidi.com/custom/path/".to_string()
-        }));
-        assert!(services.contains(&Service {
-            id: "did:web:affinidi.com:custom:path#whois".to_string(),
-            service_endpoint: "https://affinidi.com/custom/path/whois.vp".to_string()
-        }));
+        assert_eq!(
+            services[0],
+            Service {
+                id: "#files".to_string(),
+                service_endpoint: "https://affinidi.com/custom/path".to_string(),
+            }
+        );
+        assert_eq!(
+            services[1],
+            Service {
+                id: "#whois".to_string(),
+                service_endpoint: "https://affinidi.com/custom/path/whois.vp".to_string(),
+            }
+        );
     }
 }
