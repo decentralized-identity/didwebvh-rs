@@ -12,11 +12,17 @@
 //!
 //! ## Format
 //!
-//! Both implicit services are emitted with **relative-fragment IDs** (`"#files"`
-//! / `"#whois"`) and in **`#files` then `#whois` order**, matching the
-//! didwebvh-test-suite reference output (and the didwebvh-ts reference
-//! implementation). The `#files` `serviceEndpoint` is the DID's HTTP base URL
-//! with any trailing `/` removed.
+//! Both implicit services are emitted with **absolute IDs**
+//! (`"<did>#files"` / `"<did>#whois"`) in **`#files` then `#whois` order**.
+//! W3C DID Core 1.0 §5.4 requires service `id` to be a URI per RFC 3986
+//! (which mandates a scheme); a fragment-only relative reference such as
+//! `"#files"` is a URI-reference, not a URI, and is rejected by typed
+//! DID-Document parsers (including `affinidi-did-common::DIDDocument`,
+//! whose service `id` field is `url::Url`). Earlier versions emitted the
+//! relative form to match didwebvh-test-suite / didwebvh-ts byte output;
+//! that was changed in 0.5.2 to make resolution outputs parseable by
+//! spec-compliant consumers. The `#files` `serviceEndpoint` still has any
+//! trailing `/` removed.
 //!
 //! ## Hash safety
 //!
@@ -56,7 +62,10 @@ pub(crate) fn update_implicit_services(
         // There are no services, add the implicit services in spec order
         ensure_object_mut(new_state)?.insert(
             "service".to_string(),
-            Value::Array(vec![get_service_files(&url)?, get_service_whois(&url)?]),
+            Value::Array(vec![
+                get_service_files(did_id, &url)?,
+                get_service_whois(did_id, &url)?,
+            ]),
         );
         return Ok(());
     };
@@ -87,10 +96,10 @@ pub(crate) fn update_implicit_services(
         let mut new_services = services.clone();
 
         if !has_files {
-            new_services.push(get_service_files(&url)?);
+            new_services.push(get_service_files(did_id, &url)?);
         }
         if !has_whois {
-            new_services.push(get_service_whois(&url)?);
+            new_services.push(get_service_whois(did_id, &url)?);
         }
 
         ensure_object_mut(new_state)?.insert("service".to_string(), Value::Array(new_services));
@@ -104,12 +113,13 @@ pub(crate) fn update_implicit_services(
 }
 
 /// `#whois` — `LinkedVerifiablePresentation` service pointing at the DID's
-/// `whois.vp`. ID is emitted as a relative fragment to match the
-/// didwebvh-test-suite reference output.
-fn get_service_whois(url: &WebVHURL) -> Result<Value, DIDWebVHError> {
+/// `whois.vp`. ID is emitted as the absolute form `<did>#whois` so the
+/// resolved document satisfies DID Core 1.0 §5.4 (service `id` MUST be a
+/// URI per RFC 3986).
+fn get_service_whois(did_id: &str, url: &WebVHURL) -> Result<Value, DIDWebVHError> {
     Ok(json!({
         "@context": "https://identity.foundation/linked-vp/contexts/v1",
-        "id": "#whois",
+        "id": format!("{did_id}#whois"),
         "type": "LinkedVerifiablePresentation",
         "serviceEndpoint": url.get_http_whois_url()?
     }))
@@ -117,14 +127,16 @@ fn get_service_whois(url: &WebVHURL) -> Result<Value, DIDWebVHError> {
 
 /// `#files` — `relativeRef` service pointing at the DID's HTTP base URL.
 ///
-/// The base URL is emitted **without** a trailing `/`. `Url::to_string()`
-/// always appends `/` to a host-only URL, but the test-suite reference (and
-/// didwebvh-ts) emit `https://example.com`, not `https://example.com/`.
-fn get_service_files(url: &WebVHURL) -> Result<Value, DIDWebVHError> {
+/// ID is emitted as the absolute form `<did>#files` for spec compliance
+/// (DID Core 1.0 §5.4). The base URL is emitted **without** a trailing
+/// `/`. `Url::to_string()` always appends `/` to a host-only URL, but the
+/// test-suite reference (and didwebvh-ts) emit `https://example.com`, not
+/// `https://example.com/`.
+fn get_service_files(did_id: &str, url: &WebVHURL) -> Result<Value, DIDWebVHError> {
     let endpoint = url.get_http_files_url()?.to_string();
     let endpoint = endpoint.strip_suffix('/').unwrap_or(&endpoint);
     Ok(json!({
-        "id": "#files",
+        "id": format!("{did_id}#files"),
         "type": "relativeRef",
         "serviceEndpoint": endpoint
     }))
@@ -137,7 +149,8 @@ mod tests {
 
     /// Tests that when a DID Document has no services defined, both implicit
     /// services are automatically added in spec order: `#files` first, then
-    /// `#whois`. IDs are emitted as relative fragments.
+    /// `#whois`. IDs are emitted in absolute form so the document satisfies
+    /// DID Core 1.0 §5.4.
     #[test]
     fn test_no_services_adds_both() {
         let mut state = json!({"id": "did:webvh:scid123:example.com"});
@@ -145,8 +158,14 @@ mod tests {
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 2);
         // Order matters for JCS: #files MUST come before #whois.
-        assert_eq!(services[0]["id"].as_str(), Some("#files"));
-        assert_eq!(services[1]["id"].as_str(), Some("#whois"));
+        assert_eq!(
+            services[0]["id"].as_str(),
+            Some("did:webvh:scid123:example.com#files")
+        );
+        assert_eq!(
+            services[1]["id"].as_str(),
+            Some("did:webvh:scid123:example.com#whois")
+        );
     }
 
     /// Tests that when a DID Document has existing custom services but is missing
@@ -223,7 +242,7 @@ mod tests {
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 2);
         let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();
-        assert!(ids.contains(&"#files"));
+        assert!(ids.contains(&"did:webvh:scid123:example.com#files"));
     }
 
     /// When only `#files` exists (absolute form), the missing `#whois` is
@@ -244,7 +263,7 @@ mod tests {
         let services = state["service"].as_array().unwrap();
         assert_eq!(services.len(), 2);
         let ids: Vec<&str> = services.iter().map(|s| s["id"].as_str().unwrap()).collect();
-        assert!(ids.contains(&"#whois"));
+        assert!(ids.contains(&"did:webvh:scid123:example.com#whois"));
     }
 
     /// Both relative-form (`"#whois"`) and absolute-form
@@ -299,8 +318,14 @@ mod tests {
         // 2 user services + 2 implicit services = 4
         assert_eq!(services.len(), 4);
         // Implicits are appended at the end in #files, #whois order.
-        assert_eq!(services[2]["id"].as_str(), Some("#files"));
-        assert_eq!(services[3]["id"].as_str(), Some("#whois"));
+        assert_eq!(
+            services[2]["id"].as_str(),
+            Some("did:webvh:scid123:example.com#files")
+        );
+        assert_eq!(
+            services[3]["id"].as_str(),
+            Some("did:webvh:scid123:example.com#whois")
+        );
     }
 
     /// `#files` `serviceEndpoint` must NOT have a trailing slash for a
@@ -310,7 +335,10 @@ mod tests {
         let mut state = json!({"id": "did:webvh:scid123:example.com"});
         update_implicit_services(None, &mut state, "did:webvh:scid123:example.com").unwrap();
         let files = &state["service"][0];
-        assert_eq!(files["id"].as_str(), Some("#files"));
+        assert_eq!(
+            files["id"].as_str(),
+            Some("did:webvh:scid123:example.com#files")
+        );
         assert_eq!(
             files["serviceEndpoint"].as_str(),
             Some("https://example.com")
@@ -328,12 +356,18 @@ mod tests {
         let mut state = json!({"id": did});
         update_implicit_services(None, &mut state, did).unwrap();
         let services = state["service"].as_array().unwrap();
-        assert_eq!(services[0]["id"].as_str(), Some("#files"));
+        assert_eq!(
+            services[0]["id"].as_str(),
+            Some("did:webvh:scid123:example.com:foo:bar#files")
+        );
         assert_eq!(
             services[0]["serviceEndpoint"].as_str(),
             Some("https://example.com/foo/bar")
         );
-        assert_eq!(services[1]["id"].as_str(), Some("#whois"));
+        assert_eq!(
+            services[1]["id"].as_str(),
+            Some("did:webvh:scid123:example.com:foo:bar#whois")
+        );
         assert_eq!(
             services[1]["serviceEndpoint"].as_str(),
             Some("https://example.com/foo/bar/whois.vp")
@@ -399,7 +433,13 @@ mod tests {
         assert_eq!(services.len(), 4);
         assert_eq!(services[0]["id"].as_str(), Some("#linked-domain"));
         assert_eq!(services[1]["id"].as_str(), Some("#messaging"));
-        assert_eq!(services[2]["id"].as_str(), Some("#files"));
-        assert_eq!(services[3]["id"].as_str(), Some("#whois"));
+        assert_eq!(
+            services[2]["id"].as_str(),
+            Some("did:webvh:scid123:example.com#files")
+        );
+        assert_eq!(
+            services[3]["id"].as_str(),
+            Some("did:webvh:scid123:example.com#whois")
+        );
     }
 }

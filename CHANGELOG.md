@@ -1,5 +1,38 @@
 # didwebvh-rs Changelog history
 
+## 30th April 2026
+
+### Release 0.5.2 — DID Core service ID compliance
+
+Fixes a resolution-time interop break with typed DID-Document parsers
+(notably `affinidi-did-common::DIDDocument`, whose `service[].id` field
+is `url::Url`). Resolution now produces documents that satisfy DID Core
+1.0 §5.4.
+
+#### Fixed
+
+- **Implicit `#files` and `#whois` services now use absolute-URI IDs.**
+  Previously the resolver emitted relative-fragment IDs (`"#files"`,
+  `"#whois"`) to match the didwebvh-test-suite reference output and the
+  didwebvh-ts implementation. DID Core 1.0 §5.4 requires service `id`
+  to be a URI per RFC 3986 — which mandates a scheme — so a
+  fragment-only relative reference is a URI-reference, not a URI, and
+  is rejected by spec-compliant typed parsers with
+  `"relative URL without a base: '#files'"`. `get_did_document()` and
+  `to_web_did()` now emit `"<did>#files"` / `"<did>#whois"`. The
+  duplicate-detection logic still recognises both forms, so existing
+  user-supplied services keep working unchanged.
+
+#### Examples
+
+- **`generate_history` example.** Adds a "Run Summary" block reporting
+  total keys generated (split into update vs witness), witness/watcher
+  swap counts, witness proofs created, and witness proofs after
+  optimisation. Fixes a panic on `--witnesses 0` and a stale
+  `did-witness.json` load on the no-witness path. Wires up
+  `WitnessVerifyOptions::with_extra_allowed_suite` so
+  `--key-type ml-dsa-44` validates end-to-end without manual config.
+
 ## 22nd April 2026
 
 ### Release 0.5.1 — spec-compliance patch
