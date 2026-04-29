@@ -25,7 +25,7 @@
 #[path = "common/suite.rs"]
 mod suite;
 
-use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
+use affinidi_data_integrity::{DataIntegrityProof, SignOptions, crypto_suites::CryptoSuite};
 use affinidi_secrets_resolver::{SecretsResolver, SimpleSecretsResolver, secrets::Secret};
 use anyhow::{Result, anyhow, bail};
 use byte_unit::{Byte, UnitType};
@@ -36,7 +36,7 @@ use didwebvh_rs::{
     DIDWebVHState, Multibase,
     did_key::generate_did_key,
     parameters::Parameters,
-    witness::{Witness, Witnesses},
+    witness::{Witness, WitnessVerifyOptions, Witnesses},
 };
 use format_num::format_num;
 use rand::{RngExt, distr::Alphabetic};
@@ -50,6 +50,18 @@ use std::{
 };
 use suite::Suite;
 use tracing_subscriber::filter;
+
+/// Counters tracked across a generate_history run so the summary at the
+/// end can report keys generated, proofs created, and rotation events
+/// without re-deriving them from the log.
+#[derive(Default)]
+struct Stats {
+    update_keys_generated: u64,
+    witness_keys_generated: u64,
+    witness_swaps: u32,
+    watcher_swaps: u32,
+    proofs_created: u64,
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -86,6 +98,7 @@ pub async fn main() -> Result<()> {
 
     let mut didwebvh = DIDWebVHState::default();
     let mut secrets = SimpleSecretsResolver::new(&[]).await;
+    let mut stats = Stats::default();
 
     println!(
         "{}{}{}{}{}",
@@ -125,12 +138,21 @@ pub async fn main() -> Result<()> {
         (Utc::now() - ChronoDuration::seconds(i64::from(args.count) + 10)).fixed_offset();
 
     // Generate initial DID
-    let mut next = generate_did(&mut didwebvh, &mut secrets, &args, base_time).await?;
+    let mut next = generate_did(&mut didwebvh, &mut secrets, &mut stats, &args, base_time).await?;
 
     // Loop for count months (first entry represents the first month)
     for i in 2..=args.count {
         let version_time = base_time + ChronoDuration::seconds(i64::from(i));
-        next = create_log_entry(&mut didwebvh, &mut secrets, &next, i, &args, version_time).await?;
+        next = create_log_entry(
+            &mut didwebvh,
+            &mut secrets,
+            &mut stats,
+            &next,
+            i,
+            &args,
+            version_time,
+        )
+        .await?;
     }
 
     let end = SystemTime::now();
@@ -278,41 +300,59 @@ pub async fn main() -> Result<()> {
     );
     let mut total_validation = end.duration_since(start).unwrap().as_millis();
 
+    // Only touch did-witness.json when this run actually wrote it. Loading
+    // unconditionally would otherwise pick up a stale file from a previous
+    // run with `--witnesses > 0` and report bogus proof counts.
+    if args.witnesses > 0 {
+        if !args.interactive {
+            println!("{}", style("Sleeping for 3 seconds...").color256(214));
+            sleep(Duration::from_secs(3));
+        }
+
+        let start2 = SystemTime::now();
+        verify_state.load_witness_proofs_from_file("did-witness.json");
+        let end = SystemTime::now();
+
+        let throughput = (1000.0 / end.duration_since(start2).unwrap().as_millis() as f64)
+            * verify_state.witness_proofs().get_total_count() as f64;
+        let throughput = format_num!(",.02", throughput);
+
+        println!(
+            "\t{}{} {} {}{}",
+            style("Reading Witness-Proofs from file Duration: ").color256(34),
+            style(format!(
+                "{}ms",
+                end.duration_since(start2).unwrap().as_millis()
+            ))
+            .color256(141),
+            style("@").color256(34),
+            style(throughput).color256(69),
+            style(" Witness-Proofs/Second throughput").color256(34),
+        );
+
+        total_validation += end.duration_since(start2).unwrap().as_millis();
+    }
+
     if !args.interactive {
         println!("{}", style("Sleeping for 3 seconds...").color256(214));
         sleep(Duration::from_secs(3));
     }
 
-    let start2 = SystemTime::now();
-    verify_state.load_witness_proofs_from_file("did-witness.json");
-    let end = SystemTime::now();
-
-    let throughput = (1000.0 / end.duration_since(start2).unwrap().as_millis() as f64)
-        * verify_state.witness_proofs().get_total_count() as f64;
-    let throughput = format_num!(",.02", throughput);
-
-    println!(
-        "\t{}{} {} {}{}",
-        style("Reading Witness-Proofs from file Duration: ").color256(34),
-        style(format!(
-            "{}ms",
-            end.duration_since(start2).unwrap().as_millis()
-        ))
-        .color256(141),
-        style("@").color256(34),
-        style(throughput).color256(69),
-        style(" Witness-Proofs/Second throughput").color256(34),
-    );
-
-    total_validation += end.duration_since(start2).unwrap().as_millis();
-
-    if !args.interactive {
-        println!("{}", style("Sleeping for 3 seconds...").color256(214));
-        sleep(Duration::from_secs(3));
+    // Witness proofs inherit their cryptosuite from the signer's key type.
+    // The didwebvh 1.0 spec mandates `eddsa-jcs-2022` for witnesses, so
+    // anything else (notably the PQC suites this example can opt into via
+    // `--key-type`) must be explicitly admitted at verify time.
+    let mut verify_options = WitnessVerifyOptions::new();
+    if let Some(suite) = CryptoSuite::default_for_key_type(args.key_type.key_type())
+        && suite != CryptoSuite::EddsaJcs2022
+    {
+        verify_options = verify_options.with_extra_allowed_suite(suite);
     }
 
     let start3 = SystemTime::now();
-    verify_state.validate()?.assert_complete()?;
+    verify_state
+        .validate_with(&verify_options)?
+        .assert_complete()?;
     let end = SystemTime::now();
 
     println!();
@@ -340,12 +380,109 @@ pub async fn main() -> Result<()> {
         style(" Entries/Second throughput").color256(34),
     );
 
+    print_run_summary(&stats, &didwebvh, &verify_state, &args);
+
     Ok(())
+}
+
+fn print_run_summary(
+    stats: &Stats,
+    didwebvh: &DIDWebVHState,
+    verify_state: &DIDWebVHState,
+    args: &Args,
+) {
+    let total_keys = stats.update_keys_generated + stats.witness_keys_generated;
+    let proofs_after_optimise = didwebvh.witness_proofs().get_total_count();
+    let proofs_loaded = verify_state.witness_proofs().get_total_count();
+
+    println!();
+    println!("{}", style("=== Run Summary ===").color256(214));
+    println!(
+        "\t{}{}",
+        style("Cryptographic suite: ").color256(34),
+        style(format!("{:?}", args.key_type.key_type())).color256(69),
+    );
+    println!(
+        "\t{}{}",
+        style("Log entries created: ").color256(34),
+        style(format_num!(",.0", didwebvh.log_entries().len() as f64)).color256(69),
+    );
+    println!(
+        "\t{}{} {}",
+        style("Update keys generated: ").color256(34),
+        style(format_num!(",.0", stats.update_keys_generated as f64)).color256(69),
+        style("(1 initial signing key + 2 next-key hashes per entry)").color256(245),
+    );
+    println!(
+        "\t{}{} {}",
+        style("Witness keys generated: ").color256(34),
+        style(format_num!(",.0", stats.witness_keys_generated as f64)).color256(69),
+        style(format!(
+            "({} initial + {} swap{})",
+            args.witnesses,
+            stats.witness_swaps,
+            if stats.witness_swaps == 1 { "" } else { "s" },
+        ))
+        .color256(245),
+    );
+    println!(
+        "\t{}{}",
+        style("Total keys generated: ").color256(34),
+        style(format_num!(",.0", total_keys as f64)).color256(69),
+    );
+    println!(
+        "\t{}{}",
+        style("Witness swaps: ").color256(34),
+        style(stats.witness_swaps).color256(69),
+    );
+    println!(
+        "\t{}{}",
+        style("Watcher swaps: ").color256(34),
+        style(stats.watcher_swaps).color256(69),
+    );
+    println!(
+        "\t{}{} {}",
+        style("Witness proofs created: ").color256(34),
+        style(format_num!(",.0", stats.proofs_created as f64)).color256(69),
+        style(format!(
+            "({} entries × {} witnesses)",
+            args.count, args.witnesses
+        ))
+        .color256(245),
+    );
+    println!(
+        "\t{}{} {}",
+        style("Witness proofs after optimisation: ").color256(34),
+        style(format_num!(",.0", proofs_after_optimise as f64)).color256(69),
+        style(format!(
+            "(saved {})",
+            format_num!(
+                ",.0",
+                stats
+                    .proofs_created
+                    .saturating_sub(proofs_after_optimise as u64) as f64
+            )
+        ))
+        .color256(245),
+    );
+    println!(
+        "\t{}{} {}",
+        style("Log entries verified: ").color256(34),
+        style(format_num!(",.0", verify_state.log_entries().len() as f64)).color256(69),
+        style("(reloaded from did.jsonl)").color256(245),
+    );
+    println!(
+        "\t{}{} {}",
+        style("Witness proofs loaded for verification: ").color256(34),
+        style(format_num!(",.0", proofs_loaded as f64)).color256(69),
+        style("(from did-witness.json)").color256(245),
+    );
 }
 
 async fn generate_did(
     didwebvh: &mut DIDWebVHState,
     secrets: &mut SimpleSecretsResolver,
+    stats: &mut Stats,
     args: &Args,
     version_time: DateTime<FixedOffset>,
 ) -> Result<Vec<Secret>> {
@@ -392,12 +529,14 @@ async fn generate_did(
     // Generate updateKey for first log entry
     let signing_did1_secret = generate_did_key(args.key_type.key_type())?.1;
     secrets.insert(signing_did1_secret.clone()).await;
+    stats.update_keys_generated += 1;
 
     // Generate next_key_hashes
     let next_key1 = generate_did_key(args.key_type.key_type())?.1;
     secrets.insert(next_key1.clone()).await;
     let next_key2 = generate_did_key(args.key_type.key_type())?.1;
     secrets.insert(next_key2.clone()).await;
+    stats.update_keys_generated += 2;
 
     // Generate witnesses
     let witness = if args.witnesses > 0 {
@@ -410,6 +549,7 @@ async fn generate_did(
                 id: Multibase::new(w_did),
             });
         }
+        stats.witness_keys_generated += u64::from(args.witnesses);
 
         Some(Witnesses::Value {
             threshold: args.witnesses,
@@ -419,21 +559,24 @@ async fn generate_did(
         None
     };
 
-    let params = Parameters::new()
+    let mut builder = Parameters::new();
+    builder
         .with_portable(true)
         .with_update_keys(vec![signing_did1_secret.get_public_keymultibase()?])
         .with_next_key_hashes(vec![
             next_key1.get_public_keymultibase_hash()?,
             next_key2.get_public_keymultibase_hash()?,
         ])
-        .with_witnesses(witness.unwrap())
         .with_watchers(vec![
             "https://watcher-1.affinidi.com/v1/webvh".to_string(),
             "https://watcher-2.affinidi.com/v1/webvh".to_string(),
             "https://watcher-3.affinidi.com/v1/webvh".to_string(),
         ])
-        .with_ttl(3600)
-        .build();
+        .with_ttl(3600);
+    if let Some(w) = witness {
+        builder.with_witnesses(w);
+    }
+    let params = builder.build();
 
     let _ = didwebvh
         .create_log_entry(
@@ -445,7 +588,7 @@ async fn generate_did(
         .await?;
 
     // Witness LogEntry
-    witness_log_entry(didwebvh, secrets).await?;
+    witness_log_entry(didwebvh, secrets, stats).await?;
 
     Ok(vec![next_key1, next_key2])
 }
@@ -453,6 +596,7 @@ async fn generate_did(
 async fn witness_log_entry(
     didwebvh: &mut DIDWebVHState,
     secrets: &SimpleSecretsResolver,
+    stats: &mut Stats,
 ) -> Result<()> {
     let (log_entries, witness_proofs) = didwebvh.log_entries_and_witness_proofs_mut();
     let log_entry = log_entries
@@ -495,6 +639,7 @@ async fn witness_log_entry(
         witness_proofs
             .add_proof(log_entry.get_version_id(), &proof, false)
             .map_err(|e| anyhow!("Error adding proof: {e}"))?;
+        stats.proofs_created += 1;
     }
 
     Ok(())
@@ -503,6 +648,7 @@ async fn witness_log_entry(
 async fn create_log_entry(
     didwebvh: &mut DIDWebVHState,
     secrets: &mut SimpleSecretsResolver,
+    stats: &mut Stats,
     previous_keys: &[Secret],
     count: u32,
     args: &Args,
@@ -521,6 +667,7 @@ async fn create_log_entry(
     secrets.insert(next_key1.clone()).await;
     let next_key2 = generate_did_key(args.key_type.key_type())?.1;
     secrets.insert(next_key2.clone()).await;
+    stats.update_keys_generated += 2;
 
     new_params.next_key_hashes = Some(Arc::new(vec![
         Multibase::new(next_key1.get_public_keymultibase_hash()?),
@@ -536,12 +683,13 @@ async fn create_log_entry(
 
     // Swap a witness node?
     if args.witnesses > 0 && count % 6 == 3 {
-        swap_witness(&mut new_params, secrets, args).await?;
+        swap_witness(&mut new_params, secrets, stats, args).await?;
     }
 
     // Swap a watcher node?
     if count.is_multiple_of(6) {
         swap_watcher(&mut new_params)?;
+        stats.watcher_swaps += 1;
     }
 
     let _ = didwebvh
@@ -556,7 +704,7 @@ async fn create_log_entry(
         .await?;
 
     // Witness LogEntry
-    witness_log_entry(didwebvh, secrets).await?;
+    witness_log_entry(didwebvh, secrets, stats).await?;
 
     Ok(vec![next_key1, next_key2])
 }
@@ -564,6 +712,7 @@ async fn create_log_entry(
 async fn swap_witness(
     params: &mut Parameters,
     secrets: &mut SimpleSecretsResolver,
+    stats: &mut Stats,
     args: &Args,
 ) -> Result<()> {
     // Pick a random witness and remove it
@@ -588,6 +737,8 @@ async fn swap_witness(
 
     let (new_witness_did, secret) = generate_did_key(args.key_type.key_type())?;
     secrets.insert(secret.clone()).await;
+    stats.witness_keys_generated += 1;
+    stats.witness_swaps += 1;
 
     new_witnesses.push(Witness {
         id: Multibase::new(new_witness_did),

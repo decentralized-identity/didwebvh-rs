@@ -322,9 +322,11 @@ mod tests {
         assert!(also_known_as.contains(&"did:webvh:acme1234:affinidi.com".to_string()));
     }
 
-    /// Implicit services are emitted with relative-fragment IDs (`#files`,
-    /// `#whois`) and the `#files` `serviceEndpoint` has no trailing slash.
-    /// Matches the didwebvh-test-suite reference output and didwebvh-ts.
+    /// Implicit services use absolute IDs (`<did>#files`, `<did>#whois`) so
+    /// the resolved did:web document satisfies DID Core 1.0 §5.4. The
+    /// `did:webvh:<scid>:` prefix is rewritten to `did:web:` by
+    /// `to_web_did`, so the IDs land as `did:web:<host>#…`. The `#files`
+    /// `serviceEndpoint` has no trailing slash.
     #[test]
     fn test_services_none() {
         let old_state = json!({"id": "did:webvh:acme1234:affinidi.com"});
@@ -344,14 +346,14 @@ mod tests {
         assert_eq!(
             services[0],
             Service {
-                id: "#files".to_string(),
+                id: "did:web:affinidi.com#files".to_string(),
                 service_endpoint: "https://affinidi.com".to_string(),
             }
         );
         assert_eq!(
             services[1],
             Service {
-                id: "#whois".to_string(),
+                id: "did:web:affinidi.com#whois".to_string(),
                 service_endpoint: "https://affinidi.com/whois.vp".to_string(),
             }
         );
@@ -385,7 +387,8 @@ mod tests {
         assert_eq!(replace_webvh_prefix(input), input);
     }
 
-    /// Path-bearing DID: implicit services still use relative IDs, and the
+    /// Path-bearing DID: implicit services use absolute IDs that, after the
+    /// webvh→web prefix rewrite, become `did:web:<host>:<path>#…`. The
     /// `#files` endpoint drops its trailing slash to match the test-suite
     /// convention.
     #[test]
@@ -406,14 +409,14 @@ mod tests {
         assert_eq!(
             services[0],
             Service {
-                id: "#files".to_string(),
+                id: "did:web:affinidi.com:custom:path#files".to_string(),
                 service_endpoint: "https://affinidi.com/custom/path".to_string(),
             }
         );
         assert_eq!(
             services[1],
             Service {
-                id: "#whois".to_string(),
+                id: "did:web:affinidi.com:custom:path#whois".to_string(),
                 service_endpoint: "https://affinidi.com/custom/path/whois.vp".to_string(),
             }
         );

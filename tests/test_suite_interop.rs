@@ -71,13 +71,20 @@ async fn run(scenario: &str, assert_did_document: bool) {
     );
 
     if assert_did_document {
-        let resolved_doc = entry
+        let mut resolved_doc = entry
             .get_did_document()
             .unwrap_or_else(|e| panic!("{scenario}: get_did_document failed: {e:?}"));
-        let expected_doc = expected
+        let mut expected_doc = expected
             .pointer("/didDocument")
             .cloned()
             .unwrap_or_else(|| panic!("{scenario}: expected.didDocument missing"));
+        // didwebvh-test-suite fixtures emit implicit `#files`/`#whois` with
+        // relative-fragment IDs; this resolver emits the absolute form
+        // (`<did>#files` / `<did>#whois`) for DID Core 1.0 §5.4 compliance.
+        // Normalise both sides to absolute before comparing so we test
+        // semantic equality rather than byte-for-byte parity.
+        normalise_implicit_service_ids(&mut resolved_doc, &did);
+        normalise_implicit_service_ids(&mut expected_doc, &did);
         assert_eq!(
             resolved_doc,
             expected_doc,
@@ -87,6 +94,27 @@ async fn run(scenario: &str, assert_did_document: bool) {
             resolved = serde_json::to_string_pretty(&resolved_doc).unwrap(),
             expected = serde_json::to_string_pretty(&expected_doc).unwrap(),
         );
+    }
+}
+
+/// Rewrites `service[].id` values of `"#files"`/`"#whois"` to their
+/// absolute form `"<did>#files"`/`"<did>#whois"`. Only the two implicit
+/// service names are touched — user-supplied relative IDs (e.g.
+/// `"#linked-domain"`) are left alone, matching the resolver's own
+/// normalisation policy.
+fn normalise_implicit_service_ids(doc: &mut Value, did: &str) {
+    let Some(services) = doc.get_mut("service").and_then(|v| v.as_array_mut()) else {
+        return;
+    };
+    for service in services {
+        let Some(id) = service.get_mut("id") else {
+            continue;
+        };
+        if id == "#files" {
+            *id = Value::String(format!("{did}#files"));
+        } else if id == "#whois" {
+            *id = Value::String(format!("{did}#whois"));
+        }
     }
 }
 
