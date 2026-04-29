@@ -1,0 +1,15 @@
+[
+  {
+    "versionId": "1-QmW1kazgpSeCNX4kZghibxLU2ye8nr6dqADhQiTz3qPD1C",
+    "proof": [
+      {
+        "type": "DataIntegrityProof",
+        "cryptosuite": "eddsa-jcs-2022",
+        "verificationMethod": "did:key:z6Mkrv5Cm2XCLumMPTqooLTCw6YDf421d7VdTziwrZ8vNf4L#z6Mkrv5Cm2XCLumMPTqooLTCw6YDf421d7VdTziwrZ8vNf4L",
+        "created": "2000-01-01T00:00:00Z",
+        "proofPurpose": "assertionMethod",
+        "proofValue": "zTsLwZHBByHgNnHKaFuUumacoruk5mW4KCgwL7hNdt9W1WcyyP3LoqJ7FA3YgdCZ2C7gb1CLQ75oiYvMbyjsTFjP"
+      }
+    ]
+  }
+]

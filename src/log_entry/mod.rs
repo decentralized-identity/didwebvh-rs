@@ -39,6 +39,10 @@ pub(crate) fn encode_sha256_multihash(digest: &[u8]) -> Vec<u8> {
 pub struct MetaData {
     /// The `<version_number>-<hash>` identifier for this log entry.
     pub version_id: String,
+    /// Integer version number parsed from `version_id` (e.g. `2` for
+    /// `"2-Qm..."`). Exposed as a sibling of `version_id` for consumers
+    /// that want the integer without parsing the string.
+    pub version_number: u32,
     /// RFC 3339 timestamp when this version was created.
     pub version_time: String,
     /// RFC 3339 timestamp when the DID was first created.
@@ -160,6 +164,24 @@ pub trait LogEntryMethods {
     fn get_state(&self) -> &Value;
 
     /// Returns a full DID Document including implied services
+    /// (`#files` / `#whois`).
+    ///
+    /// This builds a fresh `Value` by cloning `state` and appending any
+    /// missing implicit services — the LogEntry itself is **not** mutated.
+    /// The returned document is for **resolution / display only**.
+    ///
+    /// # ⚠ DO NOT feed this back into [`create_log_entry`] or [`update`]
+    ///
+    /// The hash chain (`versionId`, SCID, `eddsa-jcs-2022` proofs) is
+    /// computed over the LogEntry's stored `state`, which by spec excludes
+    /// the implicit services. Passing the augmented document from
+    /// `get_did_document()` as the new `state` would bake `#files` and
+    /// `#whois` into the canonical bytes, breaking interop with every other
+    /// didwebvh implementation. If you need the document for an update, use
+    /// [`get_state`](Self::get_state) instead.
+    ///
+    /// [`create_log_entry`]: crate::DIDWebVHState::create_log_entry
+    /// [`update`]: crate::update::update_did
     fn get_did_document(&self) -> Result<Value, DIDWebVHError>;
 }
 
@@ -642,6 +664,32 @@ mod tests {
     use chrono::Utc;
     use serde_json::json;
 
+    // ===== MetaData tests =====
+
+    /// `MetaData::version_number` serialises as `versionNumber` alongside
+    /// `versionId`. Required for TS-interop parity with didwebvh-ts resolver
+    /// output.
+    #[test]
+    fn metadata_serialises_version_number_as_camel_case_integer() {
+        let meta = MetaData {
+            version_id: "42-QmExample".to_string(),
+            version_number: 42,
+            version_time: "2000-01-01T00:00:00Z".to_string(),
+            created: "2000-01-01T00:00:00Z".to_string(),
+            updated: "2000-01-01T00:00:00Z".to_string(),
+            scid: "QmExample".to_string(),
+            portable: false,
+            deactivated: false,
+            witness: None,
+            watchers: None,
+        };
+        let v = serde_json::to_value(&meta).unwrap();
+        assert_eq!(v.get("versionNumber"), Some(&serde_json::json!(42)));
+        assert_eq!(v.get("versionId"), Some(&serde_json::json!("42-QmExample")));
+        let round_tripped: MetaData = serde_json::from_value(v).unwrap();
+        assert_eq!(round_tripped.version_number, 42);
+    }
+
     // ===== PublicKey trait tests =====
 
     /// Tests that extracting a public key from a proof whose verification method
@@ -887,11 +935,7 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
-    /// Tests that generate_log_entry_hash produces the same hash when called
-    /// multiple times on the same log entry.
-    /// Expected: Two consecutive hash calls return identical strings.
-    /// This matters because the entry hash is used in the versionId and SCID;
-    /// non-deterministic hashing would make log entry verification impossible.
+    /// Repeated hash calls on the same value are stable — trivial idempotence.
     #[test]
     fn test_generate_hash_deterministic() {
         let entry = LogEntry::Spec1_0(LogEntry1_0 {
@@ -904,6 +948,171 @@ mod tests {
         let hash1 = entry.generate_log_entry_hash().unwrap();
         let hash2 = entry.generate_log_entry_hash().unwrap();
         assert_eq!(hash1, hash2);
+    }
+
+    // ===== JCS canonicalisation guarantees =====
+    //
+    // These tests pin down the two halves of RFC 8785's canonical form on the
+    // surface that matters most for didwebvh — the `service` block in
+    // `state`:
+    //
+    //   1. Object-key ORDER is normalised (sorted) — different key
+    //      insertion orders MUST produce the same hash.
+    //   2. Array-element ORDER is preserved — different service ordering
+    //      MUST produce different hashes.
+    //
+    // If either of these regresses (e.g. someone swaps the canonicalizer
+    // crate or accidentally pre-sorts arrays), the entry hash and SCID will
+    // silently diverge from every other didwebvh implementation. Catching
+    // that here is much cheaper than catching it via a failed interop test.
+
+    /// JCS sorts object keys: two service blocks whose object-keys are in
+    /// different insertion order MUST hash identically. Inputs are built as
+    /// raw JSON strings (not via `json!`) because `serde_json::Value` already
+    /// pre-sorts via its `BTreeMap` backing — going through string parsing
+    /// keeps the test honest about what the canonicalizer is doing.
+    #[test]
+    fn test_jcs_sorts_service_object_keys() {
+        // r##"..."## (double-#) so the JSON `"#a"` doesn't terminate the raw string.
+        let state_a: serde_json::Value = serde_json::from_str(
+            r##"{
+                "id": "did:webvh:scid:example.com",
+                "service": [
+                    {"id": "#a", "type": "X", "serviceEndpoint": "https://a"}
+                ]
+            }"##,
+        )
+        .unwrap();
+        let state_b: serde_json::Value = serde_json::from_str(
+            r##"{
+                "service": [
+                    {"serviceEndpoint": "https://a", "type": "X", "id": "#a"}
+                ],
+                "id": "did:webvh:scid:example.com"
+            }"##,
+        )
+        .unwrap();
+
+        let now = Utc::now().fixed_offset();
+        let mk = |state| {
+            LogEntry::Spec1_0(LogEntry1_0 {
+                version_id: "1-abc".to_string(),
+                version_time: now,
+                parameters: Parameters1_0::default(),
+                state,
+                proof: vec![],
+            })
+        };
+
+        assert_eq!(
+            mk(state_a).generate_log_entry_hash().unwrap(),
+            mk(state_b).generate_log_entry_hash().unwrap(),
+            "JCS must sort object keys — key insertion order must not affect hash",
+        );
+    }
+
+    /// JCS preserves array order: swapping two services in the `service`
+    /// array MUST change the hash. RFC 8785 §3.2.4 says array order is
+    /// preserved, so different orderings are different documents and must
+    /// hash differently.
+    #[test]
+    fn test_jcs_preserves_service_array_order() {
+        let svc_a = json!({"id": "#a", "type": "X", "serviceEndpoint": "https://a"});
+        let svc_b = json!({"id": "#b", "type": "Y", "serviceEndpoint": "https://b"});
+
+        let now = Utc::now().fixed_offset();
+        let mk = |services: Vec<serde_json::Value>| {
+            LogEntry::Spec1_0(LogEntry1_0 {
+                version_id: "1-abc".to_string(),
+                version_time: now,
+                parameters: Parameters1_0::default(),
+                state: json!({
+                    "id": "did:webvh:scid:example.com",
+                    "service": services,
+                }),
+                proof: vec![],
+            })
+        };
+
+        let hash_ab = mk(vec![svc_a.clone(), svc_b.clone()])
+            .generate_log_entry_hash()
+            .unwrap();
+        let hash_ba = mk(vec![svc_b, svc_a]).generate_log_entry_hash().unwrap();
+
+        assert_ne!(
+            hash_ab, hash_ba,
+            "JCS preserves array order — swapping services must change the hash",
+        );
+    }
+
+    /// Top-level array order matters too (e.g. `verificationMethod`,
+    /// `authentication`, `updateKeys` in parameters). Same property as
+    /// services but worth pinning down independently because these are
+    /// strongly-typed `Vec` fields rather than raw JSON arrays.
+    #[test]
+    fn test_jcs_preserves_authentication_array_order() {
+        let now = Utc::now().fixed_offset();
+        let mk = |refs: Vec<&str>| {
+            LogEntry::Spec1_0(LogEntry1_0 {
+                version_id: "1-abc".to_string(),
+                version_time: now,
+                parameters: Parameters1_0::default(),
+                state: json!({
+                    "id": "did:webvh:scid:example.com",
+                    "authentication": refs,
+                }),
+                proof: vec![],
+            })
+        };
+
+        let hash_ab = mk(vec!["#k1", "#k2"]).generate_log_entry_hash().unwrap();
+        let hash_ba = mk(vec!["#k2", "#k1"]).generate_log_entry_hash().unwrap();
+
+        assert_ne!(hash_ab, hash_ba);
+    }
+
+    /// `get_did_document()` must NOT mutate the LogEntry. After calling it,
+    /// the LogEntry's stored `state` must be unchanged (no implicit services
+    /// folded in) and `generate_log_entry_hash()` must return the same value
+    /// as before the call. This is the core hash-chain safety invariant: if
+    /// `get_did_document()` ever mutated `state` in-place, every subsequent
+    /// signature and version hash would diverge from every other
+    /// implementation.
+    #[test]
+    fn test_get_did_document_does_not_affect_hash() {
+        let entry = LogEntry::Spec1_0(LogEntry1_0 {
+            version_id: "1-abc".to_string(),
+            version_time: Utc::now().fixed_offset(),
+            parameters: Parameters1_0::default(),
+            state: json!({
+                "id": "did:webvh:scid123:example.com",
+                "service": [
+                    {"id": "#custom", "type": "Custom", "serviceEndpoint": "https://example.com"}
+                ]
+            }),
+            proof: vec![],
+        });
+
+        let hash_before = entry.generate_log_entry_hash().unwrap();
+        let state_before = entry.get_state().clone();
+
+        // Building the resolution-time DID Document MUST be read-only.
+        let resolved = entry.get_did_document().unwrap();
+        let resolved_services = resolved["service"].as_array().unwrap();
+        assert_eq!(
+            resolved_services.len(),
+            3,
+            "resolution adds #files + #whois"
+        );
+
+        // The LogEntry itself must be untouched.
+        assert_eq!(entry.get_state(), &state_before, "state must not mutate");
+        assert_eq!(entry.get_state()["service"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            entry.generate_log_entry_hash().unwrap(),
+            hash_before,
+            "hash must not change after get_did_document()",
+        );
     }
 
     // ===== create() tests =====
