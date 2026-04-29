@@ -300,33 +300,38 @@ pub async fn main() -> Result<()> {
     );
     let mut total_validation = end.duration_since(start).unwrap().as_millis();
 
-    if !args.interactive {
-        println!("{}", style("Sleeping for 3 seconds...").color256(214));
-        sleep(Duration::from_secs(3));
+    // Only touch did-witness.json when this run actually wrote it. Loading
+    // unconditionally would otherwise pick up a stale file from a previous
+    // run with `--witnesses > 0` and report bogus proof counts.
+    if args.witnesses > 0 {
+        if !args.interactive {
+            println!("{}", style("Sleeping for 3 seconds...").color256(214));
+            sleep(Duration::from_secs(3));
+        }
+
+        let start2 = SystemTime::now();
+        verify_state.load_witness_proofs_from_file("did-witness.json");
+        let end = SystemTime::now();
+
+        let throughput = (1000.0 / end.duration_since(start2).unwrap().as_millis() as f64)
+            * verify_state.witness_proofs().get_total_count() as f64;
+        let throughput = format_num!(",.02", throughput);
+
+        println!(
+            "\t{}{} {} {}{}",
+            style("Reading Witness-Proofs from file Duration: ").color256(34),
+            style(format!(
+                "{}ms",
+                end.duration_since(start2).unwrap().as_millis()
+            ))
+            .color256(141),
+            style("@").color256(34),
+            style(throughput).color256(69),
+            style(" Witness-Proofs/Second throughput").color256(34),
+        );
+
+        total_validation += end.duration_since(start2).unwrap().as_millis();
     }
-
-    let start2 = SystemTime::now();
-    verify_state.load_witness_proofs_from_file("did-witness.json");
-    let end = SystemTime::now();
-
-    let throughput = (1000.0 / end.duration_since(start2).unwrap().as_millis() as f64)
-        * verify_state.witness_proofs().get_total_count() as f64;
-    let throughput = format_num!(",.02", throughput);
-
-    println!(
-        "\t{}{} {} {}{}",
-        style("Reading Witness-Proofs from file Duration: ").color256(34),
-        style(format!(
-            "{}ms",
-            end.duration_since(start2).unwrap().as_millis()
-        ))
-        .color256(141),
-        style("@").color256(34),
-        style(throughput).color256(69),
-        style(" Witness-Proofs/Second throughput").color256(34),
-    );
-
-    total_validation += end.duration_since(start2).unwrap().as_millis();
 
     if !args.interactive {
         println!("{}", style("Sleeping for 3 seconds...").color256(214));
@@ -554,21 +559,24 @@ async fn generate_did(
         None
     };
 
-    let params = Parameters::new()
+    let mut builder = Parameters::new();
+    builder
         .with_portable(true)
         .with_update_keys(vec![signing_did1_secret.get_public_keymultibase()?])
         .with_next_key_hashes(vec![
             next_key1.get_public_keymultibase_hash()?,
             next_key2.get_public_keymultibase_hash()?,
         ])
-        .with_witnesses(witness.unwrap())
         .with_watchers(vec![
             "https://watcher-1.affinidi.com/v1/webvh".to_string(),
             "https://watcher-2.affinidi.com/v1/webvh".to_string(),
             "https://watcher-3.affinidi.com/v1/webvh".to_string(),
         ])
-        .with_ttl(3600)
-        .build();
+        .with_ttl(3600);
+    if let Some(w) = witness {
+        builder.with_witnesses(w);
+    }
+    let params = builder.build();
 
     let _ = didwebvh
         .create_log_entry(
