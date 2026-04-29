@@ -25,7 +25,7 @@
 #[path = "common/suite.rs"]
 mod suite;
 
-use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
+use affinidi_data_integrity::{DataIntegrityProof, SignOptions, crypto_suites::CryptoSuite};
 use affinidi_secrets_resolver::{SecretsResolver, SimpleSecretsResolver, secrets::Secret};
 use anyhow::{Result, anyhow, bail};
 use byte_unit::{Byte, UnitType};
@@ -36,7 +36,7 @@ use didwebvh_rs::{
     DIDWebVHState, Multibase,
     did_key::generate_did_key,
     parameters::Parameters,
-    witness::{Witness, Witnesses},
+    witness::{Witness, WitnessVerifyOptions, Witnesses},
 };
 use format_num::format_num;
 use rand::{RngExt, distr::Alphabetic};
@@ -311,8 +311,21 @@ pub async fn main() -> Result<()> {
         sleep(Duration::from_secs(3));
     }
 
+    // Witness proofs inherit their cryptosuite from the signer's key type.
+    // The didwebvh 1.0 spec mandates `eddsa-jcs-2022` for witnesses, so
+    // anything else (notably the PQC suites this example can opt into via
+    // `--key-type`) must be explicitly admitted at verify time.
+    let mut verify_options = WitnessVerifyOptions::new();
+    if let Some(suite) = CryptoSuite::default_for_key_type(args.key_type.key_type())
+        && suite != CryptoSuite::EddsaJcs2022
+    {
+        verify_options = verify_options.with_extra_allowed_suite(suite);
+    }
+
     let start3 = SystemTime::now();
-    verify_state.validate()?.assert_complete()?;
+    verify_state
+        .validate_with(&verify_options)?
+        .assert_complete()?;
     let end = SystemTime::now();
 
     println!();
