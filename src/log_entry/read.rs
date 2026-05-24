@@ -78,9 +78,25 @@ impl LogEntry {
         // bytes are decoded from did:key independently of the suite, so a
         // proof that selects a different suite would otherwise feed those
         // bytes into a verifier they were not generated for.
-        if proof.cryptosuite != affinidi_data_integrity::crypto_suites::CryptoSuite::EddsaJcs2022 {
+        //
+        // The `experimental-pqc` feature widens the accepted set to include
+        // the JCS-canonicalized PQC variants from W3C `di-quantum-safe` v0.3
+        // (not yet in didwebvh 1.0 — opt-in build flag). RDFC variants are
+        // still rejected: didwebvh 1.0 mandates JCS canonicalization, and
+        // accepting an RDFC suite would re-introduce the algorithm-
+        // substitution risk this check exists to close.
+        let cryptosuite_ok = match proof.cryptosuite {
+            affinidi_data_integrity::crypto_suites::CryptoSuite::EddsaJcs2022 => true,
+            #[cfg(feature = "experimental-pqc")]
+            affinidi_data_integrity::crypto_suites::CryptoSuite::MlDsa44Jcs2024
+            | affinidi_data_integrity::crypto_suites::CryptoSuite::SlhDsa128Jcs2024 => true,
+            _ => false,
+        };
+        if !cryptosuite_ok {
             return Err(DIDWebVHError::ValidationError(format!(
-                "Invalid cryptosuite {:?}: log entry proofs must use eddsa-jcs-2022",
+                "Invalid cryptosuite {:?}: log entry proofs must use eddsa-jcs-2022 \
+                 (or, with the `experimental-pqc` build feature, a JCS-canonicalized \
+                 PQC suite from W3C di-quantum-safe v0.3)",
                 proof.cryptosuite
             )));
         }

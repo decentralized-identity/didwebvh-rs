@@ -31,15 +31,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # --tests + --examples covers the shipping code without tripping
       # the nightly-only did_benchmarks_nightly bench (uses #![feature(test)]).
-      #
-      # `experimental-pqc` is deliberately excluded: it enables
-      # `affinidi-crypto/post-quantum` whose 0.1.5 release imports
-      # `ml_dsa::KeyGen` from the root, but `ml-dsa 0.1.0` (stable release)
-      # moved that symbol — pure upstream API churn that has nothing to do
-      # with didwebvh-rs. The feature is marked experimental in Cargo.toml
-      # for exactly this reason. Re-include once upstream `affinidi-crypto`
-      # publishes a release compatible with `ml-dsa >= 0.1.0`.
-      - run: cargo clippy --features ssi,rustls,cli --tests --examples -- -D warnings
+      - run: cargo clippy --all-features --tests --examples -- -D warnings
 
   test:
     name: Test
@@ -49,9 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - uses: Swatinem/rust-cache@v2
-      # Excludes `experimental-pqc` (upstream affinidi-crypto/ml-dsa breakage).
-      # See the same exclusion + rationale in the Clippy job above.
-      - run: cargo test --features ssi,rustls,cli
+      - run: cargo test --all-features
 
   msrv:
     name: MSRV (1.95.0)
@@ -62,9 +52,7 @@ jobs:
         with:
           toolchain: "1.95.0"
       - uses: Swatinem/rust-cache@v2
-      # Excludes `experimental-pqc` (upstream affinidi-crypto/ml-dsa breakage).
-      # See the Clippy job for the full rationale.
-      - run: cargo check --features ssi,rustls,cli
+      - run: cargo check --all-features
 
   audit:
     name: Security Audit
