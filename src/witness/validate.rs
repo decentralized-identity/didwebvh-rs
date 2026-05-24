@@ -3,19 +3,34 @@
 *
 *   # Witness proof version semantics
 *
-*   A witness proof attests that a witness observed a particular version of the DID log.
-*   During validation, proofs are matched against log entries with the following rules:
+*   A witness proof attests that a witness observed a particular version of
+*   the DID log. The spec rule (§ "Verifying Witness Proofs During
+*   Resolution") is "current or any later" — a proof at version K covers
+*   entries ≤ K. During validation, proofs are matched against log entries
+*   with the following rules, applied per witness against the witness's
+*   highest-versioned stored proof:
 *
-*   - **Future proofs** (proof version > highest published version) are **skipped** entirely,
-*     preventing premature acceptance of proofs for unpublished entries.
-*   - **Older proofs** (proof version > current entry version, but within published range)
-*     **still count** toward the threshold. This supports efficient batched witnessing
-*     where a single proof covers a range of entries.
-*   - **Current proofs** (proof version == current entry version) are **cryptographically
-*     verified** against the log entry data before counting.
+*   - **Future proofs** (proof version > highest published version) are
+*     **skipped** entirely, preventing premature acceptance of proofs for
+*     unpublished entries.
+*   - **Later-but-published proofs** (proof version > current entry version,
+*     ≤ highest published) are **cryptographically verified against the
+*     proof's own versionId** before counting. They cover the current entry
+*     transitively per spec.
+*   - **Current proofs** (proof version == current entry version) are
+*     **cryptographically verified** against the current entry's data before
+*     counting.
+*   - **Older proofs** (proof version < current entry version) **do NOT
+*     count** toward this entry's threshold (spec § "current or any later").
+*     They are silently skipped at debug level — if too few witnesses have
+*     a current-or-later proof, the threshold check surfaces as
+*     "threshold not met", which is the correct semantic error rather than
+*     a misleading "signature invalid" from trying to verify a proof against
+*     the wrong payload.
 *
-*   This design means a resolver cannot be tricked by proofs referencing unpublished
-*   future entries, while still allowing witnesses to attest in batches rather than
+*   This design means a resolver cannot be tricked by proofs referencing
+*   unpublished future entries, while still allowing witnesses to attest in
+*   batches (one proof covering multiple older entries) rather than
 *   per-entry.
 */
 
@@ -83,80 +98,83 @@ impl WitnessProofCollection {
                 continue;
             }
 
-            debug!(
-                "oldest_id ({}) >  version_number ({})",
-                oldest_id, version_number
-            );
-            if oldest_id > &version_number {
-                // This proof is for a *later* published LogEntry. It transitively
-                // attests this earlier entry, but we cannot assume it will be
-                // verified later: if the witness was rotated out before that
-                // version, no entry will ever check it. Verify the signature
-                // here against the versionId the proof actually covers before
-                // counting it toward the threshold.
-                enforce_witness_proof_shape(proof, options)?;
-                proof
-                    .verify_with_public_key(
-                        &json!({"versionId": &**proof_version_id}),
-                        proof.get_public_key_bytes()?.as_slice(),
-                        VerifyOptions::new(),
-                    )
-                    .map_err(|e| {
-                        DIDWebVHError::WitnessProofError(format!(
-                            "LogEntry ({}): Witness proof for later version ({}) failed verification: {}",
-                            log_entry.get_version_id(),
-                            proof_version_id,
-                            e
-                        ))
-                    })?;
-                debug!(
-                    "LogEntry ({}): later witness proof from {} (for {oldest_id}) verified ok",
-                    log_entry.get_version_id(),
-                    w.id,
-                );
-                valid_proofs += 1;
-                continue;
-            } else if oldest_id == &version_number {
-                // witness proof is for this version of the LogEntry —
-                // verify against this entry's versionId.
-                log_entry
-                    .log_entry
-                    .validate_witness_proof(proof, options)
-                    .map_err(|e| {
-                        DIDWebVHError::WitnessProofError(format!(
-                            "LogEntry ({}): Witness proof validation failed: {}",
-                            log_entry.get_version_id(),
-                            e
-                        ))
-                    })?;
-                valid_proofs += 1;
-                debug!(
-                    "LogEntry ({}): Witness proof ({}) verified ok",
-                    log_entry.get_version_id(),
-                    w.id
-                );
-            } else {
-                // oldest_id < version_number. The stored proof is for an
-                // *earlier* published entry than the one we are validating.
-                // Per didwebvh 1.0 § "Verifying Witness Proofs During
-                // Resolution", a proof at version K only counts for entries
-                // ≤ K (the "current or any later" rule, equivalently "a
-                // valid proof carries the implication that all prior log
-                // entries are also approved"). So this proof does NOT
-                // approve the current entry and MUST NOT be counted toward
-                // the threshold. We silently skip it; if too few witnesses
-                // have a current-or-later proof the threshold check at the
-                // bottom of this function will surface as "threshold not
-                // met", which is the correct semantic error (rather than
-                // attempting to verify the proof against the current
-                // versionId and surfacing a misleading "signature invalid"
-                // failure when the bytes simply don't match).
-                debug!(
-                    "LogEntry ({}): older witness proof from {} (for {oldest_id}) does not approve current entry per spec; not counted toward threshold",
-                    log_entry.get_version_id(),
-                    w.id,
-                );
-                continue;
+            debug!("oldest_id ({oldest_id}) vs. version_number ({version_number})",);
+            match oldest_id.cmp(&version_number) {
+                std::cmp::Ordering::Greater => {
+                    // This proof is for a *later* published LogEntry. It
+                    // transitively attests this earlier entry, but we cannot
+                    // assume it will be verified later: if the witness was
+                    // rotated out before that version, no entry will ever
+                    // check it. Verify the signature here against the
+                    // versionId the proof actually covers before counting
+                    // it toward the threshold.
+                    enforce_witness_proof_shape(proof, options)?;
+                    proof
+                        .verify_with_public_key(
+                            &json!({ "versionId": &**proof_version_id }),
+                            proof.get_public_key_bytes()?.as_slice(),
+                            VerifyOptions::new(),
+                        )
+                        .map_err(|e| {
+                            DIDWebVHError::WitnessProofError(format!(
+                                "LogEntry ({}): Witness proof for later version ({}) failed verification: {}",
+                                log_entry.get_version_id(),
+                                proof_version_id,
+                                e
+                            ))
+                        })?;
+                    debug!(
+                        "LogEntry ({}): later witness proof from {} (for {oldest_id}) verified ok",
+                        log_entry.get_version_id(),
+                        w.id,
+                    );
+                    valid_proofs += 1;
+                    continue;
+                }
+                std::cmp::Ordering::Equal => {
+                    // witness proof is for this version of the LogEntry —
+                    // verify against this entry's versionId.
+                    log_entry
+                        .log_entry
+                        .validate_witness_proof(proof, options)
+                        .map_err(|e| {
+                            DIDWebVHError::WitnessProofError(format!(
+                                "LogEntry ({}): Witness proof validation failed: {}",
+                                log_entry.get_version_id(),
+                                e
+                            ))
+                        })?;
+                    valid_proofs += 1;
+                    debug!(
+                        "LogEntry ({}): Witness proof ({}) verified ok",
+                        log_entry.get_version_id(),
+                        w.id
+                    );
+                }
+                std::cmp::Ordering::Less => {
+                    // The stored proof is for an *earlier* published entry
+                    // than the one we are validating. Per didwebvh 1.0
+                    // § "Verifying Witness Proofs During Resolution", a
+                    // proof at version K only counts for entries ≤ K (the
+                    // "current or any later" rule — equivalently, a valid
+                    // proof carries the implication that all prior log
+                    // entries are also approved). So this proof does NOT
+                    // approve the current entry and MUST NOT be counted
+                    // toward the threshold. We silently skip it; if too
+                    // few witnesses have a current-or-later proof the
+                    // threshold check at the bottom of this function will
+                    // surface as "threshold not met", which is the correct
+                    // semantic error (rather than attempting to verify the
+                    // proof against the current versionId and surfacing a
+                    // misleading "signature invalid" failure when the
+                    // bytes simply don't match).
+                    debug!(
+                        "LogEntry ({}): older witness proof from {} (for {oldest_id}) does not approve current entry per spec; not counted toward threshold",
+                        log_entry.get_version_id(),
+                        w.id,
+                    );
+                    continue;
+                }
             }
         }
 
