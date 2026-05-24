@@ -563,10 +563,7 @@ mod tests {
         };
         // No `{SCID}` placeholder — the doc id keeps this fake SCID while
         // parameters.scid is set to the real genesis hash.
-        let doc = did_doc_with_key(
-            "did:webvh:QmFakeScidNotTheRealHash:localhost%3A8000",
-            &key,
-        );
+        let doc = did_doc_with_key("did:webvh:QmFakeScidNotTheRealHash:localhost%3A8000", &key);
 
         let mut state = DIDWebVHState::default();
         state
@@ -773,9 +770,9 @@ mod tests {
             entry.validation_status = LogEntryValidationStatus::NotValidated;
         }
 
-        let err = state.validate().expect_err(
-            "cross-DID witness proof must not satisfy this log's threshold",
-        );
+        let err = state
+            .validate()
+            .expect_err("cross-DID witness proof must not satisfy this log's threshold");
         assert!(
             err.to_string().contains("threshold"),
             "expected threshold failure, got: {err}"

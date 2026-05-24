@@ -394,9 +394,8 @@ impl WebVHURL {
             url_string.push_str(&format!("#{fragment}",));
         }
 
-        let url = Url::parse(&url_string).map_err(|err| {
-            DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}"))
-        })?;
+        let url = Url::parse(&url_string)
+            .map_err(|err| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}")))?;
         Self::reject_ip_host(&url)?;
         Ok(url)
     }
@@ -414,9 +413,8 @@ impl WebVHURL {
             url_string.push_str("whois.vp");
         }
 
-        let url = Url::parse(&url_string).map_err(|err| {
-            DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}"))
-        })?;
+        let url = Url::parse(&url_string)
+            .map_err(|err| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}")))?;
         Self::reject_ip_host(&url)?;
         Ok(url)
     }
@@ -433,9 +431,8 @@ impl WebVHURL {
             url_string.push_str(&self.path);
         }
 
-        let url = Url::parse(&url_string).map_err(|err| {
-            DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}"))
-        })?;
+        let url = Url::parse(&url_string)
+            .map_err(|err| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}")))?;
         Self::reject_ip_host(&url)?;
         Ok(url)
     }

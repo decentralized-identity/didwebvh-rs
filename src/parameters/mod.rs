@@ -1086,8 +1086,9 @@ mod tests {
         };
         let err = current.validate(Some(&previous)).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("updateKeys must be provided when previous entry committed nextKeyHashes")
+            err.to_string().contains(
+                "updateKeys must be provided when previous entry committed nextKeyHashes"
+            )
         );
     }
 
@@ -1106,8 +1107,9 @@ mod tests {
         };
         let err = current.validate(Some(&previous)).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("updateKeys must not be empty when previous entry committed nextKeyHashes")
+            err.to_string().contains(
+                "updateKeys must not be empty when previous entry committed nextKeyHashes"
+            )
         );
     }
 
