@@ -85,7 +85,7 @@ impl WebVHURL {
         // split query from the rest of the URL
         let (prefix, query) = match prefix.split_once('?') {
             Some((prefix, query)) => (prefix, Some(query.to_string())),
-            None => (url, None),
+            None => (prefix, None),
         };
 
         let (query_version_id, query_version_time, query_version_number) =
@@ -103,7 +103,13 @@ impl WebVHURL {
 
         let scid = parts[0].to_string();
 
-        let (domain, port) = match parts[1].split_once("%3A") {
+        // Percent-encoding is case-insensitive (RFC 3986 §2.1). Matching only the
+        // uppercase form would leave `127.0.0.1%3a8080` as the "domain", which then
+        // slips past `reject_ip_address()` because it no longer parses as a bare IP.
+        let (domain, port) = match parts[1]
+            .split_once("%3A")
+            .or_else(|| parts[1].split_once("%3a"))
+        {
             Some((domain, port)) => {
                 let port = match port.parse::<u16>() {
                     Ok(port) => port,
@@ -123,6 +129,24 @@ impl WebVHURL {
         let mut path = String::new();
         let mut file_name = String::new();
         for part in parts[2..].iter() {
+            // These segments are joined with '/' into the HTTP path that the
+            // resolver fetches. Reject anything that would let a crafted DID
+            // escape its directory (`..`), collapse to the current dir (`.`),
+            // produce `//` (empty), or smuggle an extra separator (`/`, `\`).
+            // The check runs on the *percent-decoded* segment because the raw
+            // segment is later passed through Url::parse, which decodes and
+            // normalises — so `%2E%2E` would otherwise survive the literal
+            // `..` check here and then collapse into a parent-dir reference.
+            let decoded = percent_encoding::percent_decode_str(part).decode_utf8_lossy();
+            if decoded.is_empty()
+                || decoded == "."
+                || decoded == ".."
+                || decoded.contains(['/', '\\'])
+            {
+                return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                    "Invalid URL: path segment ({part:?}) is not allowed",
+                )));
+            }
             if part != &"whois" {
                 path.push('/');
                 path.push_str(part);
@@ -233,6 +257,30 @@ impl WebVHURL {
             query_version_time,
             query_version_number,
         })
+    }
+
+    /// Re-check the host *after* `Url::parse` has normalised it.
+    ///
+    /// `reject_ip_address()` runs on the raw DID segment, which has not been
+    /// percent-decoded — so `127%2E0%2E0%2E1` does not parse as an `IpAddr`
+    /// and slips through. `Url::parse` then decodes it to `127.0.0.1` and
+    /// the resolver would happily fetch from localhost (or
+    /// `169.254.169.254`, etc.). This check looks at what the HTTP client
+    /// will actually connect to, after all of the `url` crate's host
+    /// normalisation, and rejects any IP literal.
+    fn reject_ip_host(url: &Url) -> Result<(), DIDWebVHError> {
+        match url.host() {
+            Some(url::Host::Ipv4(ip)) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                "Invalid URL: IP addresses are not allowed, use a domain name instead: {ip}",
+            ))),
+            Some(url::Host::Ipv6(ip)) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                "Invalid URL: IP addresses are not allowed, use a domain name instead: {ip}",
+            ))),
+            Some(url::Host::Domain(_)) => Ok(()),
+            None => Err(DIDWebVHError::InvalidMethodIdentifier(
+                "Invalid URL: Must contain domain".to_string(),
+            )),
+        }
     }
 
     /// Rejects IP addresses (both IPv4 and IPv6) as the domain component.
@@ -346,12 +394,10 @@ impl WebVHURL {
             url_string.push_str(&format!("#{fragment}",));
         }
 
-        match Url::parse(&url_string) {
-            Ok(url) => Ok(url),
-            Err(err) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
-                "Invalid URL: {err}",
-            ))),
-        }
+        let url = Url::parse(&url_string)
+            .map_err(|err| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}")))?;
+        Self::reject_ip_host(&url)?;
+        Ok(url)
     }
 
     /// Returns the URL for a whois.vp file location
@@ -367,12 +413,10 @@ impl WebVHURL {
             url_string.push_str("whois.vp");
         }
 
-        match Url::parse(&url_string) {
-            Ok(url) => Ok(url),
-            Err(err) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
-                "Invalid URL: {err}",
-            ))),
-        }
+        let url = Url::parse(&url_string)
+            .map_err(|err| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}")))?;
+        Self::reject_ip_host(&url)?;
+        Ok(url)
     }
 
     /// Returns the URL for the #files service URL
@@ -387,12 +431,10 @@ impl WebVHURL {
             url_string.push_str(&self.path);
         }
 
-        match Url::parse(&url_string) {
-            Ok(url) => Ok(url),
-            Err(err) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
-                "Invalid URL: {err}",
-            ))),
-        }
+        let url = Url::parse(&url_string)
+            .map_err(|err| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}")))?;
+        Self::reject_ip_host(&url)?;
+        Ok(url)
     }
 }
 
@@ -464,6 +506,20 @@ mod tests {
         };
 
         assert_eq!(parsed.fragment, Some("key-fragment".to_string()));
+        assert_eq!(parsed.domain, "example.com");
+    }
+
+    #[test]
+    fn url_with_fragment_no_query_does_not_leak_into_domain() {
+        // Regression: when a fragment was present but no query, the query-split
+        // fallback restored the original (fragment-bearing) string as the prefix,
+        // so the domain became `127.0.0.1#x` and dodged reject_ip_address().
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:127.0.0.1#x").is_err());
+
+        let parsed = WebVHURL::parse_did_url("did:webvh:scid:example.com:dir#frag").unwrap();
+        assert_eq!(parsed.domain, "example.com");
+        assert_eq!(parsed.path, "/dir/");
+        assert_eq!(parsed.fragment, Some("frag".to_string()));
     }
 
     #[test]
@@ -498,6 +554,48 @@ mod tests {
     }
 
     #[test]
+    fn url_with_lowercase_pct_port() -> Result<(), DIDWebVHError> {
+        let parsed = WebVHURL::parse_did_url("did:webvh:scid:domain%3a8000")?;
+        assert_eq!(parsed.domain, "domain");
+        assert_eq!(parsed.port, Some(8000));
+        Ok(())
+    }
+
+    #[test]
+    fn url_rejects_ipv4_with_lowercase_pct_port() {
+        // Previously slipped past reject_ip_address() because the unparsed
+        // `%3a8080` suffix stayed glued to the host.
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:127.0.0.1%3a8080").is_err());
+    }
+
+    /// Regression: `reject_ip_address()` runs on the raw, still-percent-
+    /// encoded domain segment, so `127%2E0%2E0%2E1` is not an `IpAddr` and
+    /// passes — but `Url::parse` then decodes it to `127.0.0.1` and the
+    /// resolver would fetch from localhost. `get_http_url` now re-checks
+    /// the host *after* parse so the encoding the attacker chooses no
+    /// longer matters.
+    #[test]
+    fn url_rejects_pct_encoded_ip_host() {
+        for did in [
+            "did:webvh:scid:127%2E0%2E0%2E1",
+            "did:webvh:scid:127%2e0%2e0%2e1",
+            "did:webvh:scid:169%2E254%2E169%2E254",
+            "did:webvh:scid:127%2E0%2E0%2E1%3A8080",
+        ] {
+            let parsed = WebVHURL::parse_did_url(did).expect("parse stage doesn't decode");
+            let err = parsed
+                .get_http_url(None)
+                .expect_err("post-parse host check must reject the decoded IP");
+            assert!(
+                err.to_string().contains("IP addresses are not allowed"),
+                "{did} -> {err}"
+            );
+            assert!(parsed.get_http_whois_url().is_err());
+            assert!(parsed.get_http_files_url().is_err());
+        }
+    }
+
+    #[test]
     fn url_with_bad_port() {
         assert!(WebVHURL::parse_did_url("did:webvh:scid:domain%3A8bad").is_err());
         assert!(WebVHURL::parse_did_url("did:webvh:scid:domain%3A999999").is_err());
@@ -523,6 +621,40 @@ mod tests {
             "https://domain:8000/custom/path/whois.vp"
         );
         Ok(())
+    }
+
+    #[test]
+    fn url_rejects_path_traversal() {
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:..:admin").is_err());
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:a:..").is_err());
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:.").is_err());
+    }
+
+    /// Regression: the traversal check used to compare the *raw* segment
+    /// against `..` / `.` / `/`, so `%2E%2E` passed — and then Url::parse
+    /// decoded and normalised it (`/%2E%2E/x/` → `/x/`), defeating the
+    /// check entirely. The check now percent-decodes first.
+    #[test]
+    fn url_rejects_pct_encoded_path_traversal() {
+        for did in [
+            "did:webvh:scid:example.com:%2E%2E:admin",
+            "did:webvh:scid:example.com:%2e%2e:admin",
+            "did:webvh:scid:example.com:.%2E",
+            "did:webvh:scid:example.com:%2E",
+            "did:webvh:scid:example.com:a%2Fb",
+            "did:webvh:scid:example.com:a%5Cb",
+        ] {
+            assert!(
+                WebVHURL::parse_did_url(did).is_err(),
+                "{did} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn url_rejects_empty_or_slash_segment() {
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com::x").is_err());
+        assert!(WebVHURL::parse_did_url("did:webvh:scid:example.com:a/b").is_err());
     }
 
     #[test]

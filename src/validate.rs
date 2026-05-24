@@ -274,6 +274,22 @@ impl DIDWebVHState {
         self.witness_proofs
             .generate_proof_state(highest_version_number)?;
 
+        // Bind witness proofs to *this* log: a witness signs `{"versionId": X}`,
+        // and that signature is only meaningful here if X is the versionId of an
+        // entry in this log. The witness-proofs file is fetched from the
+        // (potentially compromised) DID host, so without this check an attacker
+        // can replay a genuine proof that W issued for a *different* DID's entry
+        // "N-otherhash" — the later-proof branch in validate_log_entry would
+        // verify the signature against the claimed versionId and count it.
+        let valid_version_ids: std::collections::HashSet<&str> = self
+            .log_entries
+            .iter()
+            .map(|e| e.get_version_id())
+            .collect();
+        self.witness_proofs
+            .witness_version
+            .retain(|_, (version_id, _, _)| valid_version_ids.contains(version_id.as_str()));
+
         // Step 4: Validate the witness proofs
         for log_entry in self.log_entries.iter_mut() {
             debug!("Witness Proof Validating: {}", log_entry.get_version_id());
@@ -523,6 +539,50 @@ mod tests {
         assert!(err.to_string().contains("past the deactivation entry"));
     }
 
+    /// Regression: `verify_scid()` proved `parameters.scid` was the genesis
+    /// self-hash but never checked that the SCID embedded in the DID
+    /// document's `id` was that same value. An attacker could publish a
+    /// genesis with `state.id = "did:webvh:<anything>:host"` and
+    /// `parameters.scid = <real-hash>` — `verify_scid` passed, and a
+    /// resolver requesting `did:webvh:<anything>:host` would match it
+    /// against `state["id"]` and accept. The SCID in the DID the user typed
+    /// then has zero cryptographic binding to the log.
+    ///
+    /// `create_log_entry` builds exactly this when the supplied document's
+    /// `id` uses a literal string instead of the `{SCID}` placeholder: the
+    /// `{SCID}` → real-hash substitution only touches `parameters.scid`.
+    #[tokio::test]
+    async fn test_validate_rejects_scid_mismatch_between_params_and_doc_id() {
+        let key = generate_signing_key();
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(
+                key.get_public_keymultibase().unwrap(),
+            )])),
+            portable: Some(false),
+            ..Default::default()
+        };
+        // No `{SCID}` placeholder — the doc id keeps this fake SCID while
+        // parameters.scid is set to the real genesis hash.
+        let doc = did_doc_with_key("did:webvh:QmFakeScidNotTheRealHash:localhost%3A8000", &key);
+
+        let mut state = DIDWebVHState::default();
+        state
+            .create_log_entry(None, &doc, &params, &key)
+            .await
+            .unwrap();
+        for entry in &mut state.log_entries {
+            entry.validation_status = LogEntryValidationStatus::NotValidated;
+        }
+
+        let err = state
+            .validate()
+            .expect_err("doc-id SCID must match the verified parameters.scid");
+        assert!(
+            err.to_string().contains("does not match parameters.scid"),
+            "got: {err}"
+        );
+    }
+
     /// Tests that an invalid first log entry produces an immediate error.
     ///
     /// If the very first entry in the log is malformed (e.g., missing a proof),
@@ -595,6 +655,128 @@ mod tests {
     #[tokio::test]
     async fn test_validate_ttl_custom() {
         assert_ttl_produces_expiry(Some(7200), 7200).await;
+    }
+
+    /// Regression test for cross-DID witness-proof replay.
+    ///
+    /// A witness signs `{"versionId": X}`. That signature is *globally* valid
+    /// — it does not name the DID. So if witness W also witnesses some other
+    /// DID, an attacker who controls this DID's host can lift W's genuine
+    /// proof for `"3-<other-hash>"` from the other DID's witness file and drop
+    /// it into this one. Before the fix, the later-version branch in
+    /// `validate_log_entry` would verify the signature against the *claimed*
+    /// versionId (which checks out — W really signed it) and count it toward
+    /// the threshold for entries 1 and 2, even though `"3-<other-hash>"` is
+    /// not an entry in this log at all.
+    ///
+    /// Scenario built here:
+    ///   - entry 1: sets `witness: {threshold:1, [W]}` → entry 1 needs W
+    ///   - entry 2: sets `witness: {}` (off) → entry 2 still needs W (active
+    ///     witness is the *previous* entry's config)
+    ///   - entry 3: no witness param → active_witness is None, no proof needed
+    ///   - witness file: one genuine W signature over `"3-crossdidhash"`,
+    ///     replayed from a different DID
+    ///
+    /// Without the fix: entries 1 and 2 are satisfied via the later-version
+    /// branch, entry 3 needs nothing → full validation passes with W never
+    /// having signed anything in this log. With the fix: the replayed proof's
+    /// versionId is not in this log, so it is dropped before witness
+    /// validation and entry 1 fails its threshold.
+    #[tokio::test]
+    async fn test_validate_rejects_cross_did_witness_replay() {
+        use crate::witness::{Witness, Witnesses};
+        use affinidi_data_integrity::{DataIntegrityProof, SignOptions};
+
+        let base_time = (Utc::now() - Duration::seconds(1000)).fixed_offset();
+        let controller = generate_signing_key();
+        let controller_mb = Multibase::new(controller.get_public_keymultibase().unwrap());
+
+        // Witness key — secret.id must be the did:key VM so the proof's
+        // verificationMethod matches what validate_log_entry looks up.
+        let witness_secret =
+            affinidi_secrets_resolver::secrets::Secret::generate_ed25519(None, None);
+        let w_pk = witness_secret.get_public_keymultibase().unwrap();
+        let mut witness_secret = witness_secret.clone();
+        witness_secret.id = format!("did:key:{w_pk}#{w_pk}");
+
+        let doc = did_doc_with_key("did:webvh:{SCID}:localhost%3A8000", &controller);
+        let mut state = DIDWebVHState::default();
+
+        // Entry 1: turn on witnessing.
+        state
+            .create_log_entry(
+                Some(base_time),
+                &doc,
+                &Parameters {
+                    update_keys: Some(Arc::new(vec![controller_mb.clone()])),
+                    portable: Some(false),
+                    witness: Some(Arc::new(Witnesses::Value {
+                        threshold: 1,
+                        witnesses: vec![Witness {
+                            id: Multibase::new(format!("did:key:{w_pk}")),
+                        }],
+                    })),
+                    ..Default::default()
+                },
+                &controller,
+            )
+            .await
+            .unwrap();
+        let actual_doc = state.log_entries.last().unwrap().get_state().clone();
+
+        // Entry 2: turn witnessing off (takes effect at entry 3).
+        state
+            .create_log_entry(
+                Some(base_time + Duration::seconds(1)),
+                &actual_doc,
+                &Parameters {
+                    witness: Some(Arc::new(Witnesses::Empty {})),
+                    ..Default::default()
+                },
+                &controller,
+            )
+            .await
+            .unwrap();
+
+        // Entry 3: no witness needed.
+        state
+            .create_log_entry(
+                Some(base_time + Duration::seconds(2)),
+                &actual_doc,
+                &Parameters::default(),
+                &controller,
+            )
+            .await
+            .unwrap();
+
+        // The replayed proof: W's genuine signature over a versionId from a
+        // *different* DID's log. Version number 3 ≤ highest (3) so it survives
+        // generate_proof_state, and 3 > {1,2} so entries 1 and 2 hit the
+        // later-version branch — which only checks the signature against the
+        // claimed versionId, not against this log.
+        let replayed = DataIntegrityProof::sign(
+            &json!({"versionId": "3-crossdidhash"}),
+            &witness_secret,
+            SignOptions::new(),
+        )
+        .await
+        .unwrap();
+        state
+            .witness_proofs
+            .add_proof("3-crossdidhash", &replayed, false)
+            .unwrap();
+
+        for entry in &mut state.log_entries {
+            entry.validation_status = LogEntryValidationStatus::NotValidated;
+        }
+
+        let err = state
+            .validate()
+            .expect_err("cross-DID witness proof must not satisfy this log's threshold");
+        assert!(
+            err.to_string().contains("threshold"),
+            "expected threshold failure, got: {err}"
+        );
     }
 
     /// Tests that validating a state with no log entries at all returns an error.

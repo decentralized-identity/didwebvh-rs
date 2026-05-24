@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.5.2"
+version = "0.5.3"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -11,7 +11,7 @@ keywords = ["ssi", "did", "webvh", "verifiable"]
 publish = true
 license = "Apache-2.0"
 readme = "README.md"
-rust-version = "1.94.0"
+rust-version = "1.95.0"
 
 # `getrandom` is listed in [dependencies] with `features = ["wasm_js"]`
 # but isn't directly imported — the purpose is to enable the `wasm_js`
@@ -55,12 +55,13 @@ reqwest = { version = "0.13", optional = true }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 serde_json_canonicalizer = "0.3"
-serde_with = "3.18"
+serde_with = "3.20"
 sha2 = "0.11"
 ssi = { version = "0.16", features = ["secp384r1"], optional = true }
 thiserror = "2.0"
 tokio = { version = "1" }
 tracing = { version = "0.1" }
+percent-encoding = "2.3"
 url = "2.5"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 

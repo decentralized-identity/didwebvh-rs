@@ -72,6 +72,35 @@ impl LogEntry {
             )));
         }
 
+        // didwebvh 1.0 mandates eddsa-jcs-2022 for the controller's log-entry
+        // proof. Enforcing it here (as we already do for witness proofs via
+        // enforce_witness_proof_shape) blocks algorithm-substitution: the key
+        // bytes are decoded from did:key independently of the suite, so a
+        // proof that selects a different suite would otherwise feed those
+        // bytes into a verifier they were not generated for.
+        //
+        // The `experimental-pqc` feature widens the accepted set to include
+        // the JCS-canonicalized PQC variants from W3C `di-quantum-safe` v0.3
+        // (not yet in didwebvh 1.0 — opt-in build flag). RDFC variants are
+        // still rejected: didwebvh 1.0 mandates JCS canonicalization, and
+        // accepting an RDFC suite would re-introduce the algorithm-
+        // substitution risk this check exists to close.
+        let cryptosuite_ok = match proof.cryptosuite {
+            affinidi_data_integrity::crypto_suites::CryptoSuite::EddsaJcs2022 => true,
+            #[cfg(feature = "experimental-pqc")]
+            affinidi_data_integrity::crypto_suites::CryptoSuite::MlDsa44Jcs2024
+            | affinidi_data_integrity::crypto_suites::CryptoSuite::SlhDsa128Jcs2024 => true,
+            _ => false,
+        };
+        if !cryptosuite_ok {
+            return Err(DIDWebVHError::ValidationError(format!(
+                "Invalid cryptosuite {:?}: log entry proofs must use eddsa-jcs-2022 \
+                 (or, with the `experimental-pqc` build feature, a JCS-canonicalized \
+                 PQC suite from W3C di-quantum-safe v0.3)",
+                proof.cryptosuite
+            )));
+        }
+
         // Ensure the Parameters are correctly setup
         let parameters = match self.get_parameters().validate(previous_parameters) {
             Ok(params) => params,
@@ -195,11 +224,21 @@ impl LogEntry {
             return false;
         }
 
-        if let Some((_, key)) = proof_key.split_once('#') {
-            authorized_keys.iter().any(|f| f.as_str() == key)
-        } else {
-            false
+        // The proof's verificationMethod must be exactly `did:key:{mb}#{mb}` for an
+        // authorized multibase `{mb}`. Signature verification later decodes the public
+        // key from the DID *body* (before `#`) via `resolve_did_key`, so checking only
+        // the fragment would let `did:key:<attacker>#<authorized>` pass authorization
+        // here while verifying against the attacker's key — a full forgery.
+        let Some((did, fragment)) = proof_key.split_once('#') else {
+            return false;
+        };
+        let Some(body) = did.strip_prefix("did:key:") else {
+            return false;
+        };
+        if body != fragment {
+            return false;
         }
+        authorized_keys.iter().any(|f| f.as_str() == body)
     }
 
     /// Checks the version ID of a LogEntry against the previous LogEntry
@@ -254,6 +293,26 @@ impl LogEntry {
     ) -> Result<(), DIDWebVHError> {
         let current_id = self.get_state().get("id").and_then(|v| v.as_str());
         let previous_id = previous.get_state().get("id").and_then(|v| v.as_str());
+
+        // Portability lets the host/path change; the SCID never does. Without
+        // this, a portable DID could set entry N's state.id to
+        // `did:webvh:<anything>:new-host` (with the old DID in alsoKnownAs)
+        // and resolve_state would then accept a request for that arbitrary
+        // SCID — the same self-certifying bypass verify_scid() closes for the
+        // genesis entry, reopened at N>1. parameters.scid is carried forward
+        // unchanged from genesis, so it is the authoritative anchor.
+        if let Some(current) = current_id {
+            let scid = parameters.scid.as_deref().map(String::as_str);
+            let doc_scid = current
+                .strip_prefix("did:webvh:")
+                .and_then(|rest| rest.split_once(':'))
+                .map(|(s, _)| s);
+            if doc_scid.is_none() || doc_scid != scid {
+                return Err(DIDWebVHError::ValidationError(format!(
+                    "DID document id SCID ({doc_scid:?}) does not match parameters.scid ({scid:?})",
+                )));
+            }
+        }
 
         if let (Some(current), Some(previous_did)) = (current_id, previous_id)
             && current != previous_did
@@ -344,6 +403,28 @@ impl LogEntry {
             )));
         }
 
+        // The check above proves `parameters.scid` is the genesis self-hash.
+        // It does NOT prove the SCID embedded in the DID document's `id` is
+        // that same value — `state["id"]` is attacker-authored and the
+        // string-replace above only targets `parameters.scid`. Without this
+        // check an attacker can set `state.id = "did:webvh:<anything>:host"`
+        // and `parameters.scid = <real-hash>`; verify_scid passes, and a
+        // resolver requesting `did:webvh:<anything>:host` matches it against
+        // `state["id"]` and accepts. The "self-certifying" in SCID would then
+        // certify nothing about the DID the user actually resolved.
+        let doc_scid = self
+            .get_state()
+            .get("id")
+            .and_then(|v| v.as_str())
+            .and_then(|id| id.strip_prefix("did:webvh:"))
+            .and_then(|rest| rest.split_once(':'))
+            .map(|(s, _)| s);
+        if doc_scid != Some(scid.as_str()) {
+            return Err(DIDWebVHError::ValidationError(format!(
+                "DID document id SCID ({doc_scid:?}) does not match parameters.scid ({scid})",
+            )));
+        }
+
         Ok(())
     }
 }
@@ -374,6 +455,18 @@ mod tests {
             state,
             proof: vec![],
         })
+    }
+
+    /// Validated-parameters fixture for `verify_portability` tests: `scid` is
+    /// set to match the `did:webvh:abc123:...` doc ids used throughout, so the
+    /// SCID-immutability check passes and the test exercises only the
+    /// portability rule it names.
+    fn portability_params(portable: Option<bool>) -> Parameters {
+        Parameters {
+            portable,
+            scid: Some(Arc::new("abc123".to_string())),
+            ..Default::default()
+        }
     }
 
     /// Helper to create a minimal Spec1_0 LogEntry with a specific timestamp.
@@ -423,6 +516,35 @@ mod tests {
         }
     }
 
+    /// Tests that verify_log_entry rejects a proof whose cryptosuite is not
+    /// eddsa-jcs-2022. The spec mandates this suite; accepting eddsa-rdfc-2022
+    /// would feed the same did:key bytes into a different canonicalization
+    /// pipeline and break interop/signature-domain separation.
+    #[test]
+    fn test_invalid_cryptosuite_rejected() {
+        let entry = LogEntry::Spec1_0(LogEntry1_0 {
+            version_id: "1-abcdef".to_string(),
+            version_time: Utc::now().fixed_offset(),
+            parameters: Parameters1_0::default(),
+            state: json!({}),
+            proof: vec![DataIntegrityProof {
+                type_: "DataIntegrityProof".to_string(),
+                cryptosuite: CryptoSuite::EddsaRdfc2022,
+                created: None,
+                verification_method: "did:key:z6Mk#z6Mk".to_string(),
+                proof_purpose: "assertionMethod".to_string(),
+                proof_value: Some("zDummy".to_string()),
+                context: None,
+            }],
+        });
+
+        let result = entry.verify_log_entry(None, None);
+        assert!(
+            matches!(result, Err(DIDWebVHError::ValidationError(ref msg)) if msg.contains("eddsa-jcs-2022")),
+            "Expected eddsa-jcs-2022 error, got: {result:?}",
+        );
+    }
+
     /// Tests that verify_portability passes when the DID document id has not
     /// changed between entries and portable is false.
     /// Expected: Returns Ok because no move occurred.
@@ -433,10 +555,7 @@ mod tests {
         // Same DID id between entries, portable=false → should pass
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
-        let params = Parameters {
-            portable: Some(false),
-            ..Default::default()
-        };
+        let params = portability_params(Some(false));
 
         assert!(current.verify_portability(&previous, &params).is_ok());
     }
@@ -451,10 +570,7 @@ mod tests {
         // DID id changed, portable=false → must fail
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:newdomain.com"}));
-        let params = Parameters {
-            portable: Some(false),
-            ..Default::default()
-        };
+        let params = portability_params(Some(false));
 
         let result = current.verify_portability(&previous, &params);
         assert!(result.is_err());
@@ -476,10 +592,7 @@ mod tests {
         // DID id changed, portable=None (defaults to false) → must fail
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:newdomain.com"}));
-        let params = Parameters {
-            portable: None,
-            ..Default::default()
-        };
+        let params = portability_params(None);
 
         let result = current.verify_portability(&previous, &params);
         assert!(result.is_err());
@@ -501,10 +614,7 @@ mod tests {
         // DID id changed, portable=true, but no alsoKnownAs → must fail
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:newdomain.com"}));
-        let params = Parameters {
-            portable: Some(true),
-            ..Default::default()
-        };
+        let params = portability_params(Some(true));
 
         let result = current.verify_portability(&previous, &params);
         assert!(result.is_err());
@@ -530,10 +640,7 @@ mod tests {
             "id": "did:webvh:abc123:newdomain.com",
             "alsoKnownAs": ["did:webvh:abc123:other.com"]
         }));
-        let params = Parameters {
-            portable: Some(true),
-            ..Default::default()
-        };
+        let params = portability_params(Some(true));
 
         let result = current.verify_portability(&previous, &params);
         assert!(result.is_err());
@@ -558,12 +665,31 @@ mod tests {
             "id": "did:webvh:abc123:newdomain.com",
             "alsoKnownAs": ["did:webvh:abc123:example.com"]
         }));
-        let params = Parameters {
-            portable: Some(true),
-            ..Default::default()
-        };
+        let params = portability_params(Some(true));
 
         assert!(current.verify_portability(&previous, &params).is_ok());
+    }
+
+    /// Regression: portability lets the host change, never the SCID. Before
+    /// this check a portable DID could set entry N's `state.id` to
+    /// `did:webvh:<anything>:new-host` (with the old DID in alsoKnownAs) and
+    /// pass — the same self-certifying bypass `verify_scid` closes for the
+    /// genesis, reopened at N>1. `parameters.scid` is the genesis hash carried
+    /// forward unchanged, so any entry whose doc-id SCID differs is rejected.
+    #[test]
+    fn test_portability_rejects_scid_change() {
+        let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
+        let current = make_log_entry(json!({
+            "id": "did:webvh:DIFFERENTSCID:newdomain.com",
+            "alsoKnownAs": ["did:webvh:abc123:example.com"]
+        }));
+        let params = portability_params(Some(true));
+
+        let err = current.verify_portability(&previous, &params).unwrap_err();
+        assert!(
+            err.to_string().contains("does not match parameters.scid"),
+            "got: {err}"
+        );
     }
 
     /// Tests that verify_portability succeeds when the DID id has not changed,
@@ -576,10 +702,7 @@ mod tests {
         // Same DID id, portable=true → should pass (no move happened)
         let previous = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
         let current = make_log_entry(json!({"id": "did:webvh:abc123:example.com"}));
-        let params = Parameters {
-            portable: Some(true),
-            ..Default::default()
-        };
+        let params = portability_params(Some(true));
 
         assert!(current.verify_portability(&previous, &params).is_ok());
     }
@@ -717,6 +840,40 @@ mod tests {
         assert!(LogEntry::check_signing_key_authorized(
             &Arc::new(authorized_keys),
             "did:key:z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15#z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15"
+        ));
+    }
+
+    /// Regression: a verificationMethod whose fragment names an authorized key but whose
+    /// did:key body names a *different* key must be rejected. Signature verification
+    /// decodes the public key from the body, so accepting this would allow anyone to
+    /// forge log entries by signing with their own key and pointing the fragment at an
+    /// authorized one.
+    #[test]
+    fn test_authorized_keys_mismatched_body_and_fragment_rejected() {
+        let authorized = "z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15";
+        let attacker = "z6MktKQzZyzDTccPxQR1vQfYHrXUmyDkBkJ7nFjTuqmas5Z2";
+        let authorized_keys: Vec<Multibase> = vec![Multibase::new(authorized)];
+
+        assert!(!LogEntry::check_signing_key_authorized(
+            &Arc::new(authorized_keys.clone()),
+            &format!("did:key:{attacker}#{authorized}"),
+        ));
+        // and the mirror: authorized body with attacker fragment must also fail
+        assert!(!LogEntry::check_signing_key_authorized(
+            &Arc::new(authorized_keys),
+            &format!("did:key:{authorized}#{attacker}"),
+        ));
+    }
+
+    /// A verificationMethod that isn't a did:key URI at all must be rejected even if
+    /// its fragment matches an authorized key.
+    #[test]
+    fn test_authorized_keys_non_did_key_rejected() {
+        let authorized = "z6Mkr46vzpmne5FJTE1TgRHrWkoc5j9Kb1suMYtxkdvgMu15";
+        let authorized_keys: Vec<Multibase> = vec![Multibase::new(authorized)];
+        assert!(!LogEntry::check_signing_key_authorized(
+            &Arc::new(authorized_keys),
+            &format!("did:web:example.com#{authorized}"),
         ));
     }
 
