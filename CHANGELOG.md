@@ -1,5 +1,189 @@
 # didwebvh-rs Changelog history
 
+## 24th May 2026
+
+### Release 0.5.3 — security: 15 patches from cross-implementation audit
+
+Closes the issues raised in
+[#39](https://github.com/decentralized-identity/didwebvh-rs/issues/39),
+a cross-implementation review of the four open-source `did:webvh`
+resolvers. Patch series tightens authorization, DID-URL parsing, and
+witness-proof validation. No public-API breakage; consumers on `0.5.x`
+should upgrade. Pre-existing logs continue to resolve; the changes
+reject malformed or malicious inputs that previously slipped through.
+
+MSRV: 1.94.0 → 1.95.0 (required by transitive lockfile bumps stable
+since 2026-04-14).
+
+#### Security
+
+- **Reject mismatched `did:key` body/fragment in log-entry proof
+  authorization.** `check_signing_key_authorized()` compared only the
+  fragment of the proof's `verificationMethod` against
+  `updateKeys`, but signature verification decoded the public key from
+  the DID *body*. An attacker could set
+  `verificationMethod = "did:key:<attacker-mb>#<authorized-mb>"` — the
+  fragment matched an authorized key so authorization passed, while the
+  signature was verified against the attacker's own key. This allowed
+  anyone to forge arbitrary DID log entries for any `did:webvh` DID.
+  The `verificationMethod` is now required to be exactly
+  `did:key:{mb}#{mb}` where `{mb}` is an authorized multibase.
+- **Disable HTTP redirects in DID resolution.** `reqwest` followed up
+  to 10 redirects by default. A malicious host serving a `did:webvh`
+  DID could 302-redirect the `did.jsonl` / `did-witness.json` fetch to
+  an internal address (cloud metadata, localhost, RFC 1918), turning
+  the resolver into an SSRF proxy and bypassing the existing
+  IP-address rejection in `WebVHURL::parse_did_url()`. The native
+  client now sets `redirect(Policy::none())`; the WASM path is
+  unchanged (governed by the browser's fetch/CORS model).
+- **Reject duplicate witness IDs.** `Witnesses::validate()` checked
+  the count met the threshold but not for duplicates.
+  `WitnessProofCollection::validate_log_entry()` increments
+  `valid_proofs` once per listed witness, so a controller declaring
+  `threshold: 3, witnesses: [W1, W1, W1]` could satisfy the threshold
+  with a single proof from `W1`. Duplicate witness IDs are now
+  rejected.
+- **Reject path-traversal segments when converting DID → HTTP URL.**
+  `WebVHURL::parse_did_url()` joined the colon-separated path
+  components of a `did:webvh` identifier into the HTTP path with no
+  validation. A DID such as `did:webvh:<scid>:example.com:..:..:other`
+  resolved to `https://example.com/../../other/did.jsonl`. `.`, `..`,
+  empty segments, and segments containing `/` are now rejected.
+- **Percent-decode path segments before the traversal check.** The
+  raw check could be defeated by encoding: `…:%2E%2E:x` passed the
+  literal `..` test, became `…/%2E%2E/x/…`, and `Url::parse` collapsed
+  it. Segments are now percent-decoded before the check. `\` is also
+  rejected.
+- **Match lowercase `%3a` when splitting host:port in DID URL
+  parsing.** Percent-encoding is case-insensitive (RFC 3986 §2.1) but
+  the parser only split on literal `%3A`. A DID using
+  `did:webvh:<scid>:127.0.0.1%3a8080` left
+  `domain = "127.0.0.1%3a8080"`, which did not parse as an `IpAddr`
+  and slipped past `reject_ip_address()`. Both encodings are now
+  recognised.
+- **Re-check host after `Url::parse` to block percent-encoded IP
+  bypass.** `reject_ip_address()` ran on the raw DID domain segment
+  before percent-decoding, so `did:webvh:SCID:127%2E0%2E0%2E1` did not
+  parse as `IpAddr` and passed — `Url::parse` then decoded the host to
+  `127.0.0.1` and the resolver fetched from localhost. Same for
+  `169.254.169.254` (cloud metadata). All three `get_http_*_url()`
+  functions now re-check `url.host()` after parsing and reject
+  `Host::Ipv4` / `Host::Ipv6`. The early `reject_ip_address()` remains
+  as a cheap pre-check.
+- **Don't re-include stripped fragment when DID URL has no query.**
+  The query-split fallback used the wrong variable, gluing an
+  already-stripped fragment back onto the prefix before scid/domain
+  splitting. For `did:webvh:<scid>:127.0.0.1#x` this yielded
+  `domain = "127.0.0.1#x"`, again bypassing
+  `reject_ip_address()`.
+- **Verify "later version" witness proofs before counting toward
+  threshold.** A witness proof for published version `N > current` was
+  counted toward the current entry's threshold without signature
+  verification, on the assumption it would be verified when entry `N`
+  itself was processed. But if the witness was rotated out before
+  entry `N`, the proof was never verified anywhere — letting a
+  compromised controller forge "later" proofs for rotated-out
+  witnesses and satisfy the threshold for every earlier entry. The
+  signature is now verified against its own versionId in this branch
+  before incrementing `valid_proofs`.
+- **Bind witness proofs to this log's versionIds.** A witness signs
+  `{"versionId": X}`. Nothing in that payload names the DID, so a
+  genuine signature `W` made for another DID's entry was
+  cryptographically valid here too. Since the witness-proofs file is
+  fetched from the (potentially compromised) DID host, an attacker
+  could replay `W`'s proof from another DID into this one. After
+  `generate_proof_state`, proofs whose versionId is not present in
+  this log are now dropped.
+- **Enforce `eddsa-jcs-2022` cryptosuite on controller proofs.**
+  `verify_log_entry` checked `proofPurpose` but not `cryptosuite`,
+  while witness proofs already enforced `eddsa-jcs-2022` via
+  `enforce_witness_proof_shape()`. The didwebvh 1.0 spec mandates
+  `eddsa-jcs-2022` for log-entry proofs too — without this check, the
+  proof's suite chose the canonicalization pipeline while public-key
+  bytes were decoded from `did:key` independently, an
+  algorithm-substitution surface that grows as the upstream library
+  adds suites. The widened check still admits `MlDsa44Jcs2024` and
+  `SlhDsa128Jcs2024` when the `experimental-pqc` feature is enabled.
+- **Bind the DID document's SCID to the verified `parameters.scid`.**
+  `verify_scid()` proved that `parameters.scid` is the genesis
+  self-hash, but nothing checked that the SCID embedded in
+  `state["id"]` — the DID the resolver matches the request against —
+  is that same value. An attacker could publish a genesis with
+  `state.id = "did:webvh:<anything>:host"` while
+  `parameters.scid = <real genesis hash>` and a user resolving
+  `did:webvh:<anything>:host` got a "validated" log with no
+  cryptographic binding between the resolved DID and the genesis. The
+  third colon-segment of `state["id"]` is now required to equal
+  `parameters.scid`.
+- **Enforce SCID immutability across every entry, not just genesis.**
+  `verify_portability()` let a portable DID change `state["id"]` to
+  anything as long as the previous DID appeared in `alsoKnownAs` —
+  including a new id with a different SCID segment, reopening the
+  self-certifying bypass on every non-genesis entry. The SCID segment
+  of `state["id"]` is now required to equal `parameters.scid` on every
+  entry. The spec is explicit that portability moves the host/path;
+  the SCID is the cryptographic anchor and never changes.
+- **Require `updateKeys` when previous entry committed
+  `nextKeyHashes`.** When entry `N` set `nextKeyHashes` (pre-rotation
+  active), entry `N+1` could omit `updateKeys` entirely — the `None` /
+  empty arms inherited `previous.active_update_keys` unchanged and the
+  proof was then authorized against those inherited *old* keys. An
+  attacker who compromised an old update key after the controller
+  pre-committed its replacement could forge entry `N+1` by leaving
+  `updateKeys` out, a complete bypass of the pre-rotation guarantee.
+  Absent and empty `updateKeys` are now rejected when the previous
+  entry had pre-rotation active.
+
+#### Fixed
+
+- **Don't panic on malformed `id` in
+  `convert_webvh_id_to_web_id`.** The `id` passed in is read from the
+  DID document's `state["id"]` field, which is attacker-controlled.
+  A value with fewer than three `:` segments (e.g. `"foo"`) panicked
+  on the `parts[3..]` slice, crashing any resolver that called
+  `to_web_did()` on a hostile log. Malformed input now degrades to a
+  bare `did:web` instead of a DoS.
+- **Distinguish older-version proofs from current-version proofs in
+  the witness verifier.** When the stored proof for a witness had
+  `oldest_id < version_number`, the code fell through to the
+  "current version" branch and tried to verify against the *current*
+  entry's versionId — which the proof was not signed over. The
+  verifier failed with "signature invalid", masking the actual
+  semantic: this proof simply does not cover this entry. The
+  threshold check at the end now correctly surfaces
+  `"threshold (N) was not met. Only (M) proofs were validated"`
+  instead of a misleading signature error. Surfaces a real
+  cross-implementation interop issue: Python, Java, and Java-EECC
+  witness files keep stale per-version proofs (they do not cull) so
+  the threshold cannot be met by older-version proofs alone. Rust's
+  culling behaviour (keep only the latest per witness) was already
+  correct.
+
+#### Changed
+
+- **MSRV bumped 1.94.0 → 1.95.0.** Required by transitive
+  dependencies pulled in by `cargo update` (stable since 2026-04-14).
+  CI MSRV job's toolchain matrix updated accordingly. No source
+  changes required.
+- **`serde_with` constraint widened `3.18` → `3.20`** to reflect the
+  actual minimum.
+- **`Cargo.lock` refreshed.** `affinidi-crypto 0.1.5 → 0.1.6` (fixes
+  upstream `ml-dsa` API drift on `KeyGen`), `tokio 1.52.1 → 1.52.3`,
+  `reqwest 0.13.2 → 0.13.3`, `serde_json 1.0.149 → 1.0.150`,
+  `serde_with 3.18.0 → 3.20.0`, plus transitive bumps (`tower-http`,
+  `wasm-bindgen` family, `web-sys`, `winnow`, `zerofrom`). No
+  major-version churn; no `Cargo.toml` constraints widened.
+
+#### CI
+
+- **`cargo audit`: ignore RUSTSEC-2026-0104** (rustls-webpki CRL
+  panic). Same crate version (`0.101.7`) and same transitive chain
+  (`reqwest 0.11` via the optional `ssi` feature) as already-ignored
+  RUSTSEC-2026-0098 and RUSTSEC-2026-0099. The `ssi` feature is
+  optional and not enabled in `default`, so the default build has
+  zero advisories. Inline comments now separate vulnerabilities from
+  unmaintained-package warnings to make triage easier.
+
 ## 30th April 2026
 
 ### Release 0.5.2 — DID Core service ID compliance
