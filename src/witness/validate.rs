@@ -116,9 +116,9 @@ impl WitnessProofCollection {
                 );
                 valid_proofs += 1;
                 continue;
-            } else {
-                // witness proof is for this verion of the LogEntry
-                // Validate the LogEntry against the proof
+            } else if oldest_id == &version_number {
+                // witness proof is for this version of the LogEntry —
+                // verify against this entry's versionId.
                 log_entry
                     .log_entry
                     .validate_witness_proof(proof, options)
@@ -135,6 +135,28 @@ impl WitnessProofCollection {
                     log_entry.get_version_id(),
                     w.id
                 );
+            } else {
+                // oldest_id < version_number. The stored proof is for an
+                // *earlier* published entry than the one we are validating.
+                // Per didwebvh 1.0 § "Verifying Witness Proofs During
+                // Resolution", a proof at version K only counts for entries
+                // ≤ K (the "current or any later" rule, equivalently "a
+                // valid proof carries the implication that all prior log
+                // entries are also approved"). So this proof does NOT
+                // approve the current entry and MUST NOT be counted toward
+                // the threshold. We silently skip it; if too few witnesses
+                // have a current-or-later proof the threshold check at the
+                // bottom of this function will surface as "threshold not
+                // met", which is the correct semantic error (rather than
+                // attempting to verify the proof against the current
+                // versionId and surfacing a misleading "signature invalid"
+                // failure when the bytes simply don't match).
+                debug!(
+                    "LogEntry ({}): older witness proof from {} (for {oldest_id}) does not approve current entry per spec; not counted toward threshold",
+                    log_entry.get_version_id(),
+                    w.id,
+                );
+                continue;
             }
         }
 
