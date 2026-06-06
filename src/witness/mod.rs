@@ -5,7 +5,9 @@
 use affinidi_data_integrity::crypto_suites::CryptoSuite;
 
 use crate::{DIDWebVHError, Multibase};
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer, de::Error as _, ser::SerializeStruct,
+};
 use std::fmt::Display;
 
 pub mod proofs;
@@ -137,7 +139,10 @@ impl Witnesses {
                 // multiple independent witnesses.
                 let mut seen = std::collections::HashSet::with_capacity(witnesses.len());
                 for w in witnesses {
-                    if !seen.insert(w.id.as_str()) {
+                    // Compare on the canonical `did:key:` form so that a bare
+                    // multibase key and its `did:key:`-prefixed equivalent are
+                    // recognized as the same witness (they serialize identically).
+                    if !seen.insert(w.as_did()) {
                         return Err(DIDWebVHError::ValidationError(format!(
                             "Witness ({}) appears more than once in the witness list",
                             w.id
@@ -173,9 +178,20 @@ impl Witnesses {
 }
 
 /// Single Witness Node
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+///
+/// Per didwebvh 1.0 § "Witnesses" the `id` of a witness MUST be a `did:key`
+/// identifier (e.g. `did:key:z6Mk...`), NOT a bare multibase key. To guarantee
+/// spec-compliant output regardless of how a caller constructs the value, the
+/// `id` is canonicalized to `did:key:` form on both serialization and
+/// deserialization (see the hand-written [`Serialize`]/[`Deserialize`] impls
+/// below). Use [`Witness::new`] to build one with the same canonicalization.
+///
+/// Canonicalization is a no-op for an already-`did:key:` id, so logs produced
+/// by spec-compliant implementations round-trip byte-for-byte and their
+/// `entryHash` continues to verify.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Witness {
-    /// Multibase-encoded public key identifying this witness node.
+    /// `did:key` identifier of this witness node.
     pub id: Multibase,
 }
 
@@ -185,18 +201,60 @@ impl Display for Witness {
     }
 }
 
+/// Canonicalize a witness identifier to `did:key:` form.
+///
+/// A bare multibase key (`z6Mk...`) gets the `did:key:` prefix prepended; an
+/// id that already starts with `did:key:` is returned unchanged.
+fn canonicalize_witness_id(id: &str) -> String {
+    if id.starts_with("did:key:") {
+        id.to_string()
+    } else {
+        ["did:key:", id].concat()
+    }
+}
+
+impl Serialize for Witness {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Always emit the spec-mandated `did:key:` form, even if `id` was
+        // constructed from a bare multibase key via a struct literal.
+        let mut state = serializer.serialize_struct("Witness", 1)?;
+        state.serialize_field("id", &self.as_did())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Witness {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct RawWitness {
+            id: String,
+        }
+        let raw = RawWitness::deserialize(deserializer)?;
+        if raw.id.is_empty() {
+            return Err(D::Error::custom("witness id must not be empty"));
+        }
+        Ok(Witness::new(raw.id))
+    }
+}
+
 impl Witness {
+    /// Construct a witness from any key identifier, canonicalizing it to the
+    /// spec-mandated `did:key:` form.
+    ///
+    /// Accepts either a bare multibase key (`z6Mk...`, the `did:key:` prefix is
+    /// prepended) or a full `did:key:z6Mk...` identifier (kept as-is).
+    pub fn new(id: impl Into<String>) -> Self {
+        Witness {
+            id: Multibase::new(canonicalize_witness_id(&id.into())),
+        }
+    }
+
     /// Returns the witness ID as a `did:key:` DID.
     ///
     /// Handles both formats: if the stored ID already starts with `did:key:`,
     /// it is returned as-is; otherwise the prefix is prepended.
     pub fn as_did(&self) -> String {
-        let id = self.id.as_str();
-        if id.starts_with("did:key:") {
-            id.to_string()
-        } else {
-            ["did:key:", id].concat()
-        }
+        canonicalize_witness_id(self.id.as_str())
     }
 
     /// Returns the witness ID as a `did:key:z6...#z6...` verification method reference.
@@ -225,16 +283,21 @@ impl WitnessesBuilder {
         self
     }
 
-    /// Add a single witness by its multibase-encoded public key.
+    /// Add a single witness by its key identifier.
+    ///
+    /// The id is canonicalized to `did:key:` form (a bare multibase key gets
+    /// the `did:key:` prefix prepended).
     pub fn witness(mut self, id: Multibase) -> Self {
-        self.witnesses.push(Witness { id });
+        self.witnesses.push(Witness::new(id.into_inner()));
         self
     }
 
-    /// Add multiple witnesses from an iterator of multibase-encoded public keys.
+    /// Add multiple witnesses from an iterator of key identifiers.
+    ///
+    /// Each id is canonicalized to `did:key:` form.
     pub fn witnesses(mut self, ids: impl IntoIterator<Item = Multibase>) -> Self {
         self.witnesses
-            .extend(ids.into_iter().map(|id| Witness { id }));
+            .extend(ids.into_iter().map(|id| Witness::new(id.into_inner())));
         self
     }
 
@@ -364,6 +427,77 @@ mod tests {
         };
         assert_eq!(value.witnesses().unwrap().len(), 2);
         assert_eq!(value.threshold(), Some(2));
+    }
+
+    /// Issue #42: a `Witness` built from a bare multibase key must serialize
+    /// its `id` as a `did:key:` identifier (spec § "Witnesses"), not the raw
+    /// multikey.
+    #[test]
+    fn test_witness_serializes_id_as_did_key() {
+        let w = Witness {
+            id: Multibase::new("z6Mkrv5Cm2XCLumMPTqooLTCw6YDf421d7VdTziwrZ8vNf4L"),
+        };
+        let json = serde_json::to_string(&w).unwrap();
+        assert_eq!(
+            json,
+            r#"{"id":"did:key:z6Mkrv5Cm2XCLumMPTqooLTCw6YDf421d7VdTziwrZ8vNf4L"}"#
+        );
+    }
+
+    /// An already-`did:key:` id serializes unchanged (no double prefix), so
+    /// spec-compliant logs round-trip byte-for-byte and `entryHash` still verifies.
+    #[test]
+    fn test_witness_did_key_id_serializes_unchanged() {
+        let w = Witness::new("did:key:z6Mktest");
+        let json = serde_json::to_string(&w).unwrap();
+        assert_eq!(json, r#"{"id":"did:key:z6Mktest"}"#);
+    }
+
+    /// Deserializing canonicalizes a bare multibase id to `did:key:` form, and
+    /// the value then round-trips stably.
+    #[test]
+    fn test_witness_deserialize_canonicalizes_raw_id() {
+        let w: Witness = serde_json::from_str(r#"{"id":"z6Mktest"}"#).unwrap();
+        assert_eq!(w.id.as_str(), "did:key:z6Mktest");
+        // Re-serialize is stable.
+        let json = serde_json::to_string(&w).unwrap();
+        assert_eq!(json, r#"{"id":"did:key:z6Mktest"}"#);
+    }
+
+    /// An empty witness id is rejected at deserialization.
+    #[test]
+    fn test_witness_deserialize_rejects_empty_id() {
+        let err = serde_json::from_str::<Witness>(r#"{"id":""}"#).unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    /// `Witness::new` canonicalizes both bare and prefixed ids.
+    #[test]
+    fn test_witness_new_canonicalizes() {
+        assert_eq!(Witness::new("z6Mktest").id.as_str(), "did:key:z6Mktest");
+        assert_eq!(
+            Witness::new("did:key:z6Mktest").id.as_str(),
+            "did:key:z6Mktest"
+        );
+    }
+
+    /// A bare multibase witness and its `did:key:`-prefixed equivalent are
+    /// treated as duplicates (they serialize identically).
+    #[test]
+    fn test_validate_duplicate_witnesses_mixed_form_error() {
+        let w = Witnesses::Value {
+            threshold: 1,
+            witnesses: vec![
+                Witness {
+                    id: Multibase::new("z6Mktest"),
+                },
+                Witness {
+                    id: Multibase::new("did:key:z6Mktest"),
+                },
+            ],
+        };
+        let err = w.validate().unwrap_err();
+        assert!(err.to_string().contains("more than once"));
     }
 
     /// Tests `as_did()` with a raw multibase key (prepends `did:key:` prefix).

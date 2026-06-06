@@ -582,15 +582,13 @@ mod tests {
 
     #[test]
     fn witness_value_roundtrips() {
+        // Witness ids are canonicalized to `did:key:` form (issue #42), so use
+        // already-canonical ids to assert a lossless round-trip.
         let w = Witnesses::Value {
             threshold: 2,
             witnesses: vec![
-                Witness {
-                    id: Multibase::new("witness1"),
-                },
-                Witness {
-                    id: Multibase::new("witness2"),
-                },
+                Witness::new("z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"),
+                Witness::new("z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"),
             ],
         };
         let json = serde_json::to_string(&w).unwrap();
@@ -861,9 +859,11 @@ mod tests {
             "portable": true,
             "nextKeyHashes": ["zQmS6fKbreQixpa6JueaSuDiL2VQAGosC45TDQdKHf5E155"],
             "watchers": ["https://watcher.example.com"],
+            // Witness id must be `did:key:` per spec (issue #42); lossless
+            // round-trip holds only for the canonical form.
             "witness": {
                 "threshold": 1,
-                "witnesses": [{"id": "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"}]
+                "witnesses": [{"id": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"}]
             },
             "deactivated": false,
             "ttl": 7200
@@ -1029,11 +1029,13 @@ mod tests {
             "method": "did:webvh:1.0",
             "scid": "test",
             "updateKeys": ["key1"],
+            // Witness ids must be `did:key:` per spec (issue #42); the
+            // round-trip is lossless only for the canonical form.
             "witness": {
                 "threshold": 2,
                 "witnesses": [
-                    {"id": "z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"},
-                    {"id": "z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"}
+                    {"id": "did:key:z6MkrJVnaZkeFzdQyMZu1cgjg7k1pZZ6pvBQ7lL8N8AC4Pp6"},
+                    {"id": "did:key:z6MkqUa1LbqZ7EpevqrFC7XHAWM8CE49AKFWVjyu543NfVAp"}
                 ]
             }
         }));
