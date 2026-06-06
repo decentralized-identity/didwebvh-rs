@@ -859,8 +859,10 @@ mod tests {
             .authorization_key(key)
             .did_document(doc)
             .parameters(params)
-            .witness_secret(w1_id, witness1)
-            .witness_secret(w2_id, witness2)
+            // Witness ids are canonicalized to `did:key:` form (issue #42), so
+            // the witness-secret lookup map must be keyed the same way.
+            .witness_secret(format!("did:key:{w1_id}"), witness1)
+            .witness_secret(format!("did:key:{w2_id}"), witness2)
             .build()
             .unwrap();
 
@@ -1111,8 +1113,9 @@ mod tests {
         let log_entry = state.log_entries.last().unwrap();
 
         let mut secrets = HashMap::default();
-        secrets.insert(w1_id, witness1);
-        secrets.insert(w2_id, witness2);
+        // Witness ids are canonicalized to `did:key:` form (issue #42).
+        secrets.insert(format!("did:key:{w1_id}"), witness1);
+        secrets.insert(format!("did:key:{w2_id}"), witness2);
 
         let witnesses = log_entry.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
@@ -1506,7 +1509,8 @@ mod tests {
         let log_entry_state = state.log_entries.last().unwrap();
 
         let mut secrets = HashMap::default();
-        secrets.insert(w1_id, witness1);
+        // Witness id is canonicalized to `did:key:` form (issue #42).
+        secrets.insert(format!("did:key:{w1_id}"), witness1);
 
         let witnesses = log_entry_state.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();
@@ -1546,7 +1550,8 @@ mod tests {
         let log_entry_state = state.log_entries.last().unwrap();
 
         let mut secrets = HashMap::default();
-        secrets.insert(w1_id, witness1);
+        // Witness id is canonicalized to `did:key:` form (issue #42).
+        secrets.insert(format!("did:key:{w1_id}"), witness1);
 
         let witnesses = log_entry_state.get_active_witnesses();
         let mut proofs = WitnessProofCollection::default();

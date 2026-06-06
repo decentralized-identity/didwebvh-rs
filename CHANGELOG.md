@@ -1,5 +1,39 @@
 # didwebvh-rs Changelog history
 
+## 7th June 2026
+
+### Release 0.5.4 — spec: witness IDs as `did:key` + dependency refresh
+
+Closes
+[#42](https://github.com/decentralized-identity/didwebvh-rs/issues/42).
+No public-API breakage. Pre-existing logs produced by spec-compliant
+implementations continue to resolve unchanged.
+
+#### Fixed
+
+- **Witness `id` is now serialized as a `did:key` identifier.** The
+  didwebvh 1.0 spec § "Witnesses" requires each entry in the `witnesses`
+  array to carry a `did:key` `id` (`did:key:z6Mk…`), but a `Witness`
+  built from a bare multibase key (`z6Mk…`) serialized the raw key,
+  producing non-spec, non-interoperable DID logs (the
+  `witness-threshold` / `witness-update` test-suite vectors showed
+  `"id":"z6Mk…"` instead of `"id":"did:key:z6Mk…"`). `Witness` now
+  canonicalizes its `id` to `did:key` form on both serialization and
+  deserialization, so output is spec-compliant regardless of how the
+  value was constructed. Canonicalization is a no-op for an
+  already-`did:key` id, so logs from spec-compliant implementations
+  round-trip byte-for-byte and their `entryHash` continues to verify.
+  Duplicate detection in `Witnesses::validate()` now compares on the
+  canonical form, and a new `Witness::new()` constructor applies the
+  same normalization.
+
+#### Changed
+
+- **`affinidi-data-integrity` 0.6 → 0.7.** Picked up via the
+  manifest bump; all other dependencies refreshed to their latest
+  semver-compatible versions (`cargo update`), pruning stale duplicate
+  trees (old `reqwest`, `hyper` 0.14, `rustls` 0.21, `bitflags` 1.x).
+
 ## 24th May 2026
 
 ### Release 0.5.3 — security: 15 patches from cross-implementation audit
