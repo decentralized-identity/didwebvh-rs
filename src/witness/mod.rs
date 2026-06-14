@@ -75,6 +75,7 @@ impl WitnessVerifyOptions {
 
 /// Witness nodes
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(untagged)]
 pub enum Witnesses {
     /// Active witness configuration with a threshold and list of witness nodes.
@@ -190,6 +191,7 @@ impl Witnesses {
 /// by spec-compliant implementations round-trip byte-for-byte and their
 /// `entryHash` continues to verify.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Witness {
     /// `did:key` identifier of this witness node.
     pub id: Multibase,

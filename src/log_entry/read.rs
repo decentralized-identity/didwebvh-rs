@@ -497,15 +497,14 @@ mod tests {
                 version_time: Utc::now().fixed_offset(),
                 parameters: Parameters1_0::default(),
                 state: json!({}),
-                proof: vec![DataIntegrityProof {
-                    type_: "DataIntegrityProof".to_string(),
-                    cryptosuite: CryptoSuite::EddsaJcs2022,
-                    created: None,
-                    verification_method: "did:key:z6Mk#z6Mk".to_string(),
-                    proof_purpose: bad_purpose.to_string(),
-                    proof_value: Some("zDummy".to_string()),
-                    context: None,
-                }],
+                proof: vec![DataIntegrityProof::new(
+                    CryptoSuite::EddsaJcs2022,
+                    "did:key:z6Mk#z6Mk".to_string(), // verification_method
+                    bad_purpose.to_string(),         // proof_purpose
+                    Some("zDummy".to_string()),      // proof_value
+                    None,                            // created
+                    None,                            // context
+                )],
             });
 
             let result = entry.verify_log_entry(None, None);
@@ -527,15 +526,14 @@ mod tests {
             version_time: Utc::now().fixed_offset(),
             parameters: Parameters1_0::default(),
             state: json!({}),
-            proof: vec![DataIntegrityProof {
-                type_: "DataIntegrityProof".to_string(),
-                cryptosuite: CryptoSuite::EddsaRdfc2022,
-                created: None,
-                verification_method: "did:key:z6Mk#z6Mk".to_string(),
-                proof_purpose: "assertionMethod".to_string(),
-                proof_value: Some("zDummy".to_string()),
-                context: None,
-            }],
+            proof: vec![DataIntegrityProof::new(
+                CryptoSuite::EddsaRdfc2022,
+                "did:key:z6Mk#z6Mk".to_string(), // verification_method
+                "assertionMethod".to_string(),   // proof_purpose
+                Some("zDummy".to_string()),      // proof_value
+                None,                            // created
+                None,                            // context
+            )],
         });
 
         let result = entry.verify_log_entry(None, None);
@@ -901,15 +899,14 @@ mod tests {
             version_time: Utc::now().fixed_offset(),
             parameters: Parameters1_0::default(),
             state: json!({"id": "did:webvh:scid:example.com"}),
-            proof: vec![DataIntegrityProof {
-                type_: "DataIntegrityProof".to_string(),
-                cryptosuite: CryptoSuite::EddsaJcs2022,
-                created: None,
-                verification_method: "did:key:z6Mk#z6Mk".to_string(),
-                proof_purpose: "assertionMethod".to_string(),
-                proof_value: Some("zDummy".to_string()),
-                context: None,
-            }],
+            proof: vec![DataIntegrityProof::new(
+                CryptoSuite::EddsaJcs2022,
+                "did:key:z6Mk#z6Mk".to_string(), // verification_method
+                "assertionMethod".to_string(),   // proof_purpose
+                Some("zDummy".to_string()),      // proof_value
+                None,                            // created
+                None,                            // context
+            )],
         });
         // verify_version_id checks first entry must have version ID 1
         let result = entry.verify_version_id(None);

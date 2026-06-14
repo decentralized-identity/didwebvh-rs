@@ -699,15 +699,14 @@ mod tests {
     /// methods; rejecting other DID methods prevents invalid key extraction.
     #[test]
     fn test_public_key_not_did_key_error() {
-        let proof = DataIntegrityProof {
-            type_: "test".to_string(),
-            created: None,
-            context: None,
-            cryptosuite: CryptoSuite::EddsaJcs2022,
-            proof_purpose: "test".to_string(),
-            proof_value: None,
-            verification_method: "did:web:example.com#key-1".to_string(),
-        };
+        let proof = DataIntegrityProof::new(
+            CryptoSuite::EddsaJcs2022,
+            "did:web:example.com#key-1".to_string(), // verification_method
+            "test".to_string(),                      // proof_purpose
+            None,                                    // proof_value
+            None,                                    // created
+            None,                                    // context
+        );
         let err = proof.get_public_key_bytes().unwrap_err();
         assert!(err.to_string().contains("did:key:"));
     }
@@ -719,15 +718,14 @@ mod tests {
     /// after the '#'; without it, key extraction cannot proceed safely.
     #[test]
     fn test_public_key_missing_hash_error() {
-        let proof = DataIntegrityProof {
-            type_: "test".to_string(),
-            created: None,
-            context: None,
-            cryptosuite: CryptoSuite::EddsaJcs2022,
-            proof_purpose: "test".to_string(),
-            proof_value: None,
-            verification_method: "did:key:z6MktestNoHash".to_string(),
-        };
+        let proof = DataIntegrityProof::new(
+            CryptoSuite::EddsaJcs2022,
+            "did:key:z6MktestNoHash".to_string(), // verification_method
+            "test".to_string(),                   // proof_purpose
+            None,                                 // proof_value
+            None,                                 // created
+            None,                                 // context
+        );
         let err = proof.get_public_key_bytes().unwrap_err();
         // resolve_did_key fails to decode the multibase body because
         // "z6MktestNoHash" is not a valid base58btc multicodec payload.
@@ -747,15 +745,14 @@ mod tests {
         // Use a real ed25519 multikey
         let secret = affinidi_secrets_resolver::secrets::Secret::generate_ed25519(None, None);
         let pk = secret.get_public_keymultibase().unwrap();
-        let proof = DataIntegrityProof {
-            type_: "test".to_string(),
-            created: None,
-            context: None,
-            cryptosuite: CryptoSuite::EddsaJcs2022,
-            proof_purpose: "assertionMethod".to_string(),
-            proof_value: None,
-            verification_method: format!("did:key:{pk}#{pk}"),
-        };
+        let proof = DataIntegrityProof::new(
+            CryptoSuite::EddsaJcs2022,
+            format!("did:key:{pk}#{pk}"),  // verification_method
+            "assertionMethod".to_string(), // proof_purpose
+            None,                          // proof_value
+            None,                          // created
+            None,                          // context
+        );
         let bytes = proof.get_public_key_bytes().unwrap();
         assert!(!bytes.is_empty());
     }

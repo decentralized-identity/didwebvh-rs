@@ -20,6 +20,7 @@ pub(crate) mod spec_1_0_pre;
 
 /// Parameters for WebVH DIDs
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Parameters {
     /// SCID (this is often automatically generated))
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -68,16 +69,19 @@ pub struct Parameters {
 
     /// Is key pre-rotation active?
     #[serde(skip)]
+    #[cfg_attr(feature = "arbitrary", arbitrary(default))]
     pub pre_rotation_active: bool,
 
     /// The following are calculated and populated as part of the validation process:
 
     /// Currently active update keys, populated during validation.
     #[serde(skip)]
+    #[cfg_attr(feature = "arbitrary", arbitrary(default))]
     pub active_update_keys: Arc<Vec<Multibase>>,
 
     /// Currently active witness configuration, populated during validation.
     #[serde(skip)]
+    #[cfg_attr(feature = "arbitrary", arbitrary(default))]
     pub active_witness: Option<Arc<Witnesses>>,
 }
 

@@ -18,6 +18,12 @@ use std::{fmt, sync::Arc};
 use thiserror::Error;
 use tracing::debug;
 
+/// Hand-written `arbitrary::Arbitrary` impls for the log-entry types, whose
+/// foreign-typed fields (`chrono::DateTime`, `serde_json::Value`,
+/// `DataIntegrityProof`) can't be derived through. Gated behind the
+/// `arbitrary` feature; see the `fuzz/` crate and issue #44.
+#[cfg(feature = "arbitrary")]
+mod arbitrary_impls;
 /// Shared utilities for CLI interactive flows, gated behind the `cli` feature.
 #[cfg(feature = "cli")]
 pub(crate) mod cli_common;
@@ -88,6 +94,7 @@ pub(crate) use affinidi_secrets_resolver::secrets::Secret;
 /// WebVH Specification supports multiple LogEntry versions in the same DID
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Version {
     /// Official v1.0 specification
     #[default]
@@ -318,6 +325,40 @@ impl DIDWebVHState {
 }
 
 impl DIDWebVHState {
+    /// Assemble an unvalidated state from an in-memory list of [`LogEntry`]s.
+    ///
+    /// Each entry is wrapped as [`LogEntryValidationStatus::NotValidated`],
+    /// mirroring [`load_log_entries_from_file`](Self::load_log_entries_from_file)
+    /// but without touching the filesystem. NO WEBVH VALIDATION IS DONE HERE —
+    /// call [`validate`](Self::validate) afterwards.
+    ///
+    /// This is the documented way to drive the verifier from a `Vec<LogEntry>`
+    /// (e.g. structure-aware fuzzing — see the `fuzz/` crate and issue #44).
+    /// `version_number` is parsed best-effort from each entry's `versionId`;
+    /// a malformed id yields `0` rather than failing, so deliberately broken
+    /// chains can still be fed to `validate()`.
+    pub fn from_log_entries(log_entries: Vec<LogEntry>) -> Self {
+        let log_entries = log_entries
+            .into_iter()
+            .map(|log_entry| {
+                let version_number = log_entry
+                    .get_version_id_fields()
+                    .map(|(num, _)| num)
+                    .unwrap_or(0);
+                LogEntryState {
+                    log_entry,
+                    version_number,
+                    validation_status: LogEntryValidationStatus::NotValidated,
+                    validated_parameters: Parameters::default(),
+                }
+            })
+            .collect();
+        DIDWebVHState {
+            log_entries,
+            ..Default::default()
+        }
+    }
+
     /// Convenience method to load LogEntries from a file, will ensure default state is set
     /// NOTE: NO WEBVH VALIDATION IS DONE HERE
     pub fn load_log_entries_from_file(&mut self, file_path: &str) -> Result<(), DIDWebVHError> {
