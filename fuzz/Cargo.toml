@@ -1,0 +1,61 @@
+# Structure-aware fuzzing harness for didwebvh-rs (issue #44).
+#
+# This is a SEPARATE crate with its own (empty) [workspace] table so it is
+# fully detached from the parent package — `cargo build`/`cargo test` at the
+# repo root never see it, and the nightly-only libfuzzer toolchain stays out
+# of normal CI. Run targets with `cargo +nightly fuzz run <target>` from this
+# directory (requires `cargo install cargo-fuzz`).
+[package]
+name = "didwebvh-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+
+[dependencies.didwebvh-rs]
+path = ".."
+# Default features off: we only need the `arbitrary` surface, not the network
+# stack, for fuzzing the in-memory verifier.
+default-features = false
+features = ["arbitrary"]
+
+# Keep some debug info for useful crash backtraces without killing throughput.
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "parameters_validate"
+path = "fuzz_targets/parameters_validate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "logentry_deserialize"
+path = "fuzz_targets/logentry_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chain_validate"
+path = "fuzz_targets/chain_validate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "proof_verify"
+path = "fuzz_targets/proof_verify.rs"
+test = false
+doc = false
+bench = false

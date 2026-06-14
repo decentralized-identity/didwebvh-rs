@@ -85,6 +85,7 @@ helper.
 | `native-tls` | no | Use platform-native TLS backend (implies `network`). |
 | `cli` | no | Interactive CLI flows for DID creation and updates. Adds `dialoguer` and `console`. Not included in WASM builds. |
 | `experimental-pqc` | no | **Experimental, off-spec.** Unlocks PQC cryptosuites (ML-DSA-{44,65,87}, SLH-DSA-SHA2-128s). Enable only for interop testing with other PQC-aware implementations — didwebvh 1.0 does not yet standardise these suites. See README "Experimental PQC support" below. |
+| `arbitrary` | no | Implements [`arbitrary::Arbitrary`](https://crates.io/crates/arbitrary) on the public log-entry and parameters types for structure-aware fuzzing. No effect on default builds and no new always-on dependency. See README "Fuzzing" below. |
 
 To use the library without network support (e.g. for local file validation only):
 
@@ -566,6 +567,42 @@ state.validate_with(&options)?.assert_complete()?;
 Accepting non-spec witness suites is deliberate spec-deviation; it's an
 escape hatch for testing, not a production recommendation. Strict
 `state.validate()?` keeps the `eddsa-jcs-2022`-only default.
+
+## Fuzzing
+
+The `fuzz/` crate provides structure-aware, coverage-guided fuzzing of the
+chain verifier via [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz).
+Raw byte/string mutation almost never produces input that survives `LogEntry`
+deserialization, let alone a multi-entry chain whose hashes link — so the
+off-by-default `arbitrary` feature implements `Arbitrary` on the public
+log-entry and parameters types, letting the fuzzer generate
+structurally-valid-but-semantically-mutated chains that actually exercise the
+transition and verification logic.
+
+`fuzz/` is a workspace-detached crate (its own empty `[workspace]` table), so
+`cargo build` / `cargo test` / `cargo clippy` at the repo root never compile it
+and the nightly-only libfuzzer toolchain stays out of normal CI.
+
+| Target | Surface |
+|--------|---------|
+| `parameters_validate` | `Parameters::validate` — pure parameter-transition rules (no crypto; highest ROI) |
+| `logentry_deserialize` | `LogEntry::deserialize_string` — version detection + serde paths |
+| `chain_validate` | `DIDWebVHState::validate` — full chain walk over an arbitrary `Vec<LogEntry>` |
+| `proof_verify` | `LogEntry::validate_witness_proof` — structural proof path (shape, did:key resolution, cryptosuite gating) |
+
+```sh
+cargo install cargo-fuzz            # one-time
+rustup toolchain install nightly
+
+cd fuzz
+cargo +nightly fuzz list
+cargo +nightly fuzz run parameters_validate
+cargo +nightly fuzz run chain_validate -- -max_total_time=300
+```
+
+To drive the verifier from an in-memory chain (in a harness or a test), use
+[`DIDWebVHState::from_log_entries`] with a `Vec<LogEntry>`, then call
+`validate()`. See `fuzz/README.md` for details.
 
 ## License
 

@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.5.4"
+version = "0.5.5"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -28,6 +28,11 @@ network = ["dep:reqwest"]
 rustls = ["network", "reqwest/rustls"]
 native-tls = ["network", "reqwest/native-tls"]
 cli = ["dep:dialoguer", "dep:console"]
+# Off-by-default: derives/impls `arbitrary::Arbitrary` on the public log-entry
+# and parameters types so downstream consumers can do structure-aware,
+# coverage-guided fuzzing of the chain verifier (see the `fuzz/` crate). No
+# effect on default builds and no new always-on dependency. See issue #44.
+arbitrary = ["dep:arbitrary"]
 # Experimental post-quantum cryptosuites (ML-DSA-{44,65,87}, SLH-DSA-128).
 # Not yet in the didwebvh 1.0 spec — enable only for interop testing with
 # other PQC-aware implementations. See README "Experimental PQC support"
@@ -48,6 +53,7 @@ affinidi-did-common = "0.3"
 affinidi-secrets-resolver = "0.5"
 
 ahash = { version = "0.8", features = ["serde"] }
+arbitrary = { version = "1", features = ["derive"], optional = true }
 async-trait = "0.1"
 base58 = "0.2"
 chrono = { version = "0.4", features = ["serde"] }

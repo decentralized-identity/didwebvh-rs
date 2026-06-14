@@ -1,5 +1,50 @@
 # didwebvh-rs Changelog history
 
+## 14th June 2026
+
+### Release 0.5.5 — feature-gated `Arbitrary` derives + structure-aware fuzzing
+
+Closes
+[#44](https://github.com/decentralized-identity/didwebvh-rs/issues/44).
+No public-API breakage — everything new is additive or behind an
+off-by-default feature flag.
+
+#### Added
+
+- **Off-by-default `arbitrary` feature.** Implements
+  [`arbitrary::Arbitrary`](https://crates.io/crates/arbitrary) on the public
+  log-entry and parameters types so downstream consumers can do
+  structure-aware, coverage-guided fuzzing of the chain verifier. The leaf
+  types (`Version`, `Multibase`, `Witness`, `Witnesses`, `Parameters`,
+  `Parameters1_0`, `Parameters1_0Pre`) derive it; the `LogEntry` types get
+  hand-written impls because their `chrono::DateTime` / `serde_json::Value` /
+  `DataIntegrityProof` fields are foreign types the orphan rule won't let us
+  derive through. `state` is generated as a bounded JSON value and proofs are
+  built from arbitrary parts via `DataIntegrityProof::new`, so the structural
+  proof path (shape enforcement, did:key resolution, cryptosuite gating) is
+  reachable without valid signatures. No effect on default builds and no new
+  always-on dependency.
+- **`DIDWebVHState::from_log_entries(Vec<LogEntry>)`.** Assembles an
+  unvalidated state from an in-memory list of log entries (each wrapped as
+  `NotValidated`), mirroring `load_log_entries_from_file` without touching the
+  filesystem. The documented way to drive `validate()` from a `Vec<LogEntry>`
+  (e.g. fuzzing); `version_number` is parsed best-effort so deliberately
+  broken chains still reach the verifier.
+- **`fuzz/` crate with cargo-fuzz targets** (`parameters_validate`,
+  `logentry_deserialize`, `chain_validate`, `proof_verify`). It is a
+  workspace-detached crate (its own empty `[workspace]` table), so normal
+  `cargo build`/`test`/`clippy` never compile it and the nightly-only
+  libfuzzer toolchain stays out of the default CI. A new `Fuzz` GitHub
+  workflow runs the targets only on `workflow_dispatch` and a weekly cron.
+  See README "Fuzzing".
+
+#### Changed
+
+- **Dependency refresh** (`cargo update`). Notably
+  `affinidi-data-integrity` 0.7.1 → 0.7.6, which made `DataIntegrityProof`
+  `#[non_exhaustive]`; the test/test-utility helpers that built it by struct
+  literal now use `DataIntegrityProof::new()`.
+
 ## 7th June 2026
 
 ### Release 0.5.4 — spec: witness IDs as `did:key` + dependency refresh

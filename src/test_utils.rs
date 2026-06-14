@@ -71,13 +71,12 @@ pub fn key_and_params() -> (Secret, Parameters) {
 /// key used to track which witness produced the proof. All other fields
 /// are populated with placeholder values sufficient for unit testing.
 pub fn make_test_proof(vm: &str) -> DataIntegrityProof {
-    DataIntegrityProof {
-        type_: "test".to_string(),
-        created: None,
-        context: None,
-        cryptosuite: CryptoSuite::EddsaJcs2022,
-        proof_purpose: "test".to_string(),
-        proof_value: None,
-        verification_method: vm.to_string(),
-    }
+    DataIntegrityProof::new(
+        CryptoSuite::EddsaJcs2022,
+        vm.to_string(),     // verification_method
+        "test".to_string(), // proof_purpose
+        None,               // proof_value
+        None,               // created
+        None,               // context
+    )
 }
