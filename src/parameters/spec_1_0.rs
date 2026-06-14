@@ -14,6 +14,7 @@ use std::sync::Arc;
 /// Some(Empty Array/Object) = Cancel the previous Parameters value
 /// Some(Value) = set to new value
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(rename_all = "camelCase")]
 pub struct Parameters1_0 {
     /// Is key pre-rotation active?

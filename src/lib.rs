@@ -19,6 +19,10 @@ use thiserror::Error;
 use tracing::debug;
 
 /// Shared utilities for CLI interactive flows, gated behind the `cli` feature.
+/// Custom [`arbitrary::Arbitrary`] generators for fields whose types live in
+/// foreign crates, gated behind the off-by-default `arbitrary` feature.
+#[cfg(feature = "arbitrary")]
+pub mod arbitrary_support;
 #[cfg(feature = "cli")]
 pub(crate) mod cli_common;
 /// Interactive CLI flow for creating a new DID, gated behind the `cli` feature.
@@ -88,6 +92,7 @@ pub(crate) use affinidi_secrets_resolver::secrets::Secret;
 /// WebVH Specification supports multiple LogEntry versions in the same DID
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Version {
     /// Official v1.0 specification
     #[default]

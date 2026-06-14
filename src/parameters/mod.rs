@@ -20,6 +20,7 @@ pub(crate) mod spec_1_0_pre;
 
 /// Parameters for WebVH DIDs
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Parameters {
     /// SCID (this is often automatically generated))
     #[serde(skip_serializing_if = "Option::is_none")]

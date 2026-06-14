@@ -15,6 +15,7 @@ use std::sync::Arc;
 /// Some(None) = field was specified, but set to null
 /// Some(Some(value)) = field was specified with a value
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(rename_all = "camelCase")]
 pub struct Parameters1_0Pre {
     /// Is key pre-rotation active?

@@ -11,6 +11,7 @@ use std::fmt;
 /// Serializes transparently as a plain JSON string, so existing JSON formats
 /// are fully preserved.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(transparent)]
 pub struct Multibase(String);
 

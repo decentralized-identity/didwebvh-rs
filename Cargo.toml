@@ -23,6 +23,10 @@ ignored = ["getrandom"]
 
 [features]
 default = ["network"]
+# Off-by-default `Arbitrary` derives on the public log-entry / parameters types
+# for structure-aware, coverage-guided fuzzing (cargo-fuzz) of the chain
+# verifier. Adds no always-on dependency. See `examples/fuzz_validate.rs`.
+arbitrary = ["dep:arbitrary"]
 ssi = ["dep:ssi", "network"]
 network = ["dep:reqwest"]
 rustls = ["network", "reqwest/rustls"]
@@ -48,6 +52,7 @@ affinidi-did-common = "0.3"
 affinidi-secrets-resolver = "0.5"
 
 ahash = { version = "0.8", features = ["serde"] }
+arbitrary = { version = "1", features = ["derive"], optional = true }
 async-trait = "0.1"
 base58 = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
@@ -103,6 +108,10 @@ required-features = ["network"]
 [[example]]
 name = "generate_large_did"
 required-features = ["network"]
+
+[[example]]
+name = "fuzz_validate"
+required-features = ["arbitrary"]
 
 [lints.rust]
 # Default lints become errors in CI via `cargo clippy -- -D warnings`.

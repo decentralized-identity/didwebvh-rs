@@ -121,6 +121,7 @@ impl PublicKey for DataIntegrityProof {
 /// [Log Entries](https://identity.foundation/didwebvh/v1.0/#the-did-log-file)
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(untagged)]
 pub enum LogEntry {
     /// Official v1.0 specification
