@@ -38,6 +38,11 @@ pub struct CreateDIDConfig<A: Signer = Secret, W: Signer = Secret> {
     pub also_known_as_web: bool,
     /// Add did:scid:vh to alsoKnownAs
     pub also_known_as_scid: bool,
+    /// Explicit versionTime for the genesis log entry. `None` (default) stamps
+    /// `now`. Set this to control the entry timestamp — e.g. to backdate it so a
+    /// rapid create-then-update sequence stays strictly increasing and not in the
+    /// future (versionTime serializes at second granularity).
+    pub version_time: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
 /// Builder for constructing a [`CreateDIDConfig`].
@@ -63,6 +68,7 @@ pub struct CreateDIDConfigBuilder<A: Signer = Secret, W: Signer = Secret> {
     witness_secrets: HashMap<String, W>,
     also_known_as_web: bool,
     also_known_as_scid: bool,
+    version_time: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
 impl<A: Signer, W: Signer> CreateDIDConfigBuilder<A, W> {
@@ -75,6 +81,7 @@ impl<A: Signer, W: Signer> CreateDIDConfigBuilder<A, W> {
             witness_secrets: HashMap::default(),
             also_known_as_web: false,
             also_known_as_scid: false,
+            version_time: None,
         }
     }
 
@@ -132,6 +139,12 @@ impl<A: Signer, W: Signer> CreateDIDConfigBuilder<A, W> {
         self
     }
 
+    /// Set an explicit versionTime for the genesis log entry (default: `now`).
+    pub fn version_time(mut self, version_time: chrono::DateTime<chrono::FixedOffset>) -> Self {
+        self.version_time = Some(version_time);
+        self
+    }
+
     /// Build the [`CreateDIDConfig`], returning an error if required fields are missing.
     pub fn build(self) -> Result<CreateDIDConfig<A, W>, DIDWebVHError> {
         let address = self
@@ -182,6 +195,7 @@ impl<A: Signer, W: Signer> CreateDIDConfigBuilder<A, W> {
             witness_secrets: self.witness_secrets,
             also_known_as_web: self.also_known_as_web,
             also_known_as_scid: self.also_known_as_scid,
+            version_time: self.version_time,
         })
     }
 }
@@ -290,7 +304,7 @@ pub async fn create_did<A: Signer, W: Signer>(
 
     let log_entry_state = didwebvh
         .create_log_entry(
-            None, // No version time, defaults to now
+            config.version_time,
             &config.did_document,
             &config.parameters,
             signing_key,
@@ -716,6 +730,7 @@ mod tests {
             witness_secrets: HashMap::default(),
             also_known_as_web: false,
             also_known_as_scid: false,
+            version_time: None,
         };
 
         assert!(create_did(config).await.is_err());

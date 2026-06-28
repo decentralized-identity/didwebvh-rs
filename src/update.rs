@@ -110,6 +110,11 @@ pub struct UpdateDIDConfig<A: Signer = Secret, W: Signer = Secret> {
     pub migrate_to: Option<String>,
     /// Witness signing secrets keyed by witness DID.
     pub witness_secrets: HashMap<String, W>,
+    /// Explicit versionTime for the new log entry. `None` (default) stamps
+    /// `now`. Set this to control the entry timestamp — e.g. to backdate it so a
+    /// rapid create-then-update sequence stays strictly increasing and not in the
+    /// future (versionTime serializes at second granularity).
+    pub version_time: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
 /// Builder for constructing an [`UpdateDIDConfig`].
@@ -129,6 +134,7 @@ pub struct UpdateDIDConfigBuilder<A: Signer = Secret, W: Signer = Secret> {
     deactivated: bool,
     migrate_to: Option<String>,
     witness_secrets: HashMap<String, W>,
+    version_time: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
 impl<A: Signer, W: Signer> UpdateDIDConfigBuilder<A, W> {
@@ -146,6 +152,7 @@ impl<A: Signer, W: Signer> UpdateDIDConfigBuilder<A, W> {
             deactivated: false,
             migrate_to: None,
             witness_secrets: HashMap::default(),
+            version_time: None,
         }
     }
 
@@ -230,6 +237,12 @@ impl<A: Signer, W: Signer> UpdateDIDConfigBuilder<A, W> {
         self
     }
 
+    /// Set an explicit versionTime for the new log entry (default: `now`).
+    pub fn version_time(mut self, version_time: chrono::DateTime<chrono::FixedOffset>) -> Self {
+        self.version_time = Some(version_time);
+        self
+    }
+
     /// Build the [`UpdateDIDConfig`], returning an error if required fields are missing.
     pub fn build(self) -> Result<UpdateDIDConfig<A, W>, DIDWebVHError> {
         let state = self
@@ -258,6 +271,7 @@ impl<A: Signer, W: Signer> UpdateDIDConfigBuilder<A, W> {
             deactivated: self.deactivated,
             migrate_to: self.migrate_to,
             witness_secrets: self.witness_secrets,
+            version_time: self.version_time,
         })
     }
 }
@@ -395,7 +409,7 @@ pub async fn update_did<A: Signer, W: Signer>(
 
     config
         .state
-        .create_log_entry(None, &document, &params, &config.signing_key)
+        .create_log_entry(config.version_time, &document, &params, &config.signing_key)
         .await?;
 
     // Sign witness proofs
@@ -479,7 +493,7 @@ async fn do_migrate<A: Signer, W: Signer>(
 
     config
         .state
-        .create_log_entry(None, &new_doc, &params, &config.signing_key)
+        .create_log_entry(config.version_time, &new_doc, &params, &config.signing_key)
         .await?;
 
     sign_new_entry_witnesses(&mut config.state, &config.witness_secrets).await?;
@@ -512,6 +526,9 @@ async fn do_deactivate<A: Signer, W: Signer>(
 
         config
             .state
+            // Deactivation can append two entries (pre-rotation teardown + final);
+            // a single caller-supplied `version_time` can't keep them distinct, so
+            // this multi-entry path keeps the default per-entry `now()` stamping.
             .create_log_entry(None, &doc, &disable_params, &config.signing_key)
             .await?;
 
@@ -536,6 +553,7 @@ async fn do_deactivate<A: Signer, W: Signer>(
 
     config
         .state
+        // See the deactivation note above: keep the default `now()` here too.
         .create_log_entry(None, &doc, &deactivate_params, &config.signing_key)
         .await?;
 
@@ -586,4 +604,83 @@ fn build_result(state: DIDWebVHState) -> Result<UpdateDIDResult, DIDWebVHError> 
         log_entry,
         state,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        create::{CreateDIDConfig, create_did},
+        log_entry_state::LogEntryValidationStatus,
+        test_utils::{did_doc_with_key, generate_signing_key},
+    };
+
+    /// A create-then-update sequence performed back-to-back stamps both log
+    /// entries with the same wall-clock `versionTime` (serialized at second
+    /// granularity), which fails the resolver's strictly-increasing
+    /// `versionTime` check. Passing explicit, spaced, backdated timestamps via
+    /// the new `version_time` builder methods must let the chain validate.
+    #[tokio::test]
+    async fn create_then_update_with_spaced_version_times_validates() {
+        let t_create = chrono::Utc::now().fixed_offset() - chrono::Duration::hours(1);
+        let t_update = t_create + chrono::Duration::minutes(1);
+
+        // Genesis entry, backdated to now - 1h.
+        let k1 = generate_signing_key();
+        let pk1 = k1.get_public_keymultibase().unwrap();
+        let doc = did_doc_with_key("did:webvh:{SCID}:example.com", &k1);
+        let params = Parameters {
+            update_keys: Some(Arc::new(vec![Multibase::new(&pk1)])),
+            ..Default::default()
+        };
+
+        let create_result = create_did(
+            CreateDIDConfig::builder()
+                .address("https://example.com/")
+                .authorization_key(k1.clone())
+                .did_document(doc)
+                .parameters(params)
+                .version_time(t_create)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .expect("create genesis entry");
+
+        // Rebuild a state from the genesis entry and validate once so the
+        // entry's `validated_parameters` (update_keys, scid, ...) are populated
+        // before we derive the next entry from them.
+        let mut state = DIDWebVHState::from_log_entries(vec![create_result.log_entry().clone()]);
+        let _ = state.validate().expect("genesis entry validates");
+
+        // Update (rotate K1 -> K2), backdated to now - 1h + 1min so the
+        // versionTime is strictly greater than the genesis entry's.
+        let k2 = generate_signing_key();
+        let pk2 = k2.get_public_keymultibase().unwrap();
+        let cfg = UpdateDIDConfig::<_, Secret>::builder()
+            .state(state)
+            .signing_key(k1)
+            .update_keys(vec![Multibase::new(&pk2)])
+            .version_time(t_update)
+            .build()
+            .unwrap();
+        let mut state = update_did(cfg).await.expect("update to K2").into_state();
+        assert_eq!(state.log_entries().len(), 2);
+
+        // Drive the full resolver validation path.
+        for entry in state.log_entries_mut() {
+            entry.validation_status = LogEntryValidationStatus::NotValidated;
+        }
+
+        let report = state
+            .validate()
+            .expect("spaced-versionTime chain must validate end-to-end");
+        assert!(
+            report.truncated.is_none(),
+            "chain was truncated at {:?}",
+            report.truncated
+        );
+        assert_eq!(state.log_entries().len(), 2);
+        assert!(state.validated());
+    }
 }
