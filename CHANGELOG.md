@@ -1,5 +1,29 @@
 # didwebvh-rs Changelog history
 
+## 29th June 2026
+
+### Release 0.5.6 — caller-settable `versionTime` on create/update
+
+No public-API breakage — the new field is optional and defaults to the
+previous `now()` behavior.
+
+#### Added
+
+- `CreateDIDConfig` / `UpdateDIDConfig` now accept an optional
+  `version_time` (builder method `.version_time(...)`). `None` (default)
+  stamps the entry with `now()` as before; set it to control the
+  log-entry timestamp. This lets a caller creating several entries in
+  quick succession (e.g. a back-to-back create-then-update) backdate and
+  space them — `versionTime` serialises at second granularity and must be
+  strictly increasing and not in the future, so same-second entries would
+  otherwise serialise identically and make the DID unresolvable. Honoured
+  on the single-entry operations (genesis create, standard update,
+  migrate); the multi-entry deactivation path keeps per-entry `now()`.
+
+#### Changed
+
+- Refreshed the dependency lockfile to the latest compatible versions.
+
 ## 14th June 2026
 
 ### Release 0.5.5 — feature-gated `Arbitrary` derives + structure-aware fuzzing
