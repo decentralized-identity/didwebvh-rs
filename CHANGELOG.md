@@ -28,6 +28,13 @@ rejected as `invalidDid` by the parser itself, with no fetch attempted.
   URL host (e.g. `a%2Fb`, `1.2.3.4.5`) is now rejected at parse time rather than
   being carried into `Url::parse`.
 
+#### Changed
+
+- Refreshed the dependency lockfile to the latest compatible versions (31
+  crates). This clears RUSTSEC-2026-0204 (`crossbeam-epoch` 0.9.18 — invalid
+  pointer dereference in the `fmt::Pointer` impl for `Atomic`/`Shared`),
+  published 6th July 2026 and fixed in 0.9.20.
+
 ## 29th June 2026
 
 ### Release 0.5.6 — caller-settable `versionTime` on create/update
