@@ -157,7 +157,7 @@ impl LogEntry {
             );
             return Err(DIDWebVHError::ValidationError(format!(
                 "Signing key ({}) is not authorized",
-                &proof.verification_method
+                proof.verification_method
             )));
         }
 
