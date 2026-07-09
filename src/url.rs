@@ -1,7 +1,6 @@
 use crate::DIDWebVHError;
 use chrono::{DateTime, FixedOffset};
 use std::fmt::{Display, Formatter};
-use std::net::IpAddr;
 use url::Url;
 
 type QueryPairs = (Option<String>, Option<DateTime<FixedOffset>>, Option<u32>);
@@ -104,8 +103,8 @@ impl WebVHURL {
         let scid = parts[0].to_string();
 
         // Percent-encoding is case-insensitive (RFC 3986 §2.1). Matching only the
-        // uppercase form would leave `127.0.0.1%3a8080` as the "domain", which then
-        // slips past `reject_ip_address()` because it no longer parses as a bare IP.
+        // uppercase form would leave `example.com%3a8080` glued together as the
+        // "domain" and the port would be silently dropped.
         let (domain, port) = match parts[1]
             .split_once("%3A")
             .or_else(|| parts[1].split_once("%3a"))
@@ -261,13 +260,12 @@ impl WebVHURL {
 
     /// Re-check the host *after* `Url::parse` has normalised it.
     ///
-    /// `reject_ip_address()` runs on the raw DID segment, which has not been
-    /// percent-decoded — so `127%2E0%2E0%2E1` does not parse as an `IpAddr`
-    /// and slips through. `Url::parse` then decodes it to `127.0.0.1` and
-    /// the resolver would happily fetch from localhost (or
-    /// `169.254.169.254`, etc.). This check looks at what the HTTP client
-    /// will actually connect to, after all of the `url` crate's host
-    /// normalisation, and rejects any IP literal.
+    /// Defense in depth: `reject_ip_address()` already rejects IP literals at
+    /// parse time, but a `WebVHURL` can also be constructed field-by-field, and
+    /// the path/port components are re-joined into a string before being handed
+    /// back to `Url::parse`. This is the last check before the resolver hands
+    /// the URL to an HTTP client, so it looks at the host that client will
+    /// actually connect to.
     fn reject_ip_host(url: &Url) -> Result<(), DIDWebVHError> {
         match url.host() {
             Some(url::Host::Ipv4(ip)) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
@@ -285,18 +283,28 @@ impl WebVHURL {
 
     /// Rejects IP addresses (both IPv4 and IPv6) as the domain component.
     /// The did:webvh spec requires domain names, not IP addresses.
+    ///
+    /// The host is run through `url::Host::parse` rather than `IpAddr::from_str`
+    /// so that the rule is applied to whatever the HTTP client will ultimately
+    /// connect to. `Host::parse` percent-decodes (case-insensitively, per
+    /// RFC 3986 §2.1), applies IDNA, and canonicalises the alternate IPv4
+    /// spellings (`2130706433`, `0x7f.0.0.1`, `127.1`) — all of which a check
+    /// against the raw DID segment would wave through as a "domain name",
+    /// only for `Url::parse` to normalise them back into a loopback or
+    /// link-local address later.
     fn reject_ip_address(domain: &str) -> Result<(), DIDWebVHError> {
-        // Strip brackets for IPv6 (e.g., "[::1]" -> "::1")
-        let bare = domain
-            .strip_prefix('[')
-            .and_then(|s| s.strip_suffix(']'))
-            .unwrap_or(domain);
-        if bare.parse::<IpAddr>().is_ok() {
-            return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
-                "Invalid URL: IP addresses are not allowed, use a domain name instead: {domain}",
-            )));
+        match url::Host::parse(domain) {
+            Ok(url::Host::Domain(_)) => Ok(()),
+            Ok(url::Host::Ipv4(ip)) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                "Invalid URL: IP addresses are not allowed, use a domain name instead: {ip}",
+            ))),
+            Ok(url::Host::Ipv6(ip)) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                "Invalid URL: IP addresses are not allowed, use a domain name instead: {ip}",
+            ))),
+            Err(err) => Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                "Invalid URL: host ({domain}) is not a valid domain name: {err}",
+            ))),
         }
-        Ok(())
     }
 
     /// Parses URL query parameters and returns:
@@ -568,12 +576,15 @@ mod tests {
         assert!(WebVHURL::parse_did_url("did:webvh:scid:127.0.0.1%3a8080").is_err());
     }
 
-    /// Regression: `reject_ip_address()` runs on the raw, still-percent-
-    /// encoded domain segment, so `127%2E0%2E0%2E1` is not an `IpAddr` and
-    /// passes — but `Url::parse` then decodes it to `127.0.0.1` and the
-    /// resolver would fetch from localhost. `get_http_url` now re-checks
-    /// the host *after* parse so the encoding the attacker chooses no
-    /// longer matters.
+    /// Regression: `reject_ip_address()` used to run `IpAddr::from_str` on the
+    /// raw, still-percent-encoded domain segment, so `127%2E0%2E0%2E1` was not
+    /// an `IpAddr` and passed — `Url::parse` then decoded it to `127.0.0.1` and
+    /// the resolver would fetch from localhost. The check now goes through
+    /// `url::Host::parse`, which decodes before classifying, so the DID is
+    /// rejected at parse time with no fetch attempted.
+    ///
+    /// Matches the `negative-pct-encoded-ip-host` vector in didwebvh-test-suite,
+    /// which expects `invalidDid` from the parser itself.
     #[test]
     fn url_rejects_pct_encoded_ip_host() {
         for did in [
@@ -582,16 +593,50 @@ mod tests {
             "did:webvh:scid:169%2E254%2E169%2E254",
             "did:webvh:scid:127%2E0%2E0%2E1%3A8080",
         ] {
-            let parsed = WebVHURL::parse_did_url(did).expect("parse stage doesn't decode");
-            let err = parsed
-                .get_http_url(None)
-                .expect_err("post-parse host check must reject the decoded IP");
+            let err = WebVHURL::parse_did_url(did)
+                .err()
+                .expect("must be rejected at parse time");
             assert!(
                 err.to_string().contains("IP addresses are not allowed"),
                 "{did} -> {err}"
             );
-            assert!(parsed.get_http_whois_url().is_err());
-            assert!(parsed.get_http_files_url().is_err());
+        }
+    }
+
+    /// The raw-string check also missed every non-dotted-quad spelling of an
+    /// IPv4 address. `Url::parse` canonicalises all of these to `127.0.0.1`.
+    #[test]
+    fn url_rejects_alternate_ipv4_spellings() {
+        for did in [
+            "did:webvh:scid:2130706433",
+            "did:webvh:scid:0x7f.0.0.1",
+            "did:webvh:scid:127.1",
+            "did:webvh:scid:0177.0.0.1",
+        ] {
+            let err = WebVHURL::parse_did_url(did)
+                .err()
+                .expect("must be rejected at parse time");
+            assert!(
+                err.to_string().contains("IP addresses are not allowed"),
+                "{did} -> {err}"
+            );
+        }
+    }
+
+    /// A host segment that survives the DID split but is not a legal URL host
+    /// (empty, or containing a forbidden character once decoded) must also be
+    /// rejected rather than carried into `Url::parse` later.
+    #[test]
+    fn url_rejects_malformed_host() {
+        for did in [
+            "did:webvh:scid:",
+            "did:webvh:scid:a%2Fb",
+            "did:webvh:scid:1.2.3.4.5",
+        ] {
+            assert!(
+                WebVHURL::parse_did_url(did).is_err(),
+                "{did} should be rejected"
+            );
         }
     }
 

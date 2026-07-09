@@ -1,5 +1,33 @@
 # didwebvh-rs Changelog history
 
+## 10th July 2026
+
+### Release 0.5.7 — reject IP-literal hosts at parse time
+
+Fixes the `negative-pct-encoded-ip-host` vector in the
+[didwebvh-test-suite](https://github.com/decentralized-identity/didwebvh-test-suite)
+(closes #47). Not a resolver vulnerability — a percent-encoded IP host was
+already blocked before any HTTP request — but the spec requires the DID to be
+rejected as `invalidDid` by the parser itself, with no fetch attempted.
+
+#### Fixed
+
+- `WebVHURL::parse_did_url()` now rejects a host segment that resolves to an
+  IPv4 or IPv6 literal. The check previously ran `IpAddr::from_str` against the
+  raw, still-percent-encoded segment, so `127%2E0%2E0%2E1` was classified as a
+  domain name and parsing succeeded; `Url::parse` would then decode it back to
+  `127.0.0.1`. The IP-rejection check now goes through `url::Host::parse`, which
+  percent-decodes (case-insensitively, per RFC 3986 §2.1) and applies IDNA
+  before classifying the host. `get_http_url()` / `get_http_whois_url()` /
+  `get_http_files_url()` keep their post-normalisation host check as defense in
+  depth.
+- The same change closes a related parse-time gap: the alternate IPv4 spellings
+  `2130706433`, `0x7f.0.0.1`, `127.1` and `0177.0.0.1` were also accepted as
+  "domain names" (and, like the above, caught only later at URL-build time).
+- A host segment that is empty or that decodes to something which is not a legal
+  URL host (e.g. `a%2Fb`, `1.2.3.4.5`) is now rejected at parse time rather than
+  being carried into `Url::parse`.
+
 ## 29th June 2026
 
 ### Release 0.5.6 — caller-settable `versionTime` on create/update
