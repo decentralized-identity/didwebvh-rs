@@ -261,7 +261,7 @@ mod tests {
         let test = Some(Arc::new(vec!["test".to_string()]));
         let diff = Parameters::diff_tri_state::<String>(&None, &test.clone(), "test")
             .expect("Parameters::diff_update_keys error");
-        assert!(diff == test);
+        assert_eq!(diff, test);
     }
 
     #[test]

@@ -246,7 +246,7 @@ pub async fn main() -> Result<()> {
             style("WebVH DID Witness-Proofs Save Duration: ").color256(34),
             style(format!(
                 "{}ms",
-                &end.duration_since(start).unwrap().as_millis()
+                end.duration_since(start).unwrap().as_millis()
             ))
             .color256(141)
         );
