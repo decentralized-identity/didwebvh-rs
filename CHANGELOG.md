@@ -1,5 +1,26 @@
 # didwebvh-rs Changelog history
 
+## 19th July 2026
+
+### Release 0.5.8 — affinidi-did-common 0.4
+
+Bumps the `affinidi-did-common` requirement from `"0.3"` to `"0.4"`. No code
+changes were required: `Document` gained a typed `also_known_as` field, which is
+additive, and this crate does not construct `Document` by struct literal nor
+re-export it from its public API.
+
+`affinidi-data-integrity` is pinned to `"0.7.7"` in the same change. It is a
+transitive consumer of `affinidi-did-common` and, left at `"0.7"`, resolves to
+the published `0.7.6` which still requires `"0.3"` — putting a second copy of
+`affinidi-did-common` in the graph for exactly the same reason.
+
+This release must land on crates.io **before** `affinidi-did-common 0.4.0`
+propagates to consumers. Per affinidi-tdk-rs ADR 0003 §3, a minor bump of
+`affinidi-did-common` invalidates the `[patch.crates-io]` redirect held by any
+external consumer still requiring `"0.3"`; leaving this crate on `"0.3"` would
+put two copies of `affinidi-did-common` in the dependency graph and break
+downstream builds with duplicate-type errors.
+
 ## 10th July 2026
 
 ### Release 0.5.7 — reject IP-literal hosts at parse time
