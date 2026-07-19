@@ -6,9 +6,10 @@
  *
  * # Usage
  *
- * ```ignore
+ * ```no_run
  * use didwebvh_rs::cli_create::{InteractiveCreateConfig, interactive_create_did};
  *
+ * # async fn run() -> Result<(), didwebvh_rs::DIDWebVHError> {
  * // Fully interactive - all values prompted
  * let result = interactive_create_did(InteractiveCreateConfig::default()).await?;
  * println!("Created DID: {}", result.did());
@@ -24,6 +25,8 @@
  *     .portable(true)
  *     .build();
  * let result = interactive_create_did(config).await?;
+ * # Ok(())
+ * # }
  * ```
  *
  * # Placeholder Rewriting
@@ -59,7 +62,7 @@ use url::Url;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use didwebvh_rs::cli_create::VerificationRelationship;
 ///
 /// let rels = vec![
@@ -101,9 +104,9 @@ impl VerificationRelationship {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use didwebvh_rs::cli_create::{VerificationMethodInput, VerificationRelationship};
-/// use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
+/// use didwebvh_rs::prelude::Secret;
 ///
 /// let key = Secret::generate_ed25519(None, None);
 /// let vm = VerificationMethodInput {
@@ -136,14 +139,21 @@ pub struct VerificationMethodInput {
 ///
 /// Fully interactive (all values prompted via terminal):
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::cli_create::{InteractiveCreateConfig, interactive_create_did};
+///
+/// # async fn run() -> Result<(), didwebvh_rs::DIDWebVHError> {
 /// let config = InteractiveCreateConfig::default();
 /// let result = interactive_create_did(config).await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// Pre-configured with custom services and address (remaining values prompted):
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::cli_create::InteractiveCreateConfig;
+///
 /// let config = InteractiveCreateConfig::builder()
 ///     .address("https://example.com/")
 ///     .service(serde_json::json!({
@@ -158,7 +168,11 @@ pub struct VerificationMethodInput {
 ///
 /// Fully pre-configured (no prompts triggered):
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::cli_create::{InteractiveCreateConfig, VerificationMethodInput};
+/// use didwebvh_rs::prelude::Secret;
+///
+/// # fn demo(signing_key: Secret, vm_input: VerificationMethodInput) {
 /// let config = InteractiveCreateConfig::builder()
 ///     .address("https://example.com/")
 ///     .authorization_key(signing_key)
@@ -174,6 +188,7 @@ pub struct VerificationMethodInput {
 ///     .also_known_as_web(true)
 ///     .also_known_as_scid(false)
 ///     .build();
+/// # }
 /// ```
 #[derive(Default)]
 pub struct InteractiveCreateConfig {
@@ -497,12 +512,15 @@ impl InteractiveCreateResult {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use didwebvh_rs::prelude::*;
 ///
+/// # async fn run() -> Result<(), DIDWebVHError> {
 /// let result = interactive_create_did(InteractiveCreateConfig::default()).await?;
 /// println!("Created DID: {}", result.did());
 /// result.log_entry().save_to_file("did.jsonl")?;
+/// # Ok(())
+/// # }
 /// ```
 pub async fn interactive_create_did(
     config: InteractiveCreateConfig,

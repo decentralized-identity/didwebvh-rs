@@ -97,6 +97,40 @@ async fn run(scenario: &str, assert_did_document: bool) {
     }
 }
 
+/// Resolves a scenario expecting failure, returning the error string.
+///
+/// Used for fixtures whose committed `resolutionResult.json` this
+/// implementation deliberately does not reproduce — see `witness_update`.
+async fn run_expect_error(scenario: &str) -> String {
+    let dir = format!("{ROOT}/{scenario}");
+    let jsonl = std::fs::read_to_string(format!("{dir}/did.jsonl"))
+        .unwrap_or_else(|e| panic!("read did.jsonl for {scenario}: {e}"));
+    let witness = std::fs::read_to_string(format!("{dir}/did-witness.json")).ok();
+    let expected: Value = {
+        let s = std::fs::read_to_string(format!("{dir}/resolutionResult.json"))
+            .unwrap_or_else(|e| panic!("read resolutionResult.json for {scenario}: {e}"));
+        serde_json::from_str(&s)
+            .unwrap_or_else(|e| panic!("parse resolutionResult.json for {scenario}: {e}"))
+    };
+    let did = expected
+        .pointer("/didDocument/id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| panic!("{scenario}: no didDocument.id in expected result"))
+        .to_string();
+
+    let mut state = DIDWebVHState::default();
+    match state
+        .resolve_log_owned(&did, &jsonl, witness.as_deref())
+        .await
+    {
+        Ok((_, meta)) => panic!(
+            "{scenario}: expected resolution to fail, but it resolved to {}",
+            meta.version_id
+        ),
+        Err(e) => format!("{e:?}"),
+    }
+}
+
 /// Rewrites `service[].id` values of `"#files"`/`"#whois"` to their
 /// absolute form `"<did>#files"`/`"<did>#whois"`. Only the two implicit
 /// service names are touched — user-supplied relative IDs (e.g.
@@ -158,11 +192,47 @@ async fn services() {
     run("services", true).await;
 }
 
+/// Deliberate divergence from the committed fixture — this asserts a security
+/// property, not a parity failure.
+///
+/// The `witness-update` vector's entry 2 lowers its own witness config from
+/// `{threshold: 2, witnesses: [A, B]}` to `{threshold: 1, witnesses: [A]}` and
+/// supplies a single proof (from A). Its `resolutionResult.json` expects
+/// version 2 to resolve, which means the reference generator evaluated entry 2
+/// against the *new* config it declares.
+///
+/// This resolver evaluates it against the previously-active config
+/// (threshold 2) and rejects it, per didwebvh 1.0:
+///
+/// - "the resolver MUST confirm that the `did-witness.json` file contains
+///   verified witness Data Integrity proofs from a threshold of the **then
+///   active** witnesses"
+/// - "rotating the keys authorized to update a DID or changing the witnesses
+///   for a DID take effect only *after* the entry in which they are defined
+///   has been published"
+///
+/// Accepting the fixture's reading would make witnessing bypassable: an
+/// attacker holding a compromised update key could publish an entry setting
+/// `{threshold: 1, witnesses: [attacker]}`, sign the single required proof
+/// themselves, and have it accepted — defeating the entire purpose of the
+/// witness mechanism. The whole point of witnesses is to bound the damage
+/// from exactly that compromise.
+///
+/// This test therefore pins the rejection. If it starts failing because the
+/// entry now resolves, that is a genuine security regression, not a fixture
+/// drift. The previous `#[ignore]` on this test also misdiagnosed the cause
+/// ("witness proof signature on entry 2 fails verification") — the signature
+/// is fine; the threshold is not met.
+///
+/// Tracked upstream: the vector and the spec's normative text disagree, and
+/// the discrepancy should be raised against didwebvh-test-suite.
 #[tokio::test]
-#[ignore = "witness proof signature on entry 2 fails verification; \
-            out of v0.5.1 scope, tracked as follow-up (tasks/todo.md)"]
-async fn witness_update() {
-    run("witness-update", false).await;
+async fn witness_update_rejects_self_lowered_threshold() {
+    let err = run_expect_error("witness-update").await;
+    assert!(
+        err.contains("threshold") && err.contains("not met"),
+        "expected a witness-threshold rejection, got: {err}"
+    );
 }
 
 #[tokio::test]

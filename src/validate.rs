@@ -91,7 +91,10 @@ impl TruncationReason {
 ///
 /// # Handling the report
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::prelude::*;
+///
+/// # fn run(state: &mut DIDWebVHState) -> Result<(), DIDWebVHError> {
 /// // Strict: fail on any truncation (recommended for resolvers).
 /// state.validate()?.assert_complete()?;
 ///
@@ -100,6 +103,8 @@ impl TruncationReason {
 /// if let Some(reason) = &report.truncated {
 ///     tracing::warn!(?reason, "partial validation");
 /// }
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # On `#[must_use]`

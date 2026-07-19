@@ -9,10 +9,12 @@
  *
  * # Example
  *
- * ```ignore
+ * ```no_run
  * use didwebvh_rs::prelude::*;
  * use didwebvh_rs::update::{UpdateDIDConfig, update_did};
  *
+ * # async fn run(webvh_state: DIDWebVHState, current_key: Secret, new_key_multibase: Multibase)
+ * #     -> Result<(), DIDWebVHError> {
  * // Rotate keys
  * let config = UpdateDIDConfig::builder()
  *     .state(webvh_state)
@@ -20,6 +22,8 @@
  *     .update_keys(vec![new_key_multibase])
  *     .build()?;
  * let result = update_did(config).await?;
+ * # Ok(())
+ * # }
  * ```
  */
 
@@ -45,43 +49,70 @@ use url::Url;
 ///
 /// Update the DID document:
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::prelude::*;
+/// use didwebvh_rs::update::{UpdateDIDConfig, update_did};
+/// # use serde_json::Value;
+///
+/// # async fn run(webvh_state: DIDWebVHState, key: Secret, new_doc: Value)
+/// #     -> Result<(), DIDWebVHError> {
 /// let config = UpdateDIDConfig::builder()
 ///     .state(webvh_state)
 ///     .signing_key(key)
 ///     .document(new_doc)
 ///     .build()?;
 /// let result = update_did(config).await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// Rotate authorization keys:
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::prelude::*;
+/// use didwebvh_rs::update::UpdateDIDConfig;
+///
+/// # fn run(webvh_state: DIDWebVHState, current_key: Secret, new_key_multibase: Multibase)
+/// #     -> Result<(), DIDWebVHError> {
 /// let config = UpdateDIDConfig::builder()
 ///     .state(webvh_state)
 ///     .signing_key(current_key)
 ///     .update_keys(vec![new_key_multibase])
 ///     .build()?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// Deactivate a DID:
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::prelude::*;
+/// use didwebvh_rs::update::UpdateDIDConfig;
+///
+/// # fn run(webvh_state: DIDWebVHState, key: Secret) -> Result<(), DIDWebVHError> {
 /// let config = UpdateDIDConfig::builder()
 ///     .state(webvh_state)
 ///     .signing_key(key)
 ///     .deactivate(true)
 ///     .build()?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// Migrate to a new domain:
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::prelude::*;
+/// use didwebvh_rs::update::UpdateDIDConfig;
+///
+/// # fn run(webvh_state: DIDWebVHState, key: Secret) -> Result<(), DIDWebVHError> {
 /// let config = UpdateDIDConfig::builder()
 ///     .state(webvh_state)
 ///     .signing_key(key)
 ///     .migrate_to("https://new-domain.example.com/")
 ///     .build()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct UpdateDIDConfig<A: Signer = Secret, W: Signer = Secret> {
     /// The DID WebVH state to update (must have at least one log entry).
@@ -339,9 +370,13 @@ impl UpdateDIDResult {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::prelude::*;
 /// use didwebvh_rs::update::{UpdateDIDConfig, update_did};
+/// # use serde_json::Value;
 ///
+/// # async fn run(webvh_state: DIDWebVHState, key: Secret, new_doc: Value)
+/// #     -> Result<(), DIDWebVHError> {
 /// // Update the document
 /// let result = update_did(
 ///     UpdateDIDConfig::builder()
@@ -354,6 +389,8 @@ impl UpdateDIDResult {
 /// // Save results
 /// result.log_entry().save_to_file("did.jsonl")?;
 /// result.state().witness_proofs().save_to_file("did-witness.json")?;
+/// # Ok(())
+/// # }
 /// ```
 pub async fn update_did<A: Signer, W: Signer>(
     mut config: UpdateDIDConfig<A, W>,
@@ -377,7 +414,7 @@ pub async fn update_did<A: Signer, W: Signer>(
         .map(|e| e.validated_parameters.clone())
         .ok_or_else(|| DIDWebVHError::LogEntryError("No log entries exist".to_string()))?;
 
-    let document = config.document.unwrap_or_else(|| {
+    let document = config.document.take().unwrap_or_else(|| {
         config
             .state
             .log_entries()
@@ -388,24 +425,7 @@ pub async fn update_did<A: Signer, W: Signer>(
     });
 
     let mut params = last_params;
-    if let Some(keys) = config.update_keys {
-        params.update_keys = Some(Arc::new(keys));
-    }
-    if let Some(hashes) = config.next_key_hashes {
-        params.next_key_hashes = Some(Arc::new(hashes));
-    }
-    if let Some(witness) = config.witness {
-        params.witness = Some(Arc::new(witness));
-    }
-    if let Some(watchers) = config.watchers {
-        params.watchers = Some(Arc::new(watchers));
-    }
-    if let Some(ttl) = config.ttl {
-        params.ttl = Some(ttl);
-    }
-    if let Some(portable) = config.portable {
-        params.portable = Some(portable);
-    }
+    apply_param_overrides(&mut params, &mut config);
 
     config
         .state
@@ -419,6 +439,37 @@ pub async fn update_did<A: Signer, W: Signer>(
 }
 
 /// Handle DID migration to a new domain.
+/// Overlays the caller's requested parameter changes onto `params`.
+///
+/// Each field is taken from `config`, so this must only be called once per
+/// update. Shared by the standard update path and by `do_migrate` — these were
+/// previously two copy-pasted blocks, and the migrate copy silently omitted
+/// `portable`, so `.migrate_to(..).disable_portability()` dropped the
+/// portability change without error.
+fn apply_param_overrides<A: Signer, W: Signer>(
+    params: &mut Parameters,
+    config: &mut UpdateDIDConfig<A, W>,
+) {
+    if let Some(keys) = config.update_keys.take() {
+        params.update_keys = Some(Arc::new(keys));
+    }
+    if let Some(hashes) = config.next_key_hashes.take() {
+        params.next_key_hashes = Some(Arc::new(hashes));
+    }
+    if let Some(witness) = config.witness.take() {
+        params.witness = Some(Arc::new(witness));
+    }
+    if let Some(watchers) = config.watchers.take() {
+        params.watchers = Some(Arc::new(watchers));
+    }
+    if let Some(ttl) = config.ttl.take() {
+        params.ttl = Some(ttl);
+    }
+    if let Some(portable) = config.portable.take() {
+        params.portable = Some(portable);
+    }
+}
+
 async fn do_migrate<A: Signer, W: Signer>(
     mut config: UpdateDIDConfig<A, W>,
     new_address: String,
@@ -475,21 +526,7 @@ async fn do_migrate<A: Signer, W: Signer>(
 
     // Build parameters (apply any additional changes from config)
     let mut params = last_entry.validated_parameters.clone();
-    if let Some(keys) = config.update_keys {
-        params.update_keys = Some(Arc::new(keys));
-    }
-    if let Some(hashes) = config.next_key_hashes {
-        params.next_key_hashes = Some(Arc::new(hashes));
-    }
-    if let Some(witness) = config.witness {
-        params.witness = Some(Arc::new(witness));
-    }
-    if let Some(watchers) = config.watchers {
-        params.watchers = Some(Arc::new(watchers));
-    }
-    if let Some(ttl) = config.ttl {
-        params.ttl = Some(ttl);
-    }
+    apply_param_overrides(&mut params, &mut config);
 
     config
         .state

@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.5.8"
+version = "0.6.0"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -33,6 +33,10 @@ cli = ["dep:dialoguer", "dep:console"]
 # coverage-guided fuzzing of the chain verifier (see the `fuzz/` crate). No
 # effect on default builds and no new always-on dependency. See issue #44.
 arbitrary = ["dep:arbitrary"]
+# Enables the nightly-only `did_benchmarks_nightly` bench (`#![feature(test)]`).
+# Requires a nightly toolchain; keeping it off by default is what lets
+# `--all-targets` succeed on stable.
+nightly = []
 # Experimental post-quantum cryptosuites (ML-DSA-{44,65,87}, SLH-DSA-128).
 # Not yet in the didwebvh 1.0 spec — enable only for interop testing with
 # other PQC-aware implementations. See README "Experimental PQC support"
@@ -93,6 +97,7 @@ tracing-subscriber = { version = "0.3", features = [
   "json",
   "valuable",
 ] }
+tempfile = "3.27.0"
 
 [[example]]
 name = "resolve"
@@ -166,5 +171,11 @@ unnecessary_semicolon = "allow"                     # Trailing `;` on `let _ = e
 name = "did_benchmarks"
 harness = false
 
+# Uses `#![feature(test)]`, so it only builds on a nightly toolchain. Gated
+# behind an off-by-default feature so `cargo check/clippy --all-targets` works
+# on stable — without the gate, --all-targets fails with E0554 on stable and
+# every invocation has to spell out `--tests --examples` to route around it.
+# Run with: cargo +nightly bench --features nightly
 [[bench]]
 name = "did_benchmarks_nightly"
+required-features = ["nightly"]

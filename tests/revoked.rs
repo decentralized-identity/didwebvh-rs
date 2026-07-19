@@ -9,6 +9,7 @@ use chrono::{Duration, Utc};
 use didwebvh_rs::{DIDWebVHState, Multibase, parameters::Parameters};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use tempfile::{TempDir, tempdir};
 
 /// Generate an ed25519 Secret with a proper `did:key:...#...` id
 /// so that the DataIntegrityProof verification_method matches the format
@@ -130,39 +131,52 @@ async fn build_revoked_did() -> (DIDWebVHState, String) {
     (state, did)
 }
 
-/// Save log entries to a test file
-fn save_to_file(state: &DIDWebVHState, path: &str) {
+/// Write the log entries to a fresh file inside a caller-owned `TempDir`.
+///
+/// `LogEntry::save_to_file` *appends*, so these tests must never write to a
+/// path that a previous run may have left behind — appending a second copy of
+/// the log produces a corrupt chain and the resolve fails. They previously
+/// wrote to fixed paths under the git-tracked `tests/test_vectors/` and only
+/// removed the file after the assertion, so any failed or interrupted run
+/// poisoned every subsequent run. `TempDir` gives each run a unique directory
+/// and removes it on drop, including on panic.
+fn save_to_temp(state: &DIDWebVHState) -> (TempDir, String) {
+    let dir = tempdir().expect("Failed to create temp dir");
+    let path = dir
+        .path()
+        .join("did.jsonl")
+        .to_str()
+        .expect("Temp path is not valid UTF-8")
+        .to_string();
+
     for entry in state.log_entries() {
         entry
             .log_entry
-            .save_to_file(path)
+            .save_to_file(&path)
             .expect("Failed to save log entry");
     }
+
+    (dir, path)
 }
 
 #[tokio::test]
 async fn test_revoked_did() {
-    let path = "tests/test_vectors/revoked-did-test1.jsonl";
     let (state, did) = build_revoked_did().await;
-    save_to_file(&state, path);
+    let (_dir, path) = save_to_temp(&state);
 
     let mut resolver = DIDWebVHState::default();
     let (_, metadata) = resolver
-        .resolve_file(&did, path, None)
+        .resolve_file(&did, &path, None)
         .await
         .expect("Couldn't resolve revoked DID");
-
-    // Clean up
-    let _ = std::fs::remove_file(path);
 
     assert!(metadata.deactivated);
 }
 
 #[tokio::test]
 async fn test_revoked_status_earlier_version() {
-    let path = "tests/test_vectors/revoked-did-test2.jsonl";
     let (state, did) = build_revoked_did().await;
-    save_to_file(&state, path);
+    let (_dir, path) = save_to_temp(&state);
 
     // Query version 2 — even though it wasn't itself deactivated,
     // the DID-level deactivation should still be reported
@@ -171,12 +185,9 @@ async fn test_revoked_status_earlier_version() {
 
     let mut resolver = DIDWebVHState::default();
     let (_, metadata) = resolver
-        .resolve_file(&did_with_version, path, None)
+        .resolve_file(&did_with_version, &path, None)
         .await
         .expect("Couldn't resolve revoked DID at earlier version");
-
-    // Clean up
-    let _ = std::fs::remove_file(path);
 
     assert!(metadata.deactivated);
 }

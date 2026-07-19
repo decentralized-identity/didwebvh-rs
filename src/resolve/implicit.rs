@@ -27,7 +27,7 @@
 //! ## Hash safety
 //!
 //! These services are **never** folded back into the LogEntry's stored `state`.
-//! [`update_implicit_services`] mutates the *caller's* `new_state` `Value`,
+//! `update_implicit_services` mutates the *caller's* `new_state` `Value`,
 //! which is constructed fresh by [`get_did_document`]/[`to_web_did`] from a
 //! clone of `state`. The signed/hashed bytes are taken from `state` directly,
 //! so implicit injection cannot affect the entry hash, the SCID, or any
