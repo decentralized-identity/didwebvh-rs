@@ -51,7 +51,12 @@ pub struct CreateDIDConfig<A: Signer = Secret, W: Signer = Secret> {
 /// All other fields have sensible defaults.
 ///
 /// # Example
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::prelude::*;
+/// # use serde_json::Value;
+///
+/// # fn run(signing_key: Secret, doc: Value, params: Parameters)
+/// #     -> Result<(), DIDWebVHError> {
 /// let config = CreateDIDConfig::builder()
 ///     .address("https://example.com/")
 ///     .authorization_key(signing_key)
@@ -59,6 +64,8 @@ pub struct CreateDIDConfig<A: Signer = Secret, W: Signer = Secret> {
 ///     .parameters(params)
 ///     .also_known_as_web(true)
 ///     .build()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct CreateDIDConfigBuilder<A: Signer = Secret, W: Signer = Secret> {
     address: Option<String>,

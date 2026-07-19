@@ -1,5 +1,136 @@
 # didwebvh-rs Changelog history
 
+## 19th July 2026
+
+### Release 0.6.0 — affinidi-did-common 0.4, pre-release audit fixes
+
+Originally scoped as 0.5.8 (the `affinidi-did-common` bump alone). Promoted to
+0.6.0 because the audit fixes below include `#[non_exhaustive]` on already
+published public enums, which is a breaking change for downstream code that
+`match`es them exhaustively — shipping that in a patch release would violate
+semver.
+
+#### Breaking
+
+- `DIDWebVHError`, `URLType` and `LogEntryValidationStatus` are now
+  `#[non_exhaustive]`. Downstream `match` expressions over these types must add
+  a wildcard `_ =>` arm. `DIDWebVHError` is the crate's primary public error
+  type and gains variants as the spec evolves; making it non-exhaustive now
+  means those additions no longer require a major bump every time. The struct
+  variants `NetworkError` and `ResponseTooLarge` can likewise gain fields.
+
+#### Fixed
+
+- `update_did()` no longer silently discards `portable` on the migration path.
+  `do_migrate` carried its own copy-pasted parameter-overlay block that omitted
+  the `portable` arm, so `.migrate_to(..).disable_portability()` built and ran
+  successfully while dropping the portability change. Both paths now share a
+  single `apply_param_overrides` helper, so the two cannot drift again.
+- The successor-version check in `LogEntry::verify_log_entry()` no longer
+  overflows on a `versionId` of `u32::MAX`. The value is parsed from the
+  untrusted log and `verify_log_entry` is public, so the previous bare `id + 1`
+  was reachable with attacker-controlled input: a panic in debug builds, and a
+  silent wrap to `0` in release builds that would have let a chain restart its
+  numbering. Now returns a `ValidationError`.
+- The interactive CLI update flow no longer panics when no authorization keys
+  are active. `active_update_keys[0]` was indexed unconditionally in two places;
+  a deactivated DID (empty `update_keys`) or deselecting every key in the
+  key-selection prompt produced an index-out-of-bounds panic instead of an
+  error. Both sites now return a `DIDError` explaining the condition.
+
+#### Changed
+
+- `WebVHURL` now derives `Debug`, `PartialEq` and `Eq`; `URLType` additionally
+  derives `Eq`. `WebVHURL` previously derived only `Clone`, so consumers could
+  not derive `Debug` on any type containing one, compare two, or call
+  `.expect_err()` on a `Result` returning one.
+- Direct dependencies refreshed: `async-trait` 0.1.91, `serde` 1.0.229,
+  `thiserror` 2.0.19, `tokio` 1.53.0, plus `anyhow`/`clap` on the dev side.
+- The CI security-audit job no longer passes four stale `--ignore` flags
+  (`RUSTSEC-2026-0098/0099/0104`, `RUSTSEC-2025-0134`). Those advisories were
+  rooted in the reqwest 0.11 dep chain, which disappeared when this crate moved
+  to reqwest 0.13; a current audit does not report them. Stale ignores silently
+  mask an advisory if the dependency ever returns.
+
+#### Documentation
+
+- Corrected two README examples that did not compile: `create_did()` was shown
+  without `.await`, and `CreateDIDResult` was shown accessing `did` /
+  `log_entry` / `witness_proofs` as fields when they are `pub(crate)` and
+  reached via accessor methods. A third example built `update_keys` from a bare
+  `String` rather than a `Multibase`.
+- Fixed the MSRV badge (1.94.0 → 1.95.0, the real `rust-version`), a dead
+  `LICENSE-APACHE` link, stale version numbers in four install snippets, two
+  rustdoc intra-doc links that render broken in plain Markdown, and an
+  incomplete prelude listing.
+- Doc examples previously marked ```` ```ignore ```` are now ```` ```no_run ````
+  where they can be, so they are type-checked on every `cargo test --doc`
+  instead of being skipped. The two broken README examples above existed
+  precisely because nothing compiled them.
+
+#### Testing
+
+- `tests/revoked.rs` no longer writes to fixed paths under the git-tracked
+  `tests/test_vectors/`. `LogEntry::save_to_file` **appends**, and the files
+  were only removed after the assertion, so any failed or interrupted run left
+  a file that the next run appended to — producing a corrupt chain and a
+  spurious failure. Each test now gets its own `TempDir`, removed on drop
+  including on panic.
+- Added regression coverage for the `portable`-on-migrate fix (verified to fail
+  without it), for the other overlay fields on the migrate path, and for the
+  `u32::MAX` successor-version boundary.
+- The `witness-update` interop vector is no longer `#[ignore]`d. It is now an
+  active test asserting that this resolver **rejects** it — see below. The
+  interop suite runs 13 of 13 scenarios with nothing ignored.
+
+#### Conformance note — `witness-update` test vector
+
+The didwebvh-test-suite `witness-update` vector expects a log entry that lowers
+its *own* witness configuration (from `{threshold: 2, witnesses: [A, B]}` to
+`{threshold: 1, witnesses: [A]}`, supplying one proof) to resolve successfully.
+This resolver rejects it, and that is deliberate.
+
+didwebvh 1.0 requires proofs "from a threshold of the **then active**
+witnesses", and states that "changing the witnesses for a DID take effect only
+*after* the entry in which they are defined has been published". The
+then-active configuration for that entry is the previous entry's — threshold 2
+— and only one proof is present.
+
+Evaluating the entry against the new configuration it declares would make
+witnessing bypassable: an attacker holding a compromised update key could
+publish `{threshold: 1, witnesses: [attacker]}`, sign the one required proof
+themselves, and have it accepted. Bounding exactly that compromise is the
+purpose of the witness mechanism, so the stricter reading is the correct one.
+
+The divergence should be raised against didwebvh-test-suite. The test that
+pins this behaviour is `witness_update_rejects_self_lowered_threshold` in
+`tests/test_suite_interop.rs`; if it ever starts failing because the entry
+resolves, that is a security regression rather than fixture drift.
+
+Note also that this test's previous `#[ignore]` reason misdiagnosed the cause
+as "witness proof signature on entry 2 fails verification" and pointed at a
+`tasks/todo.md` that does not exist in the repository. The signature verifies
+correctly; it is the threshold that is not met.
+
+#### Dependencies
+
+Bumps the `affinidi-did-common` requirement from `"0.3"` to `"0.4"`. No code
+changes were required: `Document` gained a typed `also_known_as` field, which is
+additive, and this crate does not construct `Document` by struct literal nor
+re-export it from its public API.
+
+`affinidi-data-integrity` is pinned to `"0.7.7"` in the same change. It is a
+transitive consumer of `affinidi-did-common` and, left at `"0.7"`, resolves to
+the published `0.7.6` which still requires `"0.3"` — putting a second copy of
+`affinidi-did-common` in the graph for exactly the same reason.
+
+This release must land on crates.io **before** `affinidi-did-common 0.4.0`
+propagates to consumers. Per affinidi-tdk-rs ADR 0003 §3, a minor bump of
+`affinidi-did-common` invalidates the `[patch.crates-io]` redirect held by any
+external consumer still requiring `"0.3"`; leaving this crate on `"0.3"` would
+put two copies of `affinidi-did-common` in the dependency graph and break
+downstream builds with duplicate-type errors.
+
 ## 10th July 2026
 
 ### Release 0.5.7 — reject IP-literal hosts at parse time

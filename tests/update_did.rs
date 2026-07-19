@@ -8,6 +8,7 @@
 use affinidi_secrets_resolver::secrets::Secret;
 use didwebvh_rs::{
     DIDWebVHState, Multibase,
+    log_entry::LogEntryMethods,
     parameters::Parameters,
     update::{UpdateDIDConfig, update_did},
     witness::Witnesses,
@@ -313,6 +314,63 @@ async fn disable_portability() {
 
     let result = update_did(config).await.unwrap();
     assert_eq!(result.state().log_entries().len(), 2);
+}
+
+/// Regression test: `migrate_to` used to run its own copy-pasted parameter
+/// overlay that omitted `portable`, so combining a migration with
+/// `disable_portability()` silently dropped the portability change and the
+/// migrated DID stayed portable. Both paths now share
+/// `apply_param_overrides`.
+#[tokio::test]
+async fn migrate_applies_disable_portability() {
+    let (state, key, _) = create_test_did(true).await; // portable
+
+    let config = UpdateDIDConfig::builder()
+        .state(state)
+        .signing_key(key)
+        .migrate_to("https://new.example.com/")
+        .disable_portability()
+        .build()
+        .unwrap();
+
+    let result = update_did(config).await.unwrap();
+
+    // The migration itself still happened.
+    assert!(result.did().contains("new.example.com"));
+
+    // ...and the portability change was NOT dropped.
+    let params = result.log_entry().get_parameters();
+    assert_eq!(
+        params.portable,
+        Some(false),
+        "disable_portability() must be honoured on the migrate path, not silently discarded"
+    );
+}
+
+/// The migrate path must carry through every other overlay field too, not just
+/// `portable` — this pins the shared-helper behaviour so a future divergence
+/// between the two paths fails loudly.
+#[tokio::test]
+async fn migrate_applies_other_param_overrides() {
+    let (state, key, _) = create_test_did(true).await;
+
+    let config = UpdateDIDConfig::builder()
+        .state(state)
+        .signing_key(key)
+        .migrate_to("https://new.example.com/")
+        .ttl(3600)
+        .watchers(vec!["https://watcher.example.com".to_string()])
+        .build()
+        .unwrap();
+
+    let result = update_did(config).await.unwrap();
+    let params = result.log_entry().get_parameters();
+
+    assert_eq!(params.ttl, Some(3600));
+    assert_eq!(
+        params.watchers.as_ref().map(|w| w.as_slice().to_vec()),
+        Some(vec!["https://watcher.example.com".to_string()])
+    );
 }
 
 #[tokio::test]

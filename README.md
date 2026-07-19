@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/didwebvh-rs.svg)](https://crates.io/crates/didwebvh-rs)
 [![Documentation](https://docs.rs/didwebvh-rs/badge.svg)](https://docs.rs/didwebvh-rs)
-[![Rust](https://img.shields.io/badge/rust-1.94.0%2B-blue.svg?maxAge=3600)](https://github.com/decentralized-identity/didwebvh-rs)
+[![Rust](https://img.shields.io/badge/rust-1.95.0%2B-blue.svg?maxAge=3600)](https://github.com/decentralized-identity/didwebvh-rs)
 
 A complete implementation of the [did:webvh](https://identity.foundation/didwebvh/v1.0/)
 method in Rust. Supports version 1.0 spec.
@@ -47,7 +47,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.5.0"
+didwebvh-rs = "0.6.0"
 ```
 
 Then:
@@ -62,18 +62,31 @@ webvh.load_log_entries_from_file("did.jsonl")?;
 ```
 
 The `prelude` module re-exports the most commonly needed types:
-`DIDWebVHError`, `DIDWebVHState`, `LogEntryMethods`, `Parameters`,
-`ValidationReport`, `TruncationReason`, `CreateDIDConfig`, `create_did`,
-`UpdateDIDConfig`, `update_did`, `Witnesses`, `WitnessProofCollection`,
-`Signer`, `KeyType`, `Secret`, `async_trait`, and the `generate_did_key`
-helper.
 
-> **Version skew note (0.5.0):** third-party types (`Signer`, `KeyType`,
-> `Secret`, `async_trait`) and the whole-crate re-export of
-> `affinidi_secrets_resolver` are no longer exposed at the crate root.
-> Reach for them via `prelude::*` or depend on the source crates in your
-> own Cargo.toml. This shields your build from version skew introduced
-> by whatever didwebvh-rs happens to pin.
+- Always available: `DIDWebVHError`, `DIDWebVHState`, `Multibase`,
+  `TruncationReason`, `ValidationReport`, `CreateDIDConfig`, `create_did`,
+  `UpdateDIDConfig`, `update_did`, `LogEntryMethods`, `Parameters`,
+  `Witnesses`, `WitnessProofCollection`, and the `generate_did_key` helper.
+- Re-exported from third-party crates: `Signer`
+  (`affinidi_data_integrity`), `KeyType` and `Secret`
+  (`affinidi_secrets_resolver`), and `async_trait`.
+- Requires the `network` feature: `ResolveOptions`.
+- Requires the `cli` feature: `InteractiveCreateConfig`,
+  `InteractiveCreateResult`, `interactive_create_did`,
+  `InteractiveUpdateConfig`, `InteractiveUpdateResult`, `UpdateOperation`,
+  `UpdateSecrets`, `interactive_update_did`.
+
+> **Version skew note:** third-party types (`Signer`, `KeyType`, `Secret`,
+> `async_trait`) are not exposed at the crate root. Reach for them via
+> `prelude::*` or depend on the source crates in your own Cargo.toml. This
+> shields your build from version skew introduced by whatever didwebvh-rs
+> happens to pin.
+>
+> The whole-crate `didwebvh_rs::affinidi_secrets_resolver` re-export was
+> deprecated in 0.5.0 and **removed in 0.6.0**. Replace
+> `didwebvh_rs::affinidi_secrets_resolver::secrets::Secret` with
+> `didwebvh_rs::prelude::Secret`, or add `affinidi-secrets-resolver` to your
+> own `Cargo.toml` if you need its full surface.
 
 ## Feature Flags
 
@@ -91,7 +104,7 @@ To use the library without network support (e.g. for local file validation only)
 
 ```toml
 [dependencies]
-didwebvh-rs = { version = "0.3.0", default-features = false }
+didwebvh-rs = { version = "0.6.0", default-features = false }
 ```
 
 ## Convenience API
@@ -114,7 +127,7 @@ See the `examples/update_did.rs`, `examples/rotate_keys.rs`, and
 
 ## Updating a DID Programmatically
 
-The `update` module provides [`update_did()`] for programmatic DID updates,
+The `update` module provides `update_did()` for programmatic DID updates,
 complementing `create_did()`. It handles document changes, key rotation,
 parameter updates, domain migration, deactivation, and witness signing:
 
@@ -220,7 +233,7 @@ DID creation and management experience as the built-in wizard.
 
 ```toml
 [dependencies]
-didwebvh-rs = { version = "0.4.1", features = ["cli"] }
+didwebvh-rs = { version = "0.6.0", features = ["cli"] }
 ```
 
 ### Interactive DID Creation
@@ -389,9 +402,9 @@ let signing_key = Secret::generate_ed25519(None, None);
 
 // Build parameters with the signing key as an update key
 let parameters = Parameters {
-    update_keys: Some(Arc::new(vec![
+    update_keys: Some(Arc::new(vec![Multibase::new(
         signing_key.get_public_keymultibase().unwrap(),
-    ])),
+    )])),
     portable: Some(true),
     ..Default::default()
 };
@@ -421,11 +434,12 @@ let config = CreateDIDConfig::builder()
     .build()
     .unwrap();
 
-let result = create_did(config).unwrap();
+let result = create_did(config).await.unwrap();
 
-// result.did        — the resolved DID identifier (with SCID)
-// result.log_entry  — the signed first log entry (serialize to JSON for did.jsonl)
-// result.witness_proofs — witness proofs (empty if no witnesses configured)
+// Access results via accessor methods
+println!("Created DID: {}", result.did());
+result.log_entry().save_to_file("did.jsonl")?;
+result.witness_proofs().save_to_file("did-witness.json")?;
 ```
 
 ### Bring Your Own Signer (HSM / KMS)
@@ -506,7 +520,7 @@ enable only for interop testing with other PQC-aware implementations.
 
 ```toml
 [dependencies]
-didwebvh-rs = { version = "0.5.0", features = ["experimental-pqc"] }
+didwebvh-rs = { version = "0.6.0", features = ["experimental-pqc"] }
 ```
 
 Key generation, signing, and verification flow through the same
@@ -561,12 +575,40 @@ use affinidi_data_integrity::crypto_suites::CryptoSuite;
 let options = WitnessVerifyOptions::new()
     .with_extra_allowed_suite(CryptoSuite::MlDsa44Jcs2024);
 
+// `validate_with` takes `&mut self`, so `state` must be a `mut` binding
+let mut state = DIDWebVHState::default();
 state.validate_with(&options)?.assert_complete()?;
 ```
 
 Accepting non-spec witness suites is deliberate spec-deviation; it's an
 escape hatch for testing, not a production recommendation. Strict
 `state.validate()?` keeps the `eddsa-jcs-2022`-only default.
+
+## Conformance
+
+`tests/test_suite_interop.rs` runs the committed
+[didwebvh-test-suite](https://github.com/decentralized-identity/didwebvh-test-suite)
+vectors: **13 of 13 scenarios, none ignored**.
+
+One scenario is asserted to **fail**, deliberately. The `witness-update` vector
+contains a log entry that lowers its *own* witness configuration — from
+`{threshold: 2, witnesses: [A, B]}` to `{threshold: 1, witnesses: [A]}` — and
+supplies a single proof. Its expected result has that entry resolving. This
+resolver rejects it.
+
+didwebvh 1.0 requires proofs "from a threshold of the **then active**
+witnesses", and specifies that changing a DID's witnesses takes effect only
+*after* the entry declaring the change is published. The then-active threshold
+for that entry is therefore 2, and only one proof is present.
+
+The stricter reading matters: if an entry's own witness configuration governed
+its own approval, an attacker holding a compromised update key could publish
+`{threshold: 1, witnesses: [attacker]}`, sign the single required proof, and
+have it accepted — bypassing witnessing entirely. Containing exactly that
+compromise is what witnesses are for.
+
+If you are comparing this implementation against another and see a divergence
+on `witness-update`, this is why.
 
 ## Fuzzing
 
@@ -601,11 +643,11 @@ cargo +nightly fuzz run chain_validate -- -max_total_time=300
 ```
 
 To drive the verifier from an in-memory chain (in a harness or a test), use
-[`DIDWebVHState::from_log_entries`] with a `Vec<LogEntry>`, then call
+`DIDWebVHState::from_log_entries()` with a `Vec<LogEntry>`, then call
 `validate()`. See `fuzz/README.md` for details.
 
 ## License
 
 Licensed under:
 
-- Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+- Apache License, Version 2.0, ([LICENSE](LICENSE) or <https://www.apache.org/licenses/LICENSE-2.0>)

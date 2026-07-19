@@ -46,6 +46,24 @@ impl LogEntry {
         Ok(entries)
     }
 
+    /// Returns the version number the successor of `previous_id` must carry.
+    ///
+    /// `previous_id` is parsed from an untrusted `versionId` string and can be
+    /// any `u32`, so a bare `previous_id + 1` overflows at `u32::MAX` — a
+    /// panic in debug builds, and a silent wrap to `0` in release builds that
+    /// would let a chain restart its numbering. `verify_log_entry` is public
+    /// and takes `previous_log_entry` from the caller, and the `arbitrary`
+    /// fuzz harness builds entries directly, so this is reachable without
+    /// going through normal chain resolution.
+    fn expected_next_version_id(previous_id: u32) -> Result<u32, DIDWebVHError> {
+        previous_id.checked_add(1).ok_or_else(|| {
+            DIDWebVHError::ValidationError(format!(
+                "Previous LogEntry version ID ({previous_id}) is at the maximum value; \
+                 no valid successor exists",
+            ))
+        })
+    }
+
     /// Verify a LogEntry against a previous entry if it exists
     /// NOTE: THIS DOES NOT VERIFY WITNESS PROOFS!
     /// NOTE: You must validate witness proofs separately
@@ -249,7 +267,9 @@ impl LogEntry {
         if let Some(previous) = previous {
             let (id, _) = previous.get_version_id_fields()?;
 
-            if current_id != id + 1 {
+            let expected_id = LogEntry::expected_next_version_id(id)?;
+
+            if current_id != expected_id {
                 return Err(DIDWebVHError::ValidationError(format!(
                     "Current LogEntry version ID ({current_id}) must be one greater than previous version ID ({id})",
                 )));
@@ -481,6 +501,38 @@ mod tests {
             state: json!({"id": "did:webvh:abc123:example.com"}),
             proof: vec![],
         })
+    }
+
+    /// Tests that the successor-version computation errors at `u32::MAX`
+    /// instead of overflowing.
+    ///
+    /// The versionId is attacker-controlled (it is parsed straight out of the
+    /// log), so the old bare `id + 1` panicked in debug builds and silently
+    /// wrapped to `0` in release builds. The wrap is the dangerous case: it
+    /// would accept a successor numbered `0` and let a chain restart its
+    /// numbering.
+    #[test]
+    fn expected_next_version_id_errors_at_u32_max() {
+        let Err(DIDWebVHError::ValidationError(msg)) = LogEntry::expected_next_version_id(u32::MAX)
+        else {
+            panic!("expected a ValidationError at u32::MAX");
+        };
+        assert!(
+            msg.contains("maximum value"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    /// The normal path must still increment by exactly one, including at the
+    /// boundary just below the overflow.
+    #[test]
+    fn expected_next_version_id_increments_normally() {
+        assert_eq!(LogEntry::expected_next_version_id(0).unwrap(), 1);
+        assert_eq!(LogEntry::expected_next_version_id(1).unwrap(), 2);
+        assert_eq!(
+            LogEntry::expected_next_version_id(u32::MAX - 1).unwrap(),
+            u32::MAX
+        );
     }
 
     /// Tests that verify_log_entry rejects proofs with any proofPurpose other

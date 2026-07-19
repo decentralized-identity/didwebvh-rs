@@ -6,7 +6,8 @@ use url::Url;
 type QueryPairs = (Option<String>, Option<DateTime<FixedOffset>>, Option<u32>);
 
 /// Distinguishes the type of resource a WebVH URL points to.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum URLType {
     /// Regular DID Documentation lookup
     DIDDoc,
@@ -16,7 +17,7 @@ pub enum URLType {
 }
 
 /// Breakdown of a WebVH URL into its components
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WebVHURL {
     /// What type of URL is this?
     pub type_: URLType,
@@ -593,9 +594,7 @@ mod tests {
             "did:webvh:scid:169%2E254%2E169%2E254",
             "did:webvh:scid:127%2E0%2E0%2E1%3A8080",
         ] {
-            let err = WebVHURL::parse_did_url(did)
-                .err()
-                .expect("must be rejected at parse time");
+            let err = WebVHURL::parse_did_url(did).expect_err("must be rejected at parse time");
             assert!(
                 err.to_string().contains("IP addresses are not allowed"),
                 "{did} -> {err}"
@@ -613,9 +612,7 @@ mod tests {
             "did:webvh:scid:127.1",
             "did:webvh:scid:0177.0.0.1",
         ] {
-            let err = WebVHURL::parse_did_url(did)
-                .err()
-                .expect("must be rejected at parse time");
+            let err = WebVHURL::parse_did_url(did).expect_err("must be rejected at parse time");
             assert!(
                 err.to_string().contains("IP addresses are not allowed"),
                 "{did} -> {err}"
@@ -863,7 +860,7 @@ mod tests {
         let result = WebVHURL::parse_did_url(
             "did:webvh:scid:example.com?versionId=1-xyz&versionTime=2024-01-01T00:00:00Z",
         );
-        let err = result.err().expect("expected error");
+        let err = result.expect_err("expected error");
         assert!(
             err.to_string()
                 .contains("Only one of versionId, versionTime, or versionNumber")
@@ -874,7 +871,7 @@ mod tests {
     fn parse_query_version_id_and_version_number_rejects() {
         let result =
             WebVHURL::parse_did_url("did:webvh:scid:example.com?versionId=1-xyz&versionNumber=5");
-        let err = result.err().expect("expected error");
+        let err = result.expect_err("expected error");
         assert!(
             err.to_string()
                 .contains("Only one of versionId, versionTime, or versionNumber")
@@ -886,7 +883,7 @@ mod tests {
         let result = WebVHURL::parse_did_url(
             "did:webvh:scid:example.com?versionTime=2024-01-01T00:00:00Z&versionNumber=5",
         );
-        let err = result.err().expect("expected error");
+        let err = result.expect_err("expected error");
         assert!(
             err.to_string()
                 .contains("Only one of versionId, versionTime, or versionNumber")
@@ -898,7 +895,7 @@ mod tests {
         let result = WebVHURL::parse_did_url(
             "did:webvh:scid:example.com?versionId=1-xyz&versionTime=2024-01-01T00:00:00Z&versionNumber=5",
         );
-        let err = result.err().expect("expected error");
+        let err = result.expect_err("expected error");
         assert!(
             err.to_string()
                 .contains("Only one of versionId, versionTime, or versionNumber")
@@ -922,21 +919,21 @@ mod tests {
     #[test]
     fn parse_did_url_rejects_ipv4() {
         let result = WebVHURL::parse_did_url("did:webvh:scid:192.168.1.1");
-        let err = result.err().expect("expected error for IPv4 address");
+        let err = result.expect_err("expected error for IPv4 address");
         assert!(err.to_string().contains("IP addresses are not allowed"));
     }
 
     #[test]
     fn parse_did_url_rejects_ipv4_loopback() {
         let result = WebVHURL::parse_did_url("did:webvh:scid:127.0.0.1");
-        let err = result.err().expect("expected error for IPv4 loopback");
+        let err = result.expect_err("expected error for IPv4 loopback");
         assert!(err.to_string().contains("IP addresses are not allowed"));
     }
 
     #[test]
     fn parse_did_url_rejects_ipv4_with_port() {
         let result = WebVHURL::parse_did_url("did:webvh:scid:192.168.1.1%3A8080");
-        let err = result.err().expect("expected error for IPv4 with port");
+        let err = result.expect_err("expected error for IPv4 with port");
         assert!(err.to_string().contains("IP addresses are not allowed"));
     }
 
@@ -956,7 +953,7 @@ mod tests {
     fn parse_url_rejects_ipv4() {
         let url = Url::parse("https://192.168.1.1/").unwrap();
         let result = WebVHURL::parse_url(&url);
-        let err = result.err().expect("expected error for IPv4 address");
+        let err = result.expect_err("expected error for IPv4 address");
         assert!(err.to_string().contains("IP addresses are not allowed"));
     }
 
@@ -964,7 +961,7 @@ mod tests {
     fn parse_url_rejects_ipv6() {
         let url = Url::parse("https://[::1]/").unwrap();
         let result = WebVHURL::parse_url(&url);
-        let err = result.err().expect("expected error for IPv6 address");
+        let err = result.expect_err("expected error for IPv6 address");
         assert!(err.to_string().contains("IP addresses are not allowed"));
     }
 

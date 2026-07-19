@@ -11,7 +11,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Tracks validation status of a LogEntry
+///
+/// This enum is `#[non_exhaustive]`: new validation states may be added in
+/// future minor releases, so downstream `match` expressions must include a
+/// wildcard `_ =>` arm.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[non_exhaustive]
 pub enum LogEntryValidationStatus {
     /// LogEntry failed validation
     Invalid(String),

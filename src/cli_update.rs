@@ -13,19 +13,23 @@
  *
  * # Usage
  *
- * ```ignore
- * use didwebvh_rs::cli_update::{InteractiveUpdateConfig, interactive_update_did};
+ * ```no_run
+ * use didwebvh_rs::DIDWebVHState;
+ * use didwebvh_rs::cli_update::{InteractiveUpdateConfig, UpdateSecrets, interactive_update_did};
  *
+ * # async fn run(webvh_state: DIDWebVHState, update_secrets: UpdateSecrets)
+ * #     -> Result<(), didwebvh_rs::DIDWebVHError> {
  * // Fully interactive - loads state from files, prompts for operation
  * let result = interactive_update_did(InteractiveUpdateConfig::default()).await?;
  *
  * // Pre-loaded state with secrets provided
  * let config = InteractiveUpdateConfig::builder()
  *     .state(webvh_state)
- *     .authorization_secrets(auth_secrets)
- *     .witness_secrets(witness_secrets)
+ *     .secrets(update_secrets)
  *     .build();
  * let result = interactive_update_did(config).await?;
+ * # Ok(())
+ * # }
  * ```
  */
 
@@ -56,7 +60,7 @@ use url::Url;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use didwebvh_rs::cli_update::UpdateOperation;
 ///
 /// let op = UpdateOperation::Modify;
@@ -79,10 +83,11 @@ pub enum UpdateOperation {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use didwebvh_rs::cli_update::UpdateSecrets;
-/// use didwebvh_rs::affinidi_secrets_resolver::secrets::Secret;
+/// use didwebvh_rs::prelude::Secret;
 ///
+/// # fn demo(witness_key: Secret) -> Result<(), Box<dyn std::error::Error>> {
 /// let mut secrets = UpdateSecrets::default();
 ///
 /// // Add an authorization key
@@ -96,6 +101,8 @@ pub enum UpdateOperation {
 ///
 /// // Add a witness secret
 /// secrets.witnesses.insert("did:key:z6Mk...".to_string(), witness_key);
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Clone, Debug, Default)]
 pub struct UpdateSecrets {
@@ -139,25 +146,46 @@ impl UpdateSecrets {
 ///
 /// Fully interactive (loads from files, prompts for everything):
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::cli_update::{InteractiveUpdateConfig, interactive_update_did};
+///
+/// # async fn run() -> Result<(), didwebvh_rs::DIDWebVHError> {
 /// let config = InteractiveUpdateConfig::default();
 /// let result = interactive_update_did(config).await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// Pre-loaded state with specific operation:
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::DIDWebVHState;
+/// use didwebvh_rs::cli_update::{
+///     InteractiveUpdateConfig, UpdateOperation, UpdateSecrets, interactive_update_did,
+/// };
+///
+/// # async fn run(webvh_state: DIDWebVHState, update_secrets: UpdateSecrets)
+/// #     -> Result<(), didwebvh_rs::DIDWebVHError> {
 /// let config = InteractiveUpdateConfig::builder()
 ///     .state(webvh_state)
 ///     .secrets(update_secrets)
 ///     .operation(UpdateOperation::Modify)
 ///     .build();
 /// let result = interactive_update_did(config).await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// Pre-configured migration:
 ///
-/// ```ignore
+/// ```no_run
+/// use didwebvh_rs::DIDWebVHState;
+/// use didwebvh_rs::cli_update::{
+///     InteractiveUpdateConfig, UpdateOperation, UpdateSecrets, interactive_update_did,
+/// };
+///
+/// # async fn run(webvh_state: DIDWebVHState, update_secrets: UpdateSecrets)
+/// #     -> Result<(), didwebvh_rs::DIDWebVHError> {
 /// let config = InteractiveUpdateConfig::builder()
 ///     .state(webvh_state)
 ///     .secrets(update_secrets)
@@ -165,6 +193,8 @@ impl UpdateSecrets {
 ///     .new_url("https://new-domain.example.com/")
 ///     .build();
 /// let result = interactive_update_did(config).await?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Default)]
 pub struct InteractiveUpdateConfig {
@@ -320,15 +350,18 @@ impl InteractiveUpdateResult {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use didwebvh_rs::prelude::*;
 ///
+/// # async fn run() -> Result<(), DIDWebVHError> {
 /// // Fully interactive - loads from files
 /// let result = interactive_update_did(InteractiveUpdateConfig::default()).await?;
 ///
 /// // Save updated state
 /// result.log_entry().save_to_file("did.jsonl")?;
 /// result.state().witness_proofs().save_to_file("did-witness.json")?;
+/// # Ok(())
+/// # }
 /// ```
 pub async fn interactive_update_did(
     config: InteractiveUpdateConfig,
@@ -475,12 +508,26 @@ async fn do_modify(
     let new_params = prompt_update_parameters(previous, secrets)?;
 
     // Find signing key
+    // A deactivated DID has an empty `update_keys` set, and the authorization-key
+    // prompt allows deselecting every key — both leave `active_update_keys`
+    // empty. Indexing `[0]` here used to panic instead of erroring.
+    let active_key = new_params
+        .active_update_keys
+        .first()
+        .ok_or_else(|| {
+            DIDWebVHError::DIDError(
+                "No active update keys are available to sign this update. A deactivated DID \
+                 cannot be updated, and at least one authorization key must be selected."
+                    .to_string(),
+            )
+        })?
+        .clone();
+
     let signing_key = secrets
-        .find_by_public_key(new_params.active_update_keys[0].as_str())
+        .find_by_public_key(active_key.as_str())
         .ok_or_else(|| {
             DIDWebVHError::DIDError(format!(
-                "No signing key found for active update key: {}",
-                new_params.active_update_keys[0]
+                "No signing key found for active update key: {active_key}"
             ))
         })?
         .clone();
@@ -609,12 +656,26 @@ async fn do_migrate(
     let mut new_params = Parameters::default();
     prompt_update_authorization_keys(&last_entry.validated_parameters, &mut new_params, secrets)?;
 
+    // A deactivated DID has an empty `update_keys` set, and the authorization-key
+    // prompt allows deselecting every key — both leave `active_update_keys`
+    // empty. Indexing `[0]` here used to panic instead of erroring.
+    let active_key = new_params
+        .active_update_keys
+        .first()
+        .ok_or_else(|| {
+            DIDWebVHError::DIDError(
+                "No active update keys are available to sign this update. A deactivated DID \
+                 cannot be updated, and at least one authorization key must be selected."
+                    .to_string(),
+            )
+        })?
+        .clone();
+
     let signing_key = secrets
-        .find_by_public_key(new_params.active_update_keys[0].as_str())
+        .find_by_public_key(active_key.as_str())
         .ok_or_else(|| {
             DIDWebVHError::DIDError(format!(
-                "No signing key found for active update key: {}",
-                new_params.active_update_keys[0]
+                "No signing key found for active update key: {active_key}"
             ))
         })?
         .clone();
