@@ -68,6 +68,14 @@ jobs:
       #
       # Vulnerabilities (advisories with severity):
       # - RUSTSEC-2023-0071: rsa 0.6.1 Marvin Attack timing side-channel (via ssi-jwk)
+      # - RUSTSEC-2026-0235: rkyv 0.7.46 out-of-bounds read validating an
+      #   archive containing Rc/Arc. Reached only as
+      #   byte-unit -> rust_decimal -> rkyv (rust_decimal's optional archive
+      #   feature); nothing in this crate constructs or validates an rkyv
+      #   archive, so the vulnerable code is never called. There is no
+      #   non-breaking fix to take: the advisory's remedy is rkyv >= 0.8.17
+      #   and rust_decimal 1.42.1 — the latest 1.x — still requires 0.7.46.
+      #   Drop this the moment rust_decimal moves.
       #
       # Unmaintained warnings (no CVE, advisory category = "unmaintained"):
       # - RUSTSEC-2021-0127: serde_cbor unmaintained (via ssi-vc-jose-cose)
@@ -86,6 +94,7 @@ jobs:
       - run: >-
           cargo audit
           --ignore RUSTSEC-2023-0071
+          --ignore RUSTSEC-2026-0235
           --ignore RUSTSEC-2024-0388
           --ignore RUSTSEC-2024-0370
           --ignore RUSTSEC-2021-0127
