@@ -1,5 +1,40 @@
 # didwebvh-rs Changelog history
 
+## 29th August 2026
+
+### Release 0.6.1 — activating pre-rotation mid-chain
+
+#### Fixed
+
+- `Parameters::validate()` no longer rejects the log entry that *activates* key
+  pre-rotation when that entry also sets `updateKeys`. The
+  "every `updateKeys` multikey must hash into the previous entry's
+  `nextKeyHashes`" rule was gated on the entry's own `pre_rotation_active` —
+  which the entry's new `nextKeyHashes` had just flipped on — instead of the
+  previous entry's. Since a not-yet-pre-rotating predecessor commits no hashes,
+  the activating entry was unsatisfiable and failed with
+  `ValidationError: nextKeyHashes must be defined when pre-rotation is active`.
+  In practice that blocked the common operator flow of turning pre-rotation on
+  as part of an ordinary document edit, which rotates `updateKeys` in the same
+  entry.
+
+  didwebvh 1.0 defines the trigger as the *previous* entry's commitment —
+  verification algorithm step 7: "If Key Pre-Rotation is active (the previously
+  active `nextKeyHashes` is non-empty)"; update algorithm step 7 checks "the
+  array of `nextKeyHashes` parameter from the previous DID log entry" — and
+  §Key Pre-Rotation lets a controller activate pre-rotation "in any DID log
+  entry". The commitment binds the *next* entry, so the activating entry itself
+  follows plain-rotation rules. `LogEntry::verify_log_entry()` and
+  `check_signing_key()` already keyed on the previous entry; only
+  `Parameters::validate()` diverged, so a chain that had somehow been written
+  with such an entry would resolve while this crate could not produce one.
+
+  The steady-state rule is unchanged: once the previous entry has committed
+  `nextKeyHashes`, an entry must restate `updateKeys` explicitly and every key
+  in it must hash into that commitment. So is the deactivation rule — an entry
+  setting `nextKeyHashes: []` while a commitment is in force must still satisfy
+  it.
+
 ## 19th July 2026
 
 ### Release 0.6.0 — affinidi-did-common 0.4, pre-release audit fixes

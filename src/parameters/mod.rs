@@ -397,15 +397,50 @@ impl Parameters {
                         new_parameters.update_keys = Some(Arc::new(Vec::new()));
                         new_parameters.active_update_keys = previous.active_update_keys.clone();
                     } else if !new_parameters.pre_rotation_active && pre_rotation_previous_value {
-                        // Key pre-rotation has been turned off
-                        // Update keys must be part of the previous nextKeyHashes
+                        // Key pre-rotation has been turned off by this entry.
+                        // didwebvh 1.0 §Pre-Rotation Key Hash Generation and
+                        // Verification: "If there is an active set of
+                        // nextKeyHashes at the time, the pre-rotation
+                        // requirements remain in effect for the DID Log entry" —
+                        // so this entry's updateKeys must still hash into the
+                        // previous entry's nextKeyHashes. Only the *next* entry
+                        // uses the non-pre-rotation rules.
                         Self::validate_pre_rotation_keys(&previous.next_key_hashes, update_keys)?;
                         new_parameters.update_keys = Some(update_keys.clone());
                         new_parameters.active_update_keys = update_keys.clone();
-                    } else if new_parameters.pre_rotation_active {
-                        // Key pre-rotation is active
-                        // Update keys must be part of the previous nextKeyHashes
+                    } else if pre_rotation_previous_value {
+                        // Key pre-rotation was already active coming into this
+                        // entry, and stays active: updateKeys must be part of the
+                        // previous nextKeyHashes.
+                        //
+                        // Gated on the PREVIOUS entry's state, not this one's.
+                        // didwebvh 1.0 verification algorithm step 7 defines the
+                        // trigger as "Key Pre-Rotation is active (the previously
+                        // active nextKeyHashes is non-empty)", and the update
+                        // algorithm step 7 likewise checks "the array of
+                        // nextKeyHashes parameter from the previous DID log
+                        // entry". Reading this entry's own `pre_rotation_active`
+                        // instead made the activating entry below unsatisfiable.
                         Self::validate_pre_rotation_keys(&previous.next_key_hashes, update_keys)?;
+                        new_parameters.active_update_keys = update_keys.clone();
+                    } else if new_parameters.pre_rotation_active {
+                        // This entry ACTIVATES pre-rotation: it commits
+                        // nextKeyHashes while the previous entry committed none.
+                        // Per didwebvh 1.0 §Key Pre-Rotation a controller "MAY
+                        // include the parameter nextKeyHashes with a non-empty
+                        // list in ANY DID log entry to activate the pre-rotation
+                        // feature", and the commitment binds the *next* entry, so
+                        // there is nothing for these updateKeys to hash into.
+                        // Plain-rotation rules apply to the entry itself.
+                        //
+                        // `update_keys` is deliberately left unset on the
+                        // validated parameters, as in the already-active arm
+                        // above: pre-rotation is in force from here, and an entry
+                        // published while it is active must restate updateKeys
+                        // explicitly rather than inherit them (§parameters,
+                        // nextKeyHashes). Leaving the field unset is what makes
+                        // `diff()` emit updateKeys on the next entry instead of
+                        // eliding an unchanged-looking value.
                         new_parameters.active_update_keys = update_keys.clone();
                     } else {
                         // No Key pre-rotation is active
@@ -1048,6 +1083,93 @@ mod tests {
         };
         let err = current.validate(Some(&previous)).unwrap_err();
         assert!(err.to_string().contains("scid must not be provided"));
+    }
+
+    /// A second valid ed25519 multikey, distinct from [`TEST_UPDATE_KEY`], for
+    /// tests that need to rotate from one update key to another.
+    const TEST_ROTATED_KEY: &str = "z6MkkZb4PaW5hZJr2vVp6aA4FMVTbziXEW7aFHPFLmuKVrzn";
+
+    /// Regression: turning pre-rotation ON in an entry that also rotates
+    /// `updateKeys` must validate.
+    ///
+    /// The previous entry committed no `nextKeyHashes`, so there is nothing for
+    /// this entry's `updateKeys` to hash into — didwebvh 1.0 lets a controller
+    /// activate pre-rotation in *any* log entry, and the commitment binds the
+    /// next one. `validate()` used to key the "updateKeys must be in the
+    /// previous nextKeyHashes" check on *this* entry's `pre_rotation_active`
+    /// (which the new `nextKeyHashes` had just flipped on) rather than the
+    /// previous entry's, making the activating entry unsatisfiable with
+    /// `ValidationError: nextKeyHashes must be defined when pre-rotation is
+    /// active`.
+    #[test]
+    fn validate_activating_pre_rotation_with_rotated_update_keys_ok() {
+        let previous = validated_first_params();
+        assert!(!previous.pre_rotation_active);
+        assert!(previous.next_key_hashes.is_none());
+
+        let rotated = Arc::new(vec![Multibase::new(TEST_ROTATED_KEY)]);
+        let current = Parameters {
+            next_key_hashes: Some(Arc::new(vec![Multibase::new("QmNextKeyHash")])),
+            update_keys: Some(rotated.clone()),
+            ..Default::default()
+        };
+
+        let result = current
+            .validate(Some(&previous))
+            .expect("activating pre-rotation must be allowed to rotate updateKeys");
+        assert!(result.pre_rotation_active);
+        assert_eq!(result.active_update_keys, rotated);
+        // Left unset on purpose: pre-rotation is in force from here, so the
+        // next entry has to restate `updateKeys` rather than inherit them,
+        // and `diff()` only emits the field when it differs from this value.
+        assert!(result.update_keys.is_none());
+    }
+
+    /// Companion to the test above: activating pre-rotation while *inheriting*
+    /// `updateKeys` is also valid — the previous entry committed nothing, so
+    /// the no-pre-rotation inheritance rule still applies to this entry.
+    #[test]
+    fn validate_activating_pre_rotation_with_inherited_update_keys_ok() {
+        let previous = validated_first_params();
+
+        let current = Parameters {
+            next_key_hashes: Some(Arc::new(vec![Multibase::new("QmNextKeyHash")])),
+            update_keys: None,
+            ..Default::default()
+        };
+
+        let result = current
+            .validate(Some(&previous))
+            .expect("activating pre-rotation may inherit updateKeys");
+        assert!(result.pre_rotation_active);
+        assert_eq!(result.active_update_keys, previous.active_update_keys);
+    }
+
+    /// Guard on the fix above: once the PREVIOUS entry has committed
+    /// `nextKeyHashes`, an entry presenting `updateKeys` that do not hash into
+    /// that commitment is still rejected. Relaxing the activating case must not
+    /// relax the steady-state rule that pre-rotation exists to enforce.
+    #[test]
+    fn validate_pre_rotation_active_rejects_uncommitted_update_keys() {
+        let mut previous = validated_first_params();
+        previous.pre_rotation_active = true;
+        previous.next_key_hashes = Some(Arc::new(vec![Multibase::new(
+            Secret::base58_hash_string(TEST_UPDATE_KEY).unwrap(),
+        )]));
+
+        let current = Parameters {
+            next_key_hashes: Some(Arc::new(vec![Multibase::new("QmNextKeyHash")])),
+            // Not the key whose hash the previous entry committed.
+            update_keys: Some(Arc::new(vec![Multibase::new(TEST_ROTATED_KEY)])),
+            ..Default::default()
+        };
+
+        let err = current.validate(Some(&previous)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("was not specified in the previous nextKeyHashes"),
+            "unexpected error: {err}"
+        );
     }
 
     /// Given a previous entry with pre-rotation active and a current entry that omits nextKeyHashes,

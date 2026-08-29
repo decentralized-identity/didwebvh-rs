@@ -720,4 +720,109 @@ mod tests {
         assert_eq!(state.log_entries().len(), 2);
         assert!(state.validated());
     }
+
+    /// End-to-end regression for activating pre-rotation on a live DID.
+    ///
+    /// This is the shape an operator hits when a DID has been running without
+    /// pre-rotation and they turn it on as part of an ordinary document edit:
+    /// one entry that changes `state`, rotates `updateKeys`, and commits
+    /// `nextKeyHashes` for the first time. It used to fail with
+    /// `ValidationError: nextKeyHashes must be defined when pre-rotation is
+    /// active`, because the updateKeys→nextKeyHashes check keyed on the entry's
+    /// own freshly-set `pre_rotation_active` instead of the previous entry's.
+    ///
+    /// The third entry keeps the other half honest: once pre-rotation IS active,
+    /// the next entry must reveal a pre-committed key and sign with it.
+    #[tokio::test]
+    async fn activate_pre_rotation_mid_chain_then_reveal_validates() {
+        let t0 = chrono::Utc::now().fixed_offset() - chrono::Duration::hours(1);
+
+        // v1: plain genesis, no pre-rotation.
+        let k1 = generate_signing_key();
+        let pk1 = k1.get_public_keymultibase().unwrap();
+        let did = "did:webvh:{SCID}:example.com";
+        let create_result = create_did(
+            CreateDIDConfig::builder()
+                .address("https://example.com/")
+                .authorization_key(k1.clone())
+                .did_document(did_doc_with_key(did, &k1))
+                .parameters(Parameters {
+                    update_keys: Some(Arc::new(vec![Multibase::new(&pk1)])),
+                    ..Default::default()
+                })
+                .version_time(t0)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .expect("create genesis entry");
+
+        let mut state = DIDWebVHState::from_log_entries(vec![create_result.log_entry().clone()]);
+        let _ = state.validate().expect("genesis entry validates");
+
+        // v2: document change + updateKeys rotation + pre-rotation ACTIVATED,
+        // all in one entry, signed by the genesis update key.
+        let k2 = generate_signing_key();
+        let pk2 = k2.get_public_keymultibase().unwrap();
+        let k3 = generate_signing_key();
+        let pk3 = k3.get_public_keymultibase().unwrap();
+        let hash3 = Secret::base58_hash_string(&pk3).unwrap();
+
+        let mut edited_doc = state.current_document().unwrap();
+        edited_doc["service"] = serde_json::json!([{
+            "id": format!("{}#tsp", state.log_entries().last().unwrap().get_state()["id"].as_str().unwrap()),
+            "type": "TSPTransport",
+            "serviceEndpoint": "did:webvh:QmMediator:example.com",
+        }]);
+
+        let state = update_did(
+            UpdateDIDConfig::<_, Secret>::builder()
+                .state(state)
+                .signing_key(k1)
+                .document(edited_doc)
+                .update_keys(vec![Multibase::new(&pk2)])
+                .next_key_hashes(vec![Multibase::new(&hash3)])
+                .version_time(t0 + chrono::Duration::minutes(1))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .expect("activating pre-rotation alongside a document edit must succeed")
+        .into_state();
+        assert_eq!(state.log_entries().len(), 2);
+
+        // v3: reveal the pre-committed key. Pre-rotation is active now, so the
+        // entry must restate `updateKeys` with the revealed key, sign with it,
+        // and commit the next hash.
+        let k4 = generate_signing_key();
+        let hash4 = Secret::base58_hash_string(&k4.get_public_keymultibase().unwrap()).unwrap();
+        let mut state = update_did(
+            UpdateDIDConfig::<_, Secret>::builder()
+                .state(state)
+                .signing_key(k3)
+                .update_keys(vec![Multibase::new(&pk3)])
+                .next_key_hashes(vec![Multibase::new(&hash4)])
+                .version_time(t0 + chrono::Duration::minutes(2))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .expect("revealing a pre-committed key must succeed")
+        .into_state();
+        assert_eq!(state.log_entries().len(), 3);
+
+        // Drive the full resolver validation path over the whole chain.
+        for entry in state.log_entries_mut() {
+            entry.validation_status = LogEntryValidationStatus::NotValidated;
+        }
+        let report = state
+            .validate()
+            .expect("activate-then-reveal chain must validate end-to-end");
+        assert!(
+            report.truncated.is_none(),
+            "chain was truncated at {:?}",
+            report.truncated
+        );
+        assert!(state.validated());
+    }
 }

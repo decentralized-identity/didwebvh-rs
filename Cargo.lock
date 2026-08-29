@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "didwebvh-rs"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "affinidi-data-integrity",
  "affinidi-did-common",
