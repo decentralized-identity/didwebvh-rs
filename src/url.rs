@@ -1,4 +1,4 @@
-use crate::DIDWebVHError;
+use crate::{DIDWebVHError, host_policy::HostPolicy};
 use chrono::{DateTime, FixedOffset};
 use std::fmt::{Display, Formatter};
 use url::Url;
@@ -383,9 +383,56 @@ impl WebVHURL {
         url_string
     }
 
+    /// Builds the URL that network resolution fetches `file_name` from, under
+    /// `policy`.
+    ///
+    /// This is the egress check. The host is canonicalised (percent-decoding,
+    /// IDNA, case) and checked against `policy` before the URL is assembled,
+    /// and again on the host of the parsed URL. `http://` is used only under
+    /// [`HostPolicy::AllowPrivate`] for `localhost` / `*.localhost`; every other
+    /// case uses `https://`. The DID fragment is not included.
+    ///
+    /// Use this, not [`get_http_url`](Self::get_http_url), for anything that
+    /// fetches a did:webvh resource.
+    pub fn get_fetch_url(&self, file_name: &str, policy: HostPolicy) -> Result<Url, DIDWebVHError> {
+        Self::reject_ip_address(&self.domain)?;
+        let host = match url::Host::parse(&self.domain) {
+            Ok(url::Host::Domain(host)) => host,
+            _ => {
+                return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
+                    "Invalid URL: host ({}) is not a valid domain name",
+                    self.domain
+                )));
+            }
+        };
+        policy.check_host(&host)?;
+
+        let mut url_string = format!("{}://{host}", policy.fetch_scheme(&host));
+        if let Some(port) = self.port {
+            url_string.push_str(&format!(":{port}"));
+        }
+        url_string.push_str(&self.path);
+        url_string.push_str(file_name);
+        if let Some(query) = &self.query {
+            url_string.push_str(&format!("?{query}"));
+        }
+
+        let url = Url::parse(&url_string)
+            .map_err(|err| DIDWebVHError::InvalidMethodIdentifier(format!("Invalid URL: {err}")))?;
+        Self::reject_ip_host(&url)?;
+        // Check the host the HTTP client will actually be given.
+        policy.check_host(url.host_str().unwrap_or_default())?;
+        Ok(url)
+    }
+
     /// Creates a HTTP URL from webvh DID
     /// Can specify a file_name depending on the operation
     /// If None, then the default file_name will be used
+    ///
+    /// This renders the URL for display and for the implicit `#files` /
+    /// `#whois` service endpoints (`localhost` renders as `http://`). It does
+    /// not apply a [`HostPolicy`]; code that fetches from the URL should use
+    /// [`get_fetch_url`](Self::get_fetch_url) instead.
     pub fn get_http_url(&self, file_name: Option<&str>) -> Result<Url, DIDWebVHError> {
         let mut url_string = self.get_http_base_url();
 

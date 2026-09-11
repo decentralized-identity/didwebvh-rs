@@ -1,5 +1,100 @@
 # didwebvh-rs Changelog history
 
+## 11th September 2026
+
+### Release 0.7.0 — resolution host policy and injectable HTTP client
+
+Promoted to a minor release because the default resolution behaviour changes
+for non-public hosts and `ResolveOptions` gains public fields.
+
+#### Breaking
+
+- `DIDWebVHState::resolve()` now contacts **public hosts only** by default
+  (`HostPolicy::PublicOnly`). A DID whose host is `localhost`, `*.localhost`,
+  `*.local`, `*.internal`, `home.arpa` / `*.home.arpa` or a single-label name
+  fails with the new `DIDWebVHError::BlockedHost` before any request is made.
+  On native targets the default HTTP client also refuses a name when *any* of
+  its resolved addresses is non-public, and connects only to the addresses it
+  checked. Non-public means loopback, unspecified, RFC 1918, carrier-grade NAT
+  (100.64.0.0/10), link-local (including cloud metadata addresses),
+  unique-local (fc00::/7), site-local, multicast, reserved, benchmarking and
+  documentation space, IPv6 outside 2000::/3, and IPv4-mapped,
+  IPv4-compatible, NAT64 and 6to4 addresses embedding any of those.
+  Previously `did:webvh:{SCID}:localhost%3A<port>` was fetched over `http://`
+  and any other name was fetched from whatever address it resolved to.
+- The default native client no longer uses system proxy settings
+  (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`). A proxy resolves the target name
+  itself, outside the resolver's checks.
+- `ResolveOptions` has two new public fields, `host_policy` and `http_client`.
+  Struct literals that list every field must add `..ResolveOptions::default()`.
+
+#### Added
+
+- `host_policy::HostPolicy` with `PublicOnly` (default) and `AllowPrivate`.
+  Also exported from `prelude` and re-exported from `resolve`.
+- `ResolveOptions::host_policy` and `ResolveOptions::http_client`, with
+  `with_host_policy()` and `with_http_client()` builders. A caller-supplied
+  client is used for every fetch. The host policy's name checks still apply to
+  it, but DNS answers, redirects and proxies are then the caller's
+  responsibility.
+- `host_policy::guarded_dns_resolver()` and
+  `host_policy::guarded_dns_resolver_with(inner)` (native targets, `network`
+  feature): the `reqwest::dns::Resolve` the default client uses, for
+  installing on a caller-built client. Also re-exported from `resolve`.
+- `WebVHURL::get_fetch_url(file_name, policy)`: the policy-checked URL used for
+  fetching. The host is canonicalised (percent-decoding, IDNA, case, trailing
+  dot) before it is checked.
+- `DIDWebVHError::BlockedHost`. The message does not include resolved
+  addresses.
+- `examples/resolve.rs` takes `--allow-private-hosts`.
+
+#### Changed
+
+- Every resolution fetch (`did.jsonl` and `did-witness.json`, on the eager and
+  deferred paths) is built with `get_fetch_url()`. Under
+  `HostPolicy::AllowPrivate`, `http://` is used only for `localhost` and
+  `*.localhost`; every other host uses `https://`.
+- `WebVHURL::get_http_url()`, `get_http_whois_url()` and `get_http_files_url()`
+  are unchanged: they render URLs for display and for the implicit `#files` /
+  `#whois` service endpoints, and do not apply a host policy.
+- With `http_client` set, `ResolveOptions::timeout` (when `Some`) is applied to
+  each request.
+- The `ssi` feature's `DIDWebVH` resolver uses `ResolveOptions::default()` and
+  is therefore public-only.
+- wasm32: the name checks apply. reqwest's wasm client has no redirect setting
+  and the browser does not expose DNS, so redirect and resolved-address checks
+  are not available there.
+- `tokio`'s `net` feature is declared explicitly on non-wasm targets (the DNS
+  guard uses `tokio::net::lookup_host`).
+
+#### Migration
+
+- Local development and tests against `localhost`:
+  `ResolveOptions::default().with_host_policy(HostPolicy::AllowPrivate)`.
+- Deployments whose did:webvh hosts are trusted and live on a private network:
+  `HostPolicy::AllowPrivate`.
+- Environments that must use an HTTP proxy: pass `http_client` built with the
+  proxy. Resolved-address checks are then the proxy's job; name checks still
+  apply.
+- A custom client that should keep the default protection:
+  `reqwest::Client::builder().dns_resolver(guarded_dns_resolver()).redirect(reqwest::redirect::Policy::none()).no_proxy()`.
+
+#### Testing
+
+- Classifier vectors for IP literals, WHATWG URL canonicalisation (alternate
+  IPv4 spellings, mapped IPv6), special-use names, DID-to-fetch-URL mapping
+  (including `did:webvh:…:example.com:localhost` staying on `https://`), and
+  DNS answers through a stub resolver (single private, mixed public/private,
+  mapped, NAT64, empty).
+- Resolution tests: by default a `localhost` DID (and its case, trailing-dot,
+  percent-encoded and subdomain variants) is refused with zero connections to a
+  local listener on both download paths; `AllowPrivate` resolves it over
+  `http://`; a 302 is not followed and its target receives no request; a mixed
+  public/private DNS answer is refused with zero connections; the default
+  client installs the DNS guard only under `PublicOnly`; a caller-supplied
+  client without the guard connects where its resolver points.
+- Existing mock-server resolution tests opt in to `HostPolicy::AllowPrivate`.
+
 ## 29th August 2026
 
 ### Release 0.6.1 — activating pre-rotation mid-chain

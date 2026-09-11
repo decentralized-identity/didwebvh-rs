@@ -31,6 +31,7 @@ pub use crate::cli_update::{
 };
 pub use crate::create::{CreateDIDConfig, create_did};
 pub use crate::did_key::generate_did_key;
+pub use crate::host_policy::HostPolicy;
 pub use crate::log_entry::LogEntryMethods;
 pub use crate::parameters::Parameters;
 #[cfg(feature = "network")]

@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.6.1"
+version = "0.7.0"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -78,6 +78,12 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 # Optional dependencies for `cli` feature (interactive DID creation flow)
 console = { version = "0.16", optional = true }
 dialoguer = { version = "0.12", optional = true }
+
+# The native DNS guard (`host_policy::guarded_dns_resolver`) calls
+# `tokio::net::lookup_host`. Declared here rather than relied on through
+# reqwest; `net` does not exist on wasm32-unknown-unknown.
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
+tokio = { version = "1", features = ["net"] }
 
 [dev-dependencies]
 anyhow = "1.0"
