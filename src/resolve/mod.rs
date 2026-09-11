@@ -6,7 +6,21 @@
 //! [`crate::DIDWebVHState::resolve_log`] Will load a WebVH DID from raw JSONL string data
 //! `resolve_state` is an internal function that will validate the DID and return
 //! the resolved result
+//!
+//! Network resolution only contacts hosts allowed by the
+//! [host policy](crate::host_policy) in `ResolveOptions`, which defaults to
+//! public hosts only. The file and in-memory variants make no network
+//! requests.
 
+#[cfg(feature = "network")]
+pub use crate::host_policy::HostPolicy;
+#[cfg(feature = "network")]
+use crate::host_policy::blocked_resolution_in_chain;
+#[cfg(all(
+    feature = "network",
+    not(all(target_arch = "wasm32", target_os = "unknown"))
+))]
+pub use crate::host_policy::{guarded_dns_resolver, guarded_dns_resolver_with};
 #[cfg(feature = "network")]
 use crate::url::URLType;
 use crate::{
@@ -42,17 +56,54 @@ pub mod implicit; // WebVH specification implies specific Services for a DID Doc
 #[cfg(feature = "network")]
 pub const DEFAULT_MAX_RESPONSE_BYTES: u64 = 200 * 1024;
 
+#[cfg(feature = "network")]
+const LOG_FILE: &str = "did.jsonl";
+#[cfg(feature = "network")]
+const WITNESS_FILE: &str = "did-witness.json";
+
 /// Options for network-based DID resolution.
+///
+/// Every field has a secure default. Set individual fields with
+/// `ResolveOptions { field: value, ..ResolveOptions::default() }` or the
+/// `with_*` methods.
 #[cfg(feature = "network")]
 #[derive(Debug, Clone)]
 pub struct ResolveOptions {
     /// Network timeout (default: 10 seconds).
+    ///
+    /// Applied to the client this crate builds. With
+    /// [`http_client`](Self::http_client) set, a `Some` value is applied to
+    /// each request instead. Not applied on wasm32.
     pub timeout: Option<Duration>,
     /// Download witnesses concurrently with log entries (default: false).
     pub eager_witness_download: bool,
     /// Maximum allowed HTTP response body size in bytes (default: 200 KB).
     /// Applies independently to each downloaded file (did.jsonl, did-witness.json).
     pub max_response_bytes: u64,
+    /// Which hosts resolution may contact (default: [`HostPolicy::PublicOnly`]).
+    ///
+    /// Applied to every fetch (`did.jsonl`, `did-witness.json`), including
+    /// fetches made through a caller-supplied [`http_client`](Self::http_client).
+    /// Local development against `did:webvh:{SCID}:localhost%3A<port>` needs
+    /// [`HostPolicy::AllowPrivate`].
+    pub host_policy: HostPolicy,
+    /// HTTP client to fetch with, instead of the one this crate builds
+    /// (default: `None`).
+    ///
+    /// When `None`, native builds use a client with the configured timeout,
+    /// redirects disabled, system proxy settings ignored and, unless the
+    /// policy is [`HostPolicy::AllowPrivate`], a DNS resolver that refuses any
+    /// name resolving to a non-public address (`guarded_dns_resolver`).
+    /// wasm32 builds use reqwest's default browser client.
+    ///
+    /// When `Some`, [`host_policy`](Self::host_policy) still refuses
+    /// non-public names before any request is made, but **the caller owns the
+    /// connect-time half**: DNS answers, redirects and proxies are whatever
+    /// that client does. On native targets, build it with
+    /// `.dns_resolver(guarded_dns_resolver())`,
+    /// `.redirect(reqwest::redirect::Policy::none())` and `.no_proxy()` to
+    /// keep the default protection.
+    pub http_client: Option<reqwest::Client>,
 }
 
 #[cfg(feature = "network")]
@@ -62,8 +113,60 @@ impl Default for ResolveOptions {
             timeout: None,
             eager_witness_download: false,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+            host_policy: HostPolicy::PublicOnly,
+            http_client: None,
         }
     }
+}
+
+#[cfg(feature = "network")]
+impl ResolveOptions {
+    /// Set [`host_policy`](Self::host_policy).
+    pub fn with_host_policy(mut self, host_policy: HostPolicy) -> Self {
+        self.host_policy = host_policy;
+        self
+    }
+
+    /// Set [`http_client`](Self::http_client). The caller then owns the
+    /// connect-time checks (DNS answers, redirects, proxies).
+    pub fn with_http_client(mut self, client: reqwest::Client) -> Self {
+        self.http_client = Some(client);
+        self
+    }
+}
+
+/// Per-fetch settings derived from [`ResolveOptions`].
+#[cfg(feature = "network")]
+#[derive(Clone, Copy)]
+struct FetchOptions {
+    max_bytes: u64,
+    host_policy: HostPolicy,
+    /// Per-request timeout, used with a caller-supplied client.
+    request_timeout: Option<Duration>,
+}
+
+/// The HTTP client used when `ResolveOptions::http_client` is `None`.
+#[cfg(all(
+    feature = "network",
+    not(all(target_arch = "wasm32", target_os = "unknown"))
+))]
+fn default_client(timeout: Duration, host_policy: HostPolicy) -> Result<Client, DIDWebVHError> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(timeout)
+        // The DID chooses the host; a redirect would let that host choose
+        // another one.
+        .redirect(reqwest::redirect::Policy::none())
+        // A proxy resolves the target name itself, where the DNS guard
+        // cannot see the answer.
+        .no_proxy();
+    if host_policy != HostPolicy::AllowPrivate {
+        builder = builder.dns_resolver(guarded_dns_resolver());
+    }
+    builder.build().map_err(|e| DIDWebVHError::NetworkError {
+        url: String::new(),
+        status_code: None,
+        message: format!("Failed to build HTTP client: {e}"),
+    })
 }
 
 /// HTTP client helpers for fetching DID log entries and witness proofs.
@@ -83,19 +186,24 @@ impl DIDWebVH {
     async fn download_file(
         client: Client,
         url: Url,
-        max_bytes: u64,
+        fetch: FetchOptions,
     ) -> Result<String, DIDWebVHError> {
+        let max_bytes = fetch.max_bytes;
         let url_str = url.to_string();
-        let mut response =
-            client
-                .get(url.clone())
-                .send()
-                .await
-                .map_err(|e| DIDWebVHError::NetworkError {
-                    url: url_str.clone(),
-                    status_code: None,
-                    message: format!("Request failed: {e}"),
-                })?;
+        let mut request = client.get(url);
+        if let Some(timeout) = fetch.request_timeout {
+            request = request.timeout(timeout);
+        }
+        let mut response = request.send().await.map_err(|e| {
+            if let Some(blocked) = blocked_resolution_in_chain(&e) {
+                return DIDWebVHError::BlockedHost(blocked.to_string());
+            }
+            DIDWebVHError::NetworkError {
+                url: url_str.clone(),
+                status_code: None,
+                message: format!("Request failed: {e}"),
+            }
+        })?;
 
         if response.status() != StatusCode::OK {
             let status = response.status().as_u16();
@@ -146,14 +254,17 @@ impl DIDWebVH {
         })
     }
 
-    /// Handles all processing and fetching for LogEntry file
-    async fn get_log_entries(
+    /// Builds the policy-checked URL for `file_name` (the log or the witness
+    /// proofs) and fetches it.
+    async fn get_file(
         url: WebVHURL,
+        file_name: &'static str,
         client: Client,
-        max_bytes: u64,
+        fetch: FetchOptions,
     ) -> Result<String, DIDWebVHError> {
-        let log_entries_url = match url.get_http_url(Some("did.jsonl")) {
+        let file_url = match url.get_fetch_url(file_name, fetch.host_policy) {
             Ok(url) => url,
+            Err(e @ DIDWebVHError::BlockedHost(_)) => return Err(e),
             Err(e) => {
                 warn!("Invalid URL for DID: {e}");
                 return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
@@ -162,26 +273,7 @@ impl DIDWebVH {
             }
         };
 
-        Self::download_file(client, log_entries_url, max_bytes).await
-    }
-
-    /// Handles all processing and fetching for witness proofs
-    async fn get_witness_proofs(
-        url: WebVHURL,
-        client: Client,
-        max_bytes: u64,
-    ) -> Result<String, DIDWebVHError> {
-        let witness_url = match url.get_http_url(Some("did-witness.json")) {
-            Ok(url) => url,
-            Err(e) => {
-                warn!("Invalid URL for DID: {e}");
-                return Err(DIDWebVHError::InvalidMethodIdentifier(format!(
-                    "Couldn't generate a valid URL from the DID: {e}"
-                )));
-            }
-        };
-
-        Self::download_file(client, witness_url, max_bytes).await
+        Self::download_file(client, file_url, fetch).await
     }
 }
 
@@ -389,8 +481,20 @@ impl DIDWebVHState {
     ///
     /// # Arguments
     /// * `did` — The DID to resolve (may include query parameters like `?versionId=...`).
-    /// * `options` — Network options (timeout, eager witness download, max response size).
-    ///   Use [`ResolveOptions::default()`] for sensible defaults (10 s timeout, 200 KB limit).
+    /// * `options` — Network options (timeout, eager witness download, max response size,
+    ///   host policy, HTTP client). Use [`ResolveOptions::default()`] for secure defaults
+    ///   (10 s timeout, 200 KB limit, public hosts only).
+    ///
+    /// # Host policy
+    ///
+    /// With the default [`HostPolicy::PublicOnly`], a DID whose host is
+    /// `localhost`, `*.localhost`, `*.local`, `*.internal`, `*.home.arpa` or a
+    /// single label fails with [`DIDWebVHError::BlockedHost`] before any
+    /// request is made, and (on native targets, with the default client) so
+    /// does a host that resolves to a non-public address. Set
+    /// [`ResolveOptions::host_policy`] to [`HostPolicy::AllowPrivate`] to
+    /// resolve such DIDs, for example `did:webvh:{SCID}:localhost%3A8000` in
+    /// development.
     ///
     /// # Returned `LogEntry` vs. resolution-time DID Document
     ///
@@ -424,24 +528,34 @@ impl DIDWebVHState {
             }
 
             if !self.validated || self.expires < Utc::now() {
-                let max_bytes = options.max_response_bytes;
+                // Refuse a host the policy does not allow before any client is
+                // built or request made. Each fetch below repeats the check.
+                parsed_did_url.get_fetch_url(LOG_FILE, options.host_policy)?;
 
                 // If building for WASM then don't use tokio::spawn
                 // This means sequential retrieval of files
                 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
                 let (log_entries, witness_proofs) = {
                     trace!("timeout is not available in WASM builds! {:#?}", options.timeout);
-                    let client = reqwest::Client::new();
+                    // The browser's fetch follows redirects (reqwest's wasm
+                    // client has no switch for it) and does not expose DNS, so
+                    // only the name and literal checks apply here.
+                    let client = options.http_client.clone().unwrap_or_else(reqwest::Client::new);
+                    let fetch = FetchOptions {
+                        max_bytes: options.max_response_bytes,
+                        host_policy: options.host_policy,
+                        request_timeout: None,
+                    };
 
                     let raw_entries =
-                        DIDWebVH::get_log_entries(parsed_did_url.clone(), client.clone(), max_bytes).await?;
+                        DIDWebVH::get_file(parsed_did_url.clone(), LOG_FILE, client.clone(), fetch).await?;
                     let log_entries = Self::parse_log_entries(&raw_entries)?;
                     Self::validate_log_entries(&log_entries, did)?;
 
                     let needs_witnesses = Self::needs_witness_proofs(&log_entries);
                     let witness_proofs = if options.eager_witness_download || needs_witnesses {
                         let raw_result =
-                            DIDWebVH::get_witness_proofs(parsed_did_url.clone(), client.clone(), max_bytes)
+                            DIDWebVH::get_file(parsed_did_url.clone(), WITNESS_FILE, client.clone(), fetch)
                                 .await;
                         Self::resolve_witness_proofs(raw_result, needs_witnesses)?
                     } else {
@@ -454,30 +568,32 @@ impl DIDWebVHState {
                 // Otherwise use tokio::spawn to do async downloads
                 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
                 let (log_entries, witness_proofs) = {
-                    // Set network timeout values. Will default to 10 seconds for any reasons
-                    let network_timeout = options.timeout.unwrap_or(Duration::from_secs(10));
-
-                    let client = reqwest::ClientBuilder::new()
-                        .timeout(network_timeout)
-                        .redirect(reqwest::redirect::Policy::none())
-                        .build()
-                        .map_err(|e| DIDWebVHError::NetworkError {
-                            url: String::new(),
-                            status_code: None,
-                            message: format!("Failed to build HTTP client: {e}"),
-                        })?;
+                    let (client, request_timeout) = if let Some(client) = &options.http_client {
+                        (client.clone(), options.timeout)
+                    } else {
+                        // Set network timeout values. Will default to 10 seconds for any reasons
+                        let network_timeout = options.timeout.unwrap_or(Duration::from_secs(10));
+                        (default_client(network_timeout, options.host_policy)?, None)
+                    };
+                    let fetch = FetchOptions {
+                        max_bytes: options.max_response_bytes,
+                        host_policy: options.host_policy,
+                        request_timeout,
+                    };
 
                     if options.eager_witness_download {
                         // Eager path: download both files concurrently
-                        let r1 = tokio::spawn(DIDWebVH::get_log_entries(
+                        let r1 = tokio::spawn(DIDWebVH::get_file(
                             parsed_did_url.clone(),
+                            LOG_FILE,
                             client.clone(),
-                            max_bytes,
+                            fetch,
                         ));
-                        let r2 = tokio::spawn(DIDWebVH::get_witness_proofs(
+                        let r2 = tokio::spawn(DIDWebVH::get_file(
                             parsed_did_url.clone(),
+                            WITNESS_FILE,
                             client.clone(),
-                            max_bytes,
+                            fetch,
                         ));
 
                         let raw_entries = r1.await.map_err(|e| {
@@ -502,10 +618,11 @@ impl DIDWebVHState {
                         (log_entries, witness_proofs)
                     } else {
                         // Deferred path: download did.jsonl first, then conditionally fetch witnesses
-                        let raw_entries = tokio::spawn(DIDWebVH::get_log_entries(
+                        let raw_entries = tokio::spawn(DIDWebVH::get_file(
                             parsed_did_url.clone(),
+                            LOG_FILE,
                             client.clone(),
-                            max_bytes,
+                            fetch,
                         ))
                         .await
                         .map_err(|e| DIDWebVHError::NetworkError {
@@ -518,10 +635,11 @@ impl DIDWebVHState {
                         Self::validate_log_entries(&log_entries, did)?;
 
                         let witness_proofs = if Self::needs_witness_proofs(&log_entries) {
-                            let raw_result = DIDWebVH::get_witness_proofs(
+                            let raw_result = DIDWebVH::get_file(
                                 parsed_did_url.clone(),
+                                WITNESS_FILE,
                                 client.clone(),
-                                max_bytes,
+                                fetch,
                             )
                             .await;
                             Self::resolve_witness_proofs(raw_result, true)?
@@ -631,8 +749,21 @@ impl DIDWebVHState {
 
 #[cfg(all(test, feature = "network"))]
 mod tests {
-    use super::ResolveOptions;
-    use crate::{DIDWebVHError, DIDWebVHState};
+    use super::{HostPolicy, ResolveOptions};
+    use crate::{DIDWebVHError, DIDWebVHState, test_utils::StubResolver};
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
+
+    /// The mock-server tests serve DIDs from `localhost`, which the default
+    /// host policy refuses; they opt in to the development policy.
+    fn dev_options() -> ResolveOptions {
+        ResolveOptions::default().with_host_policy(HostPolicy::AllowPrivate)
+    }
 
     // ===== Mock-based resolve tests =====
     //
@@ -681,7 +812,7 @@ mod tests {
         let (_server, did) = setup_mock_resolve().await;
 
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+        let result = webvh.resolve(&did, dev_options()).await;
         assert!(result.is_ok(), "resolve failed: {result:?}");
     }
 
@@ -702,7 +833,7 @@ mod tests {
                 &did,
                 ResolveOptions {
                     eager_witness_download: true,
-                    ..ResolveOptions::default()
+                    ..dev_options()
                 },
             )
             .await;
@@ -718,18 +849,13 @@ mod tests {
 
         // First resolve to get the versionId
         let mut webvh = DIDWebVHState::default();
-        let (entry, _) = webvh
-            .resolve(&did, ResolveOptions::default())
-            .await
-            .unwrap();
+        let (entry, _) = webvh.resolve(&did, dev_options()).await.unwrap();
         let version_id = entry.get_version_id().to_string();
 
         // Resolve again with ?versionId=...
         let mut webvh2 = DIDWebVHState::default();
         let did_with_version = format!("{did}?versionId={version_id}");
-        let result = webvh2
-            .resolve(&did_with_version, ResolveOptions::default())
-            .await;
+        let result = webvh2.resolve(&did_with_version, dev_options()).await;
         assert!(result.is_ok(), "versionId resolve failed: {result:?}");
     }
 
@@ -742,25 +868,21 @@ mod tests {
 
         // Resolve to get a valid versionTime
         let mut webvh = DIDWebVHState::default();
-        let (entry, _) = webvh
-            .resolve(&did, ResolveOptions::default())
-            .await
-            .unwrap();
+        let (entry, _) = webvh.resolve(&did, dev_options()).await.unwrap();
         let version_time = entry.get_version_time_string();
 
         // Resolve again with ?versionTime=...
         let mut webvh2 = DIDWebVHState::default();
         let did_with_time = format!("{did}?versionTime={version_time}");
-        let result = webvh2
-            .resolve(&did_with_time, ResolveOptions::default())
-            .await;
+        let result = webvh2.resolve(&did_with_time, dev_options()).await;
         assert!(result.is_ok(), "versionTime resolve failed: {result:?}");
     }
 
     // ===== Network failure tests =====
     //
     // These tests use wiremock to simulate HTTP failures without hitting real servers.
-    // DIDs pointing to `localhost` use `http://` (not HTTPS), allowing local mock servers.
+    // Under `HostPolicy::AllowPrivate` (`dev_options()`), DIDs pointing to
+    // `localhost` use `http://` (not HTTPS), allowing local mock servers.
 
     /// Helper: build a DID URL pointing at the given wiremock server.
     /// Format: `did:webvh:<scid>:localhost%3A<port>`
@@ -781,7 +903,7 @@ mod tests {
 
         let did = mock_did(&server, "testscid404");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+        let result = webvh.resolve(&did, dev_options()).await;
 
         match result {
             Err(DIDWebVHError::NetworkError {
@@ -804,7 +926,7 @@ mod tests {
 
         let did = mock_did(&server, "testscid500");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+        let result = webvh.resolve(&did, dev_options()).await;
 
         match result {
             Err(DIDWebVHError::NetworkError {
@@ -827,7 +949,7 @@ mod tests {
 
         let did = mock_did(&server, "testscidbad");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+        let result = webvh.resolve(&did, dev_options()).await;
 
         match result {
             Err(DIDWebVHError::LogEntryError(_)) => {} // expected: invalid JSON
@@ -847,7 +969,7 @@ mod tests {
 
         let did = mock_did(&server, "testscidempty");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+        let result = webvh.resolve(&did, dev_options()).await;
 
         match result {
             Err(DIDWebVHError::NotFound(msg)) => {
@@ -878,7 +1000,7 @@ mod tests {
                 &did,
                 ResolveOptions {
                     timeout: Some(Duration::from_secs(1)),
-                    ..ResolveOptions::default()
+                    ..dev_options()
                 },
             )
             .await;
@@ -903,7 +1025,7 @@ mod tests {
                 did,
                 ResolveOptions {
                     timeout: Some(std::time::Duration::from_secs(2)),
-                    ..ResolveOptions::default()
+                    ..dev_options()
                 },
             )
             .await;
@@ -930,7 +1052,7 @@ mod tests {
 
         let did = mock_did(&server, "testscidfields");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+        let result = webvh.resolve(&did, dev_options()).await;
 
         match result {
             Err(DIDWebVHError::NetworkError {
@@ -1004,10 +1126,7 @@ mod tests {
 
         // Resolve via network
         let mut webvh_net = DIDWebVHState::default();
-        let (net_entry, _) = webvh_net
-            .resolve(&did, ResolveOptions::default())
-            .await
-            .unwrap();
+        let (net_entry, _) = webvh_net.resolve(&did, dev_options()).await.unwrap();
         let net_doc = net_entry.get_did_document().unwrap();
 
         // Get the raw log from the network-resolved state
@@ -1104,7 +1223,7 @@ mod tests {
 
         let did = mock_did(&server, "testscidlarge");
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+        let result = webvh.resolve(&did, dev_options()).await;
 
         match result {
             Err(DIDWebVHError::ResponseTooLarge { max_bytes, .. }) => {
@@ -1126,7 +1245,7 @@ mod tests {
                 &did,
                 ResolveOptions {
                     max_response_bytes: 10, // 10 bytes — too small for any DID log
-                    ..ResolveOptions::default()
+                    ..dev_options()
                 },
             )
             .await;
@@ -1145,10 +1264,227 @@ mod tests {
         let (_server, did) = setup_mock_resolve().await;
 
         let mut webvh = DIDWebVHState::default();
-        let result = webvh.resolve(&did, ResolveOptions::default()).await;
+        let result = webvh.resolve(&did, dev_options()).await;
         assert!(
             result.is_ok(),
             "Normal response should pass size check: {result:?}"
         );
+    }
+
+    // ===== Host policy (egress) tests =====
+
+    /// A TCP listener on 127.0.0.1 that counts accepted connections.
+    async fn counting_listener() -> (u16, Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = accepted.clone();
+        tokio::spawn(async move {
+            while let Ok((socket, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                drop(socket);
+            }
+        });
+        (port, accepted)
+    }
+
+    /// By default, loopback and other non-public names are refused before
+    /// any connection is attempted, on both download paths.
+    #[tokio::test]
+    async fn default_policy_refuses_localhost_without_connecting() {
+        let (port, accepted) = counting_listener().await;
+        for host in [
+            "localhost",
+            "LOCALHOST",
+            "localhost.",
+            "local%68ost",
+            "svc.localhost",
+            "printer.local",
+            "metadata.google.internal",
+            "metadata",
+        ] {
+            for eager_witness_download in [false, true] {
+                let did = format!("did:webvh:QmScid:{host}%3A{port}");
+                let mut webvh = DIDWebVHState::default();
+                let result = webvh
+                    .resolve(
+                        &did,
+                        ResolveOptions {
+                            eager_witness_download,
+                            ..ResolveOptions::default()
+                        },
+                    )
+                    .await;
+                assert!(
+                    matches!(result, Err(DIDWebVHError::BlockedHost(_))),
+                    "{did} (eager={eager_witness_download}): {result:?}"
+                );
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 0);
+    }
+
+    /// The same localhost DID is refused by default (the server sees nothing)
+    /// and resolves over plain http with `HostPolicy::AllowPrivate`.
+    #[tokio::test]
+    async fn allow_private_opt_in_resolves_localhost_over_http() {
+        let (server, did) = setup_mock_resolve().await;
+
+        let mut webvh = DIDWebVHState::default();
+        let refused = webvh.resolve(&did, ResolveOptions::default()).await;
+        assert!(
+            matches!(refused, Err(DIDWebVHError::BlockedHost(_))),
+            "{refused:?}"
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh
+            .resolve(
+                &did,
+                ResolveOptions {
+                    host_policy: HostPolicy::AllowPrivate,
+                    ..ResolveOptions::default()
+                },
+            )
+            .await;
+        assert!(result.is_ok(), "{result:?}");
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url.scheme(), "http");
+        assert_eq!(requests[0].url.path(), "/.well-known/did.jsonl");
+    }
+
+    /// A 3xx is surfaced as an error; its target receives no request.
+    #[tokio::test]
+    async fn redirects_are_not_followed() {
+        let target = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_string(""))
+            .mount(&target)
+            .await;
+        let redirector = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(302).insert_header(
+                "Location",
+                format!("{}/.well-known/did.jsonl", target.uri()),
+            ))
+            .mount(&redirector)
+            .await;
+
+        let did = mock_did(&redirector, "testscidredirect");
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh.resolve(&did, dev_options()).await;
+        assert!(
+            matches!(
+                result,
+                Err(DIDWebVHError::NetworkError {
+                    status_code: Some(302),
+                    ..
+                })
+            ),
+            "{result:?}"
+        );
+        assert!(target.received_requests().await.unwrap().is_empty());
+    }
+
+    /// A name whose answers mix a public and a private address is refused as
+    /// a whole, and nothing connects.
+    #[tokio::test]
+    async fn guarded_client_refuses_mixed_public_private_answer() {
+        let (port, accepted) = counting_listener().await;
+        let stub = StubResolver::new(&["93.184.216.34", "127.0.0.1"]);
+        let lookups = stub.lookups.clone();
+        let client = reqwest::Client::builder()
+            .dns_resolver(super::guarded_dns_resolver_with(Arc::new(stub)))
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+
+        let did = format!("did:webvh:QmScid:mixed.example%3A{port}");
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh
+            .resolve(&did, ResolveOptions::default().with_http_client(client))
+            .await;
+        assert!(
+            matches!(result, Err(DIDWebVHError::BlockedHost(_))),
+            "{result:?}"
+        );
+        assert_eq!(lookups.load(Ordering::SeqCst), 1);
+        assert_eq!(accepted.load(Ordering::SeqCst), 0);
+    }
+
+    /// The client built when no `http_client` is supplied carries the DNS
+    /// guard under `PublicOnly` and not under `AllowPrivate`.
+    #[tokio::test]
+    async fn default_client_installs_dns_guard_for_public_only() {
+        let client = super::default_client(Duration::from_secs(2), HostPolicy::PublicOnly).unwrap();
+        let err = client
+            .get("http://localhost:1/")
+            .send()
+            .await
+            .expect_err("must be refused");
+        assert!(
+            crate::host_policy::blocked_resolution_in_chain(&err).is_some(),
+            "{err:?}"
+        );
+
+        let client =
+            super::default_client(Duration::from_secs(2), HostPolicy::AllowPrivate).unwrap();
+        let err = client
+            .get("http://localhost:1/")
+            .send()
+            .await
+            .expect_err("nothing listens on port 1");
+        assert!(
+            crate::host_policy::blocked_resolution_in_chain(&err).is_none(),
+            "{err:?}"
+        );
+    }
+
+    /// With a caller-supplied client the name check still applies, but DNS
+    /// answers are the caller's responsibility: a client without the guard
+    /// connects wherever its resolver points.
+    #[tokio::test]
+    async fn caller_supplied_client_owns_the_dns_half() {
+        let (port, accepted) = counting_listener().await;
+        let client = reqwest::Client::builder()
+            .dns_resolver(
+                Arc::new(StubResolver::new(&["127.0.0.1"])) as Arc<dyn reqwest::dns::Resolve>
+            )
+            .no_proxy()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let options = ResolveOptions::default().with_http_client(client);
+
+        let mut webvh = DIDWebVHState::default();
+        let refused = webvh
+            .resolve(
+                &format!("did:webvh:QmScid:localhost%3A{port}"),
+                options.clone(),
+            )
+            .await;
+        assert!(
+            matches!(refused, Err(DIDWebVHError::BlockedHost(_))),
+            "{refused:?}"
+        );
+        assert_eq!(accepted.load(Ordering::SeqCst), 0);
+
+        let mut webvh = DIDWebVHState::default();
+        let result = webvh
+            .resolve(
+                &format!("did:webvh:QmScid:unguarded.example%3A{port}"),
+                options,
+            )
+            .await;
+        assert!(
+            matches!(result, Err(DIDWebVHError::NetworkError { .. })),
+            "{result:?}"
+        );
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
     }
 }

@@ -37,6 +37,7 @@ pub mod create;
 /// `did:key` helpers used by tests, examples and the interactive CLI.
 pub mod did_key;
 pub mod did_web;
+pub mod host_policy;
 pub mod log_entry;
 /// Manages per-entry validation state during DID log processing.
 pub mod log_entry_state;
@@ -135,6 +136,12 @@ pub(crate) fn ensure_object_mut(
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum DIDWebVHError {
+    /// Resolution refused to contact a host that the active
+    /// [`host_policy::HostPolicy`] does not allow: a non-public name, or (with
+    /// the default native client) a name that resolves to a non-public
+    /// address. Raised before any request is sent to that host.
+    #[error("BlockedHost: {0}")]
+    BlockedHost(String),
     /// The DID has been deactivated and can no longer be resolved.
     #[error("DeactivatedError: {0}")]
     DeactivatedError(String),

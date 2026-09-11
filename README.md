@@ -47,7 +47,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.6.0"
+didwebvh-rs = "0.7.0"
 ```
 
 Then:
@@ -66,7 +66,8 @@ The `prelude` module re-exports the most commonly needed types:
 - Always available: `DIDWebVHError`, `DIDWebVHState`, `Multibase`,
   `TruncationReason`, `ValidationReport`, `CreateDIDConfig`, `create_did`,
   `UpdateDIDConfig`, `update_did`, `LogEntryMethods`, `Parameters`,
-  `Witnesses`, `WitnessProofCollection`, and the `generate_did_key` helper.
+  `Witnesses`, `WitnessProofCollection`, `HostPolicy`, and the
+  `generate_did_key` helper.
 - Re-exported from third-party crates: `Signer`
   (`affinidi_data_integrity`), `KeyType` and `Secret`
   (`affinidi_secrets_resolver`), and `async_trait`.
@@ -88,6 +89,61 @@ The `prelude` module re-exports the most commonly needed types:
 > `didwebvh_rs::prelude::Secret`, or add `affinidi-secrets-resolver` to your
 > own `Cargo.toml` if you need its full surface.
 
+## Network resolution and host policy
+
+`DIDWebVHState::resolve()` fetches `did.jsonl` (and `did-witness.json` when
+needed) from the host named in the DID. Because the DID chooses the host,
+resolution only contacts **public hosts** by default (`HostPolicy::PublicOnly`):
+
+- `localhost`, `*.localhost`, `*.local`, `*.internal`, `home.arpa` and
+  single-label names are refused with `DIDWebVHError::BlockedHost` before any
+  request is made. IP-address hosts are always rejected by did:webvh parsing.
+- On native targets, the default HTTP client refuses a name if any address it
+  resolves to is non-public (loopback, private, carrier-grade NAT, link-local,
+  unique-local, reserved, or an IPv4-mapped / NAT64 / 6to4 form of those). It
+  connects only to the addresses it checked, does not follow redirects, and
+  ignores system proxy settings.
+- Every fetch uses `https://`.
+
+For local development against `did:webvh:{SCID}:localhost%3A8000`, opt in to
+`HostPolicy::AllowPrivate`. `localhost` and `*.localhost` are then fetched
+over `http://`:
+
+```rust
+use didwebvh_rs::prelude::*;
+
+let options = ResolveOptions::default().with_host_policy(HostPolicy::AllowPrivate);
+let mut webvh = DIDWebVHState::default();
+let (log_entry, metadata) = webvh.resolve("did:webvh:{SCID}:localhost%3A8000", options).await?;
+```
+
+> **`localhost` is for local testing only.** It is the one host that resolves
+> and renders over `http://` (including the implicit `#files` / `#whois`
+> endpoints from `get_http_url()`), so that a DID served from a developer
+> machine works without TLS. Don't publish production DIDs on `localhost`, and
+> don't enable `AllowPrivate` in production unless every did:webvh host you
+> resolve is trusted.
+
+To use your own `reqwest::Client` (custom TLS roots, a required proxy, shared
+connection pool), pass it with `ResolveOptions::with_http_client()`. The host
+policy's name checks still apply, but **your client owns the connect-time
+checks**: DNS answers, redirects and proxies. To keep the default protection
+on native targets:
+
+```rust
+use didwebvh_rs::{host_policy::guarded_dns_resolver, resolve::ResolveOptions};
+
+let client = reqwest::Client::builder()
+    .dns_resolver(guarded_dns_resolver())
+    .redirect(reqwest::redirect::Policy::none())
+    .no_proxy()
+    .build()?;
+let options = ResolveOptions::default().with_http_client(client);
+```
+
+In a browser (`wasm32-unknown-unknown`) only the name checks apply: DNS is not
+observable there, and reqwest's wasm client follows redirects.
+
 ## Feature Flags
 
 | Feature | Default | Description |
@@ -104,7 +160,7 @@ To use the library without network support (e.g. for local file validation only)
 
 ```toml
 [dependencies]
-didwebvh-rs = { version = "0.6.0", default-features = false }
+didwebvh-rs = { version = "0.7.0", default-features = false }
 ```
 
 ## Convenience API
@@ -233,7 +289,7 @@ DID creation and management experience as the built-in wizard.
 
 ```toml
 [dependencies]
-didwebvh-rs = { version = "0.6.0", features = ["cli"] }
+didwebvh-rs = { version = "0.7.0", features = ["cli"] }
 ```
 
 ### Interactive DID Creation
@@ -520,7 +576,7 @@ enable only for interop testing with other PQC-aware implementations.
 
 ```toml
 [dependencies]
-didwebvh-rs = { version = "0.6.0", features = ["experimental-pqc"] }
+didwebvh-rs = { version = "0.7.0", features = ["experimental-pqc"] }
 ```
 
 Key generation, signing, and verification flow through the same

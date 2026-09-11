@@ -65,6 +65,47 @@ pub fn key_and_params() -> (Secret, Parameters) {
     (key, params)
 }
 
+/// A `reqwest` DNS resolver returning fixed answers for every name, counting
+/// lookups. Stands in for DNS in egress-guard tests so they stay hermetic.
+#[cfg(all(
+    feature = "network",
+    not(all(target_arch = "wasm32", target_os = "unknown"))
+))]
+pub struct StubResolver {
+    answers: Vec<std::net::IpAddr>,
+    pub lookups: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[cfg(all(
+    feature = "network",
+    not(all(target_arch = "wasm32", target_os = "unknown"))
+))]
+impl StubResolver {
+    pub fn new(answers: &[&str]) -> Self {
+        Self {
+            answers: answers.iter().map(|a| a.parse().unwrap()).collect(),
+            lookups: Arc::default(),
+        }
+    }
+}
+
+#[cfg(all(
+    feature = "network",
+    not(all(target_arch = "wasm32", target_os = "unknown"))
+))]
+impl reqwest::dns::Resolve for StubResolver {
+    fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        self.lookups
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let addrs: Vec<std::net::SocketAddr> = self
+            .answers
+            .iter()
+            .map(|ip| std::net::SocketAddr::new(*ip, 0))
+            .collect();
+        Box::pin(async move { Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs) })
+    }
+}
+
 /// Creates a minimal `DataIntegrityProof` for use in tests.
 ///
 /// The `vm` parameter sets the `verification_method` field, which is the

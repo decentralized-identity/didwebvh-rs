@@ -36,6 +36,11 @@ struct Args {
     /// downloaded file (did.jsonl, did-witness.json).
     #[arg(short = 'l', long, default_value_t = DEFAULT_MAX_RESPONSE_BYTES / 1024)]
     max_size_kb: u64,
+
+    /// Allow non-public hosts such as `localhost` (development only). By
+    /// default resolution only contacts public hosts.
+    #[arg(long)]
+    allow_private_hosts: bool,
 }
 
 #[tokio::main]
@@ -52,6 +57,11 @@ async fn main() {
 
     let options = ResolveOptions {
         max_response_bytes: args.max_size_kb * 1024,
+        host_policy: if args.allow_private_hosts {
+            HostPolicy::AllowPrivate
+        } else {
+            HostPolicy::PublicOnly
+        },
         ..ResolveOptions::default()
     };
 
