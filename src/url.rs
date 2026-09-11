@@ -430,9 +430,15 @@ impl WebVHURL {
     /// If None, then the default file_name will be used
     ///
     /// This renders the URL for display and for the implicit `#files` /
-    /// `#whois` service endpoints (`localhost` renders as `http://`). It does
-    /// not apply a [`HostPolicy`]; code that fetches from the URL should use
+    /// `#whois` service endpoints. It does not apply a [`HostPolicy`]; code
+    /// that fetches from the URL should use
     /// [`get_fetch_url`](Self::get_fetch_url) instead.
+    ///
+    /// `localhost` renders as `http://`. That is a special case for local
+    /// testing only, so that a DID served from a developer machine yields
+    /// usable URLs. It is not a production path: resolution never fetches a
+    /// `localhost` DID unless the caller opts in with
+    /// [`HostPolicy::AllowPrivate`].
     pub fn get_http_url(&self, file_name: Option<&str>) -> Result<Url, DIDWebVHError> {
         let mut url_string = self.get_http_base_url();
 

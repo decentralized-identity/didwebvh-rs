@@ -117,6 +117,13 @@ let mut webvh = DIDWebVHState::default();
 let (log_entry, metadata) = webvh.resolve("did:webvh:{SCID}:localhost%3A8000", options).await?;
 ```
 
+> **`localhost` is for local testing only.** It is the one host that resolves
+> and renders over `http://` (including the implicit `#files` / `#whois`
+> endpoints from `get_http_url()`), so that a DID served from a developer
+> machine works without TLS. Don't publish production DIDs on `localhost`, and
+> don't enable `AllowPrivate` in production unless every did:webvh host you
+> resolve is trusted.
+
 To use your own `reqwest::Client` (custom TLS roots, a required proxy, shared
 connection pool), pass it with `ResolveOptions::with_http_client()`. The host
 policy's name checks still apply, but **your client owns the connect-time

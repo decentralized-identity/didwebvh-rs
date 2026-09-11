@@ -56,7 +56,10 @@ for non-public hosts and `ResolveOptions` gains public fields.
   `*.localhost`; every other host uses `https://`.
 - `WebVHURL::get_http_url()`, `get_http_whois_url()` and `get_http_files_url()`
   are unchanged: they render URLs for display and for the implicit `#files` /
-  `#whois` service endpoints, and do not apply a host policy.
+  `#whois` service endpoints, and do not apply a host policy. They still render
+  `localhost` as `http://`. That is a local-testing special case only, now
+  documented as such; resolution never fetches a `localhost` DID without
+  `HostPolicy::AllowPrivate`.
 - With `http_client` set, `ResolveOptions::timeout` (when `Some`) is applied to
   each request.
 - The `ssi` feature's `DIDWebVH` resolver uses `ResolveOptions::default()` and
