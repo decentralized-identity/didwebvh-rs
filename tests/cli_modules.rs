@@ -150,11 +150,7 @@ mod cli_tests {
         assert!(!result.did().contains("{SCID}"));
 
         // Log entry should be valid
-        assert!(
-            !serde_json::to_string(result.log_entry())
-                .unwrap()
-                .is_empty()
-        );
+        assert_ne!(serde_json::to_string(result.log_entry()).unwrap(), "");
 
         // Secrets should be populated
         assert_eq!(result.authorization_secrets().len(), 1);

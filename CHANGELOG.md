@@ -1,5 +1,31 @@
 # didwebvh-rs Changelog history
 
+## 1st October 2026
+
+### Release 0.8.0 — affinidi-data-integrity 0.8
+
+Promoted to a minor release because `affinidi-data-integrity`, whose types are
+part of this crate's public API, moves from 0.7 to 0.8.
+
+#### Breaking
+
+- Requires `affinidi-data-integrity` 0.8. Its types appear throughout this
+  crate's API: the `Signer` re-exported from `prelude`, the `&dyn Signer`
+  taken by `create_log_entry`, `update_document`, `rotate_keys` and
+  `deactivate`, the `DataIntegrityProof`s in `LogEntry1_0`, `LogEntry1_0Pre`
+  and `WitnessProof`, and the `CryptoSuite`s in `WitnessVerifyOptions`. Callers
+  must use `affinidi-data-integrity` 0.8 (and so `affinidi-bbs` 0.4) too. A
+  signer or proof built against 0.7 is a different type. No behaviour change.
+
+  `affinidi-data-integrity` 0.7.14 already moved to `affinidi-bbs` 0.4, but as
+  a patch release; 0.8.0 re-releases it under the version that change needed.
+
+#### Maintenance
+
+- Test assertions use `assert_ne!(x, "")` instead of `assert!(!x.is_empty())`,
+  for the `clippy::assert_is_empty` lint new in Rust 1.99, which failed CI's
+  `-D warnings` clippy job on `stable`.
+
 ## 11th September 2026
 
 ### Release 0.7.0 — resolution host policy and injectable HTTP client

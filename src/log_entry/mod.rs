@@ -754,7 +754,7 @@ mod tests {
             None,                          // context
         );
         let bytes = proof.get_public_key_bytes().unwrap();
-        assert!(!bytes.is_empty());
+        assert_ne!(bytes, [] as [u8; 0]);
     }
 
     // ===== deserialize_string() tests =====
