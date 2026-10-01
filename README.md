@@ -47,7 +47,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-didwebvh-rs = "0.7.0"
+didwebvh-rs = "0.8.0"
 ```
 
 Then:
@@ -160,7 +160,7 @@ To use the library without network support (e.g. for local file validation only)
 
 ```toml
 [dependencies]
-didwebvh-rs = { version = "0.7.0", default-features = false }
+didwebvh-rs = { version = "0.8.0", default-features = false }
 ```
 
 ## Convenience API
@@ -289,7 +289,7 @@ DID creation and management experience as the built-in wizard.
 
 ```toml
 [dependencies]
-didwebvh-rs = { version = "0.7.0", features = ["cli"] }
+didwebvh-rs = { version = "0.8.0", features = ["cli"] }
 ```
 
 ### Interactive DID Creation
@@ -576,7 +576,7 @@ enable only for interop testing with other PQC-aware implementations.
 
 ```toml
 [dependencies]
-didwebvh-rs = { version = "0.7.0", features = ["experimental-pqc"] }
+didwebvh-rs = { version = "0.8.0", features = ["experimental-pqc"] }
 ```
 
 Key generation, signing, and verification flow through the same

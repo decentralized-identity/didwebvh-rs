@@ -387,7 +387,7 @@ mod tests {
         let report = state.validate().expect("Validation should pass");
         assert!(report.truncated.is_none());
         assert!(state.validated);
-        assert!(!state.scid.is_empty());
+        assert_ne!(state.scid, "");
     }
 
     /// Tests that a deactivated DID stops log entry processing at the deactivation point.

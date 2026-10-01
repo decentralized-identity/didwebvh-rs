@@ -1,6 +1,6 @@
 [package]
 name = "didwebvh-rs"
-version = "0.7.0"
+version = "0.8.0"
 description = "Implementation of the did:webvh method in Rust"
 repository = "https://github.com/decentralized-identity/didwebvh-rs"
 edition = "2024"
@@ -52,7 +52,7 @@ experimental-pqc = [
 ]
 
 [dependencies]
-affinidi-data-integrity = { version = "0.7.7" }
+affinidi-data-integrity = { version = "0.8" }
 affinidi-did-common = "0.4"
 affinidi-secrets-resolver = "0.5"
 

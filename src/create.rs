@@ -963,7 +963,7 @@ mod tests {
         let result = create_did(config).await.unwrap();
         let json = serde_json::to_string(&result.log_entry);
         assert!(json.is_ok());
-        assert!(!json.unwrap().is_empty());
+        assert_ne!(json.unwrap(), "");
     }
 
     // -----------------------------------------------------------------------
