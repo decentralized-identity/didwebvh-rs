@@ -57,9 +57,9 @@ dependencies = [
 
 [[package]]
 name = "affinidi-data-integrity"
-version = "0.7.10"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "837d0913b02cccd98439abed758329bb568f5bea1edab9e719525a65ef80552b"
+checksum = "ad2d289fc4df366539b3a6eba73c9eb37abb4d5342fa6773105af3ae895bfaba"
 dependencies = [
  "affinidi-crypto",
  "affinidi-did-common",
@@ -72,7 +72,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
  "tracing",
  "zeroize",
@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "didwebvh-rs"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "affinidi-data-integrity",
  "affinidi-did-common",
