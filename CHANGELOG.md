@@ -1,5 +1,25 @@
 # didwebvh-rs Changelog history
 
+## Unreleased
+
+### Release 0.8.1 — did:scid:vh:1 conversions
+
+#### Added
+
+- `DIDWebVHState::convert_scid_id_to_webvh_id`, the inverse of
+  `convert_webvh_id_to_scid_id`: maps a `did:scid:vh:1:<SCID>?src=<source>`
+  ID or DID URL to its `did:webvh` form, carrying a `#fragment` across.
+  Returns `None` for anything else, including peer mode (no `src`).
+- `did_web::to_scid_did_document`, with `DIDWebVHState::to_scid_did` and
+  `LogEntryState::to_scid_did`: expresses a did:webvh DID document as the
+  document of its `did:scid:vh:1:<SCID>` DID, the way `to_web_did` does for
+  did:web. `id` becomes the bare did:scid DID (`?src=` is a locator, not part of
+  it), and every reference to the did:webvh DID itself (verification method ids
+  and controllers, relationship entries, service ids, `controller`) moves
+  under it. `alsoKnownAs` gains the `did:scid:vh:1:<SCID>?src=…` DID URL of
+  the log's location and the did:webvh DID. A did:scid resolver returns this,
+  so the `id` is the DID that was resolved and its keys are found under it.
+
 ## 1st October 2026
 
 ### Release 0.8.0 — affinidi-data-integrity 0.8
