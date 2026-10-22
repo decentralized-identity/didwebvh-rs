@@ -2,7 +2,17 @@
 
 ## Unreleased
 
-### Release 0.8.1 — did:scid:vh:1 conversions
+### Release 0.8.1 — did:scid:vh:1 conversions, dependency refresh
+
+#### Security
+
+- Lockfile refreshed to current semver-compatible releases, clearing
+  RUSTSEC-2026-0338, RUSTSEC-2026-0340 and RUSTSEC-2026-0343 (`quinn-proto`
+  0.11.17 → 0.11.18+) and RUSTSEC-2026-0347 / RUSTSEC-2026-0348 (`rustls`
+  0.23.45 → 0.23.46+), among others; the fuzz lockfile likewise.
+- `serde_json_canonicalizer` 0.3 → 0.4. It produces the JCS input to SCID and
+  entry-hash computation; the output is unchanged (the full suite, including
+  the log and SCID vectors, passes).
 
 #### Added
 
