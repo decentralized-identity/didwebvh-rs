@@ -12,6 +12,14 @@
   `webpki-root-certs` 1.0.10 → 1.0.11, and the ICU 2.3 → 2.4 stack. No
   manifest requirement changes and no behaviour change.
 
+#### Security
+
+- RUSTSEC-2026-0387 (`crypto-bigint` timing variability) affects the 0.3.2 and
+  0.5.5 copies reached only through the optional `ssi` feature (via `rsa` 0.6
+  and `elliptic-curve` 0.13). This crate never calls that code; it is ignored
+  in CI until `ssi` moves to `crypto-bigint` 0.7. Default builds use 0.7.9,
+  which is not affected.
+
 ## 22nd October 2026
 
 ### Release 0.8.1 — did:scid:vh:1 conversions, dependency refresh
