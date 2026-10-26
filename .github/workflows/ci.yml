@@ -76,6 +76,14 @@ jobs:
       #   non-breaking fix to take: the advisory's remedy is rkyv >= 0.8.17
       #   and rust_decimal 1.42.1 — the latest 1.x — still requires 0.7.46.
       #   Drop this the moment rust_decimal moves.
+      # - RUSTSEC-2026-0387: crypto-bigint 0.3.2 and 0.5.5 timing variability
+      #   in operations meant to be constant-time. Reached only via `ssi`:
+      #   0.3.2 through rsa 0.6.1 -> pkcs1 -> der 0.5 (ssi-jwk), 0.5.5 through
+      #   elliptic-curve 0.13 (k256/p256 in ssi-crypto, did-method-key). This
+      #   crate's ssi integration only implements ssi's resolver trait and never
+      #   calls ssi's crypto. No fix to take: the remedy is crypto-bigint >= 0.7.6
+      #   and ssi 0.16.0, the latest release, still uses the 0.3/0.5 chains. The
+      #   default build uses crypto-bigint 0.7.9 only. Drop this when ssi moves.
       #
       # Unmaintained warnings (no CVE, advisory category = "unmaintained"):
       # - RUSTSEC-2021-0127: serde_cbor unmaintained (via ssi-vc-jose-cose)
@@ -95,6 +103,7 @@ jobs:
           cargo audit
           --ignore RUSTSEC-2023-0071
           --ignore RUSTSEC-2026-0235
+          --ignore RUSTSEC-2026-0387
           --ignore RUSTSEC-2024-0388
           --ignore RUSTSEC-2024-0370
           --ignore RUSTSEC-2021-0127
