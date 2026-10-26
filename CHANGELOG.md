@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Release 0.8.2 — dependency refresh
+
+#### Changed
+
+- Lockfile refreshed to current semver-compatible releases; the fuzz lockfile
+  likewise. Notable: `affinidi-did-common` 0.4.3 → 0.4.4, `crypto-bigint`
+  0.7.5 → 0.7.9, `elliptic-curve` 0.14.1 → 0.14.3, `der` 0.8.2 → 0.8.3,
+  `webpki-root-certs` 1.0.10 → 1.0.11, and the ICU 2.3 → 2.4 stack. No
+  manifest requirement changes and no behaviour change.
+
+## 22nd October 2026
+
 ### Release 0.8.1 — did:scid:vh:1 conversions, dependency refresh
 
 #### Security
