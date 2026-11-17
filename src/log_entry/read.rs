@@ -1,6 +1,6 @@
 /*!
-*  Reads a JSON Log file, all functions related to reading and verifying Log Entries are here
-*/
+ *  Reads a JSON Log file, all functions related to reading and verifying Log Entries are here
+ */
 
 use super::LogEntry;
 use crate::{

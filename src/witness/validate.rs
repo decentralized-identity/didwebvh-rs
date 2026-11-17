@@ -1,38 +1,38 @@
 /*!
-*   Validating LogEntries using Witness Proofs
-*
-*   # Witness proof version semantics
-*
-*   A witness proof attests that a witness observed a particular version of
-*   the DID log. The spec rule (§ "Verifying Witness Proofs During
-*   Resolution") is "current or any later" — a proof at version K covers
-*   entries ≤ K. During validation, proofs are matched against log entries
-*   with the following rules, applied per witness against the witness's
-*   highest-versioned stored proof:
-*
-*   - **Future proofs** (proof version > highest published version) are
-*     **skipped** entirely, preventing premature acceptance of proofs for
-*     unpublished entries.
-*   - **Later-but-published proofs** (proof version > current entry version,
-*     ≤ highest published) are **cryptographically verified against the
-*     proof's own versionId** before counting. They cover the current entry
-*     transitively per spec.
-*   - **Current proofs** (proof version == current entry version) are
-*     **cryptographically verified** against the current entry's data before
-*     counting.
-*   - **Older proofs** (proof version < current entry version) **do NOT
-*     count** toward this entry's threshold (spec § "current or any later").
-*     They are silently skipped at debug level — if too few witnesses have
-*     a current-or-later proof, the threshold check surfaces as
-*     "threshold not met", which is the correct semantic error rather than
-*     a misleading "signature invalid" from trying to verify a proof against
-*     the wrong payload.
-*
-*   This design means a resolver cannot be tricked by proofs referencing
-*   unpublished future entries, while still allowing witnesses to attest in
-*   batches (one proof covering multiple older entries) rather than
-*   per-entry.
-*/
+ *   Validating LogEntries using Witness Proofs
+ *
+ *   # Witness proof version semantics
+ *
+ *   A witness proof attests that a witness observed a particular version of
+ *   the DID log. The spec rule (§ "Verifying Witness Proofs During
+ *   Resolution") is "current or any later" — a proof at version K covers
+ *   entries ≤ K. During validation, proofs are matched against log entries
+ *   with the following rules, applied per witness against the witness's
+ *   highest-versioned stored proof:
+ *
+ *   - **Future proofs** (proof version > highest published version) are
+ *     **skipped** entirely, preventing premature acceptance of proofs for
+ *     unpublished entries.
+ *   - **Later-but-published proofs** (proof version > current entry version,
+ *     ≤ highest published) are **cryptographically verified against the
+ *     proof's own versionId** before counting. They cover the current entry
+ *     transitively per spec.
+ *   - **Current proofs** (proof version == current entry version) are
+ *     **cryptographically verified** against the current entry's data before
+ *     counting.
+ *   - **Older proofs** (proof version < current entry version) **do NOT
+ *     count** toward this entry's threshold (spec § "current or any later").
+ *     They are silently skipped at debug level — if too few witnesses have
+ *     a current-or-later proof, the threshold check surfaces as
+ *     "threshold not met", which is the correct semantic error rather than
+ *     a misleading "signature invalid" from trying to verify a proof against
+ *     the wrong payload.
+ *
+ *   This design means a resolver cannot be tricked by proofs referencing
+ *   unpublished future entries, while still allowing witnesses to attest in
+ *   batches (one proof covering multiple older entries) rather than
+ *   per-entry.
+ */
 
 use crate::{
     DIDWebVHError,

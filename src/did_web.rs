@@ -1,6 +1,6 @@
 /*!
-*   Handles converting a WebVH DID to a Web DID Document
-*/
+ *   Handles converting a WebVH DID to a Web DID Document
+ */
 
 use crate::{
     DIDWebVHError, DIDWebVHState, ensure_object_mut, log_entry_state::LogEntryState,

@@ -1,9 +1,9 @@
 /*!
-*   Shared test utilities for the didwebvh-rs crate.
-*
-*   Provides common helpers used across multiple test modules to avoid
-*   code duplication. All items are `pub(crate)` and only compiled in test builds.
-*/
+ *   Shared test utilities for the didwebvh-rs crate.
+ *
+ *   Provides common helpers used across multiple test modules to avoid
+ *   code duplication. All items are `pub(crate)` and only compiled in test builds.
+ */
 
 use affinidi_data_integrity::{DataIntegrityProof, crypto_suites::CryptoSuite};
 use affinidi_secrets_resolver::secrets::Secret;

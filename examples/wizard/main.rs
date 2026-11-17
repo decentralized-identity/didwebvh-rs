@@ -1,9 +1,9 @@
 /*!
-*   Interactive webvh DID wizard.
-*
-*   Uses the library's embeddable CLI flows for DID creation and updates.
-*   Run with: `cargo run --example wizard`
-*/
+ *   Interactive webvh DID wizard.
+ *
+ *   Uses the library's embeddable CLI flows for DID creation and updates.
+ *   Run with: `cargo run --example wizard`
+ */
 
 use crate::{did_web::save_did_web, resolve::resolve};
 use anyhow::Result;
