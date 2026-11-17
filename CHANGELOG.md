@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Release 0.8.3 — accept the next affinidi TDK generation
+
+#### Changed
+
+- Dependency requirements widened to accept the next affinidi TDK release
+  alongside the current one: `affinidi-data-integrity` `>=0.8, <0.10`,
+  `affinidi-did-common` `>=0.4, <0.6`, `affinidi-secrets-resolver`
+  `>=0.5, <0.7`. The affinidi TDK is taking a coordinated breaking release
+  (did-common 0.5, data-integrity 0.9, secrets-resolver 0.6), and its DID
+  resolver uses this crate; single-minor pins would build two copies of each
+  crate there. None of the APIs used here change in that release, so this crate
+  builds against either generation. No source change and no behaviour change;
+  resolution against today's published versions is unchanged.
+
 ### Release 0.8.2 — dependency refresh
 
 #### Changed
