@@ -1,9 +1,9 @@
 /*!
-*   A webvh that has witnessing enabled requires a proof file containing each witness proof
-*
-*   When saving or serializing the Witness Proofs, you should run `optimise_records` first
-*   THis will ensure that previous witness proof records have been removed
-*/
+ *   A webvh that has witnessing enabled requires a proof file containing each witness proof
+ *
+ *   When saving or serializing the Witness Proofs, you should run `optimise_records` first
+ *   THis will ensure that previous witness proof records have been removed
+ */
 use std::{fs::File, sync::Arc};
 
 use crate::DIDWebVHError;

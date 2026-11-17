@@ -1,6 +1,6 @@
 /*!
-*   Handling of witnessing changes to the log entries
-*/
+ *   Handling of witnessing changes to the log entries
+ */
 
 use affinidi_data_integrity::crypto_suites::CryptoSuite;
 

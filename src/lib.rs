@@ -1,7 +1,7 @@
 /*!
-*   DID method for Web with Verifiable History
-*   See [WebVH Spec](https://identity.foundation/didwebvh/v1.0)
-*/
+ *   DID method for Web with Verifiable History
+ *   See [WebVH Spec](https://identity.foundation/didwebvh/v1.0)
+ */
 #![warn(missing_docs)]
 
 use crate::{

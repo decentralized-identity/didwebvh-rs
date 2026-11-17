@@ -1,6 +1,6 @@
 /*!
-*   Webvh utilizes Log Entries for each version change of the DID Document.
-*/
+ *   Webvh utilizes Log Entries for each version change of the DID Document.
+ */
 use crate::{
     DIDWebVHError, Version,
     log_entry::{spec_1_0::LogEntry1_0, spec_1_0_pre::LogEntry1_0Pre},

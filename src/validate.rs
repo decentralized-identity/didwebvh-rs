@@ -1,12 +1,12 @@
 /*!
-*   Highest level validation logic for a webvh entry
-*
-*   Step 1: Load LogEntries and validate each LogEntry
-*   Step 2: Get the highest LogEntry versionId
-*   Step 3: Load the Witness proofs and generate Witness State
-*   Step 4: Validate LogEntry Witness Proofs against each other
-*   Step 5: Fully validated WebVH DID result
-*/
+ *   Highest level validation logic for a webvh entry
+ *
+ *   Step 1: Load LogEntries and validate each LogEntry
+ *   Step 2: Get the highest LogEntry versionId
+ *   Step 3: Load the Witness proofs and generate Witness State
+ *   Step 4: Validate LogEntry Witness Proofs against each other
+ *   Step 5: Fully validated WebVH DID result
+ */
 
 use chrono::{Duration, Utc};
 use std::sync::Arc;

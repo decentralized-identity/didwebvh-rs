@@ -1,7 +1,7 @@
 /*!
-*   Contains the parameters that define DID processing parameters
-*   used when processing the current and previous Log Entry
-*/
+ *   Contains the parameters that define DID processing parameters
+ *   used when processing the current and previous Log Entry
+ */
 
 use crate::{Multibase, Version, parameters::Parameters, witness::Witnesses};
 use serde::{Deserialize, Serialize};

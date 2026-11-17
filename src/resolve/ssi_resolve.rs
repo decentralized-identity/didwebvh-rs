@@ -1,10 +1,10 @@
 /*!
-*   Resolver trait methods for webvh derived from the SpruiceID SSI Library
-*
-*   NOTE: This is a naïve implementation that will download the DID information on every resolve
-*
-*   If you want greater control and caching then please use the DIDWebVHState.resolve() method directly
-*/
+ *   Resolver trait methods for webvh derived from the SpruiceID SSI Library
+ *
+ *   NOTE: This is a naïve implementation that will download the DID information on every resolve
+ *
+ *   If you want greater control and caching then please use the DIDWebVHState.resolve() method directly
+ */
 
 use crate::{
     DIDWebVHError, DIDWebVHState,

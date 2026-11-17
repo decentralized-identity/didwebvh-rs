@@ -1,8 +1,8 @@
 /*!
-*   Library API for creating a new webvh DID programmatically.
-*   Encapsulates the DID creation flow (log entry creation, validation, witness signing)
-*   without any interactive prompts.
-*/
+ *   Library API for creating a new webvh DID programmatically.
+ *   Encapsulates the DID creation flow (log entry creation, validation, witness signing)
+ *   without any interactive prompts.
+ */
 
 use crate::{
     DIDWebVHError, DIDWebVHState, Signer, ensure_object_mut,
